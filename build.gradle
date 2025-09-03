@@ -3,7 +3,7 @@ plugins {
   id 'application'
   id 'antlr'
   id 'groovy'
-  id 'com.github.johnrengelman.shadow' version '8.1.1'
+  id 'com.gradleup.shadow' version '9.0.0'
 }
 
 group = 'streamsql'
@@ -21,6 +21,7 @@ dependencies {
   testImplementation 'org.junit.jupiter:junit-jupiter:5.10.3'
   testImplementation 'com.google.jimfs:jimfs:1.3.0'
   ebnfConvert 'de.bottlecaps.ebnf-convert:ebnf-convert-webapp:0.72'
+  testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }
 
 // Remove old combined grammar task configs
