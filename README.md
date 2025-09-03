@@ -1,6 +1,6 @@
 # KAFKA SQL
 
-The idea behind this project is to create a structured query language for Kafka that can be used to do IO and resouece management.
+The idea behind this project is to create a structured query language for Kafka that can be used to do IO and resource management.
 > DISCLAIMIER: This is currently just a side project to demonstrate an idea with code that might become intersting. This is very much subject to change, but if you find it intersting, I am very intersted to hear from you.
 
 While there exists tools out there that enable you to interact with Kafka such as KSQL, Flink, and others - these are additions to, and run along side Kafka as opposed to be native to Kafka. What is more is that they are indended for Stream Processing which is in our case a secondary stage. What we are looking to do is to focus on more basic operations such as `CREATE` for adding Kafka resources and `READ`/`WRITE` for IO.
