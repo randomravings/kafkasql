@@ -1,0 +1,30 @@
+CREATE CONTEXT com;
+USE CONTEXT com;
+CREATE CONTEXT example;
+USE CONTEXT example;
+
+CREATE SCALAR Money AS DECIMAL(18,2);
+CREATE ENUM Status ( ACTIVE = 0, PENDING = 1, DISABLED = 4096 );
+
+CREATE STRUCT Address ( Street STRING, Zip STRING OPTIONAL );
+CREATE STRUCT Customer (
+  Id UInt64,
+  Name STRING,
+  Email STRING OPTIONAL,
+  Tags LIST<STRING>,
+  Attrs MAP<STRING, STRING>
+);
+
+CREATE STREAM customers AS
+  TYPE ( Id UInt64, Name STRING, Email STRING OPTIONAL ) AS V1
+  TYPE com.example.Customer AS V2;
+
+READ FROM customers
+TYPE CustomerV1 Id, Name WHERE Name = 'Alice'
+TYPE CustomerV2 Id, Tags;
+
+WRITE TO customers TYPE CustomerV1
+( Id, Name, Email )
+VALUES
+  ( 1001, 'Alice', 'alice@example.com' ),
+  ( 1002, 'Bob', NULL );
