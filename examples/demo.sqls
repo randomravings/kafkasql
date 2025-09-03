@@ -15,7 +15,7 @@ CREATE STRUCT Customer (
   Attrs MAP<STRING, STRING>
 );
 
-CREATE STREAM customers AS
+CREATE STREAM customers
   TYPE ( Id UInt64, Name STRING, Email STRING OPTIONAL ) AS V1
   TYPE com.example.Customer AS V2;
 

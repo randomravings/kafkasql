@@ -7,8 +7,8 @@ public class Main {
 
   private static void usage() {
     System.out.println("Usage:");
-    System.out.println("  streamsql [-a] [-n] (-f <f1.sqls>[,<f2.sqls>...] ...)");
-    System.out.println("  streamsql [-a] -t <script...>");
+    System.out.println("  kafkasql [-a] [-n] (-f <f1.sqls>[,<f2.sqls>...] ...)");
+    System.out.println("  kafkasql [-a] -t <script...>");
     System.out.println("Options:");
     System.out.println("  -w, --working-dir   Base directory for includes (default: .)");
     System.out.println("  -f, --files         Comma separated list (can repeat)");

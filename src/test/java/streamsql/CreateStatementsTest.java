@@ -120,7 +120,7 @@ public class CreateStatementsTest {
   @Test
   void createStreamLogWithInlineAndRef() {
     Parsed p = parse("""
-      CREATE LOG STREAM Events AS
+      CREATE LOG STREAM Events
         TYPE ( Id INT32, Kind STRING ) AS Base
         TYPE com.example.Payload AS Payload;
       """);
@@ -135,7 +135,7 @@ public class CreateStatementsTest {
   @Test
   void createStreamCompactMultipleInline() {
     Parsed p = parse("""
-      CREATE COMPACT STREAM Session AS
+      CREATE COMPACT STREAM Session
         TYPE ( UserId INT64, Start TIMESTAMP(3) ) AS StartRec
         TYPE ( UserId INT64, End TIMESTAMP(3) ) AS EndRec
         TYPE com.example.Extra AS Extra;

@@ -157,7 +157,7 @@ typeName
   ;
 
 createStream
-  : CREATE (LOG | COMPACT) STREAM identifier AS streamTypeDef+
+  : CREATE (LOG | COMPACT) STREAM identifier streamTypeDef+
   ;
 
 streamTypeDef
