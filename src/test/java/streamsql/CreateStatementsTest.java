@@ -2,13 +2,18 @@ package streamsql;
 
 import org.junit.jupiter.api.*;
 
-import streamsql.ast.Complex;
 import streamsql.ast.CreateContext;
 import streamsql.ast.CreateType;
+import streamsql.ast.Int32T;
 import streamsql.ast.CreateStream;
-import streamsql.ast.Stream;
+import streamsql.ast.StreamCompact;
+import streamsql.ast.StreamInlineT;
+import streamsql.ast.StreamLog;
+import streamsql.ast.StreamReferenceT;
+import streamsql.ast.Struct;
+import streamsql.ast.Union;
 import streamsql.ast.UseContext;
-import streamsql.ast.Primitive;
+import streamsql.ast.Scalar;
 import streamsql.ast.Stmt;
 
 import java.util.List;
@@ -61,8 +66,8 @@ public class CreateStatementsTest {
     Parsed p = parse("CREATE SCALAR MyInt AS INT32;");
     CreateType ct = only(p.stmts(), CreateType.class);
     assertEquals("MyInt", ct.qName().fullName().toString());
-    Complex.Scalar scalar = assertType(ct.complexType(), Complex.Scalar.class);
-    assertTrue(scalar.primitive() instanceof Primitive.Int32, "Expected Int32 primitive");
+    Scalar scalar = assertType(ct.type(), Scalar.class);
+    assertTrue(scalar.primitive() instanceof Int32T, "Expected Int32 primitive");
   }
 
   @Test
@@ -75,10 +80,10 @@ public class CreateStatementsTest {
       );
       """);
     CreateType ct = only(p.stmts(), CreateType.class);
-    Complex.Enum en = assertType(ct.complexType(), Complex.Enum.class);
+    streamsql.ast.Enum en = assertType(ct.type(), streamsql.ast.Enum.class);
     assertEquals("Color", ct.qName().fullName());
     assertEquals(3, en.symbols().size());
-    assertEquals("Green", en.symbols().get(1).name());
+    assertEquals("Green", en.symbols().get(1).name().value());
   }
 
   @Test
@@ -95,26 +100,26 @@ public class CreateStatementsTest {
       );
       """);
     CreateType ct = only(p.stmts(), CreateType.class);
-    Complex.Struct st = assertType(ct.complexType(), Complex.Struct.class);
+    Struct st = assertType(ct.type(), Struct.class);
     assertEquals("Person", ct.qName().fullName());
     assertEquals(7, st.fields().size());
-    assertEquals("Nick", st.fields().get(2).name());
+    assertEquals("Nick", st.fields().get(2).name().value());
   }
 
   @Test
   void createUnionAlts() {
     Parsed p = parse("""
       CREATE UNION Value (
-        I: INT32,
-        S: STRING,
-        Ref: com.example.Other
+        I INT32,
+        S STRING,
+        Ref com.example.Other
       );
       """);
     CreateType ct = only(p.stmts(), CreateType.class);
-    Complex.Union un = assertType(ct.complexType(), Complex.Union.class);
+    Union un = assertType(ct.type(), Union.class);
     assertEquals("Value", ct.qName().fullName());
     assertEquals(3, un.types().size());
-    assertEquals("Ref", un.types().get(2).name());
+    assertEquals("Ref", un.types().get(2).name().value());
   }
 
   @Test
@@ -125,11 +130,11 @@ public class CreateStatementsTest {
         TYPE com.example.Payload AS Payload;
       """);
     CreateStream cs = only(p.stmts(), CreateStream.class);
-    Stream.Log log = assertType(cs.stream(), Stream.Log.class);
+    StreamLog log = assertType(cs.stream(), StreamLog.class);
     assertEquals("Events", cs.qName().fullName());
     assertEquals(2, log.types().size());
-    assertTrue(log.types().get(0) instanceof Stream.InlineType);
-    assertTrue(log.types().get(1) instanceof Stream.ReferenceType);
+    assertTrue(log.types().get(0) instanceof StreamInlineT);
+    assertTrue(log.types().get(1) instanceof StreamReferenceT);
   }
 
   @Test
@@ -141,12 +146,12 @@ public class CreateStatementsTest {
         TYPE com.example.Extra AS Extra;
       """);
     CreateStream cs = only(p.stmts(), CreateStream.class);
-    Stream.Compact cmp = assertType(cs.stream(), Stream.Compact.class);
+    StreamCompact cmp = assertType(cs.stream(), StreamCompact.class);
     assertEquals("Session", cs.qName().fullName());
     assertEquals(3, cmp.types().size());
-    assertTrue(cmp.types().get(0) instanceof Stream.InlineType);
-    assertTrue(cmp.types().get(1) instanceof Stream.InlineType);
-    assertTrue(cmp.types().get(2) instanceof Stream.ReferenceType);
+    assertTrue(cmp.types().get(0) instanceof StreamInlineT);
+    assertTrue(cmp.types().get(1) instanceof StreamInlineT);
+    assertTrue(cmp.types().get(2) instanceof StreamReferenceT);
   }
 
   @Test
@@ -164,7 +169,7 @@ public class CreateStatementsTest {
     CreateContext ctx1 = at(p.stmts(), 2, CreateContext.class);
     UseContext utx1 = at(p.stmts(), 3, UseContext.class);
     CreateType ct = at(p.stmts(), 4, CreateType.class);
-    Complex.Struct struct = assertType(ct.complexType(), Complex.Struct.class);
+    Struct struct = assertType(ct.type(), Struct.class);
     assertEquals("company", ctx0.qName().fullName().toString());
     assertEquals("company", utx0.context().qName().fullName().toString());
     assertEquals("company.finance", ctx1.qName().fullName().toString());
@@ -180,9 +185,9 @@ public class CreateStatementsTest {
       );
       """);
     CreateType ct = only(p.stmts(), CreateType.class);
-    Complex.Struct st = assertType(ct.complexType(), Complex.Struct.class);
+    Struct st = assertType(ct.type(), Struct.class);
     assertEquals(1, st.fields().size());
-    assertEquals("Data", st.fields().get(0).name());
+    assertEquals("Data", st.fields().get(0).name().value());
   }
 
   @Nested
@@ -194,7 +199,7 @@ public class CreateStatementsTest {
       Parsed p = parse("CREATE ENUM Dups ( A = 1, B = 1 );");
       CreateType ct = only(p.stmts(), CreateType.class);
       assertEquals("Dups", ct.qName().fullName());
-      assertTrue(ct.complexType() instanceof Complex.Enum);
+      assertTrue(ct.type() instanceof streamsql.ast.Enum);
     }
   }
 }

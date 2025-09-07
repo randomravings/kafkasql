@@ -12,15 +12,22 @@ CREATE STRUCT Customer (
   Name STRING,
   Email STRING OPTIONAL,
   Tags LIST<STRING>,
-  Attrs MAP<STRING, STRING>
+  Attrs MAP<STRING, STRING>,
+  Classification FSTRING(5)
 );
 
-CREATE STREAM customers
+CREATE UNION CustomerIdOrName (
+  Id Int32,
+  Name String
+);
+
+CREATE LOG STREAM customers
   TYPE ( Id UInt64, Name STRING, Email STRING OPTIONAL ) AS V1
+    DISTRIBUTE BY (Id, Name)
   TYPE com.example.Customer AS V2;
 
 READ FROM customers
-TYPE CustomerV1 Id, Name WHERE Name = 'Alice'
+TYPE CustomerV1 * WHERE Name = 'Alice' AND Id > 0.5
 TYPE CustomerV2 Id, Tags;
 
 WRITE TO customers TYPE CustomerV1

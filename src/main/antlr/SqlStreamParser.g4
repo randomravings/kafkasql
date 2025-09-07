@@ -51,12 +51,8 @@ typeBlock
   ;
 
 projection
-  : projectionItem (COMMA projectionItem)*
-  ;
-
-projectionItem
-  : STAR       # projectAll
-  | columnName # projectCol
+  : STAR
+  | fieldPath (COMMA fieldPath)*
   ;
 
 whereClause
@@ -73,31 +69,12 @@ fieldPathList
   : fieldPath (COMMA fieldPath)*
   ;
 
-fieldPath
-  : identifier pathSeg*
-  ;
-
-pathSeg
-  : DOT identifier
-  | LBRACK NUMBER RBRACK
-  | LBRACK STRING_LIT RBRACK
-  ;
-
 tuple
   : LPAREN literalOnlyList RPAREN
   ;
 
 literalOnlyList
-  : valueLit (COMMA valueLit)*
-  ;
-
-valueLit
-  : STRING_LIT
-  | NUMBER
-  | TRUE
-  | FALSE
-  | NULL
-  | identifier
+  : literal (COMMA literal)*
   ;
 
 ddlStmt
@@ -123,11 +100,11 @@ createScalar
 
 createEnum
   : CREATE ENUM typeName
-    LPAREN enumEntry (COMMA enumEntry)* RPAREN
+    LPAREN enumSymbol (COMMA enumSymbol)* RPAREN
   ;
 
-enumEntry
-  : identifier EQ NUMBER
+enumSymbol
+  : identifier EQ INT32_V
   ;
 
 createStruct
@@ -141,7 +118,7 @@ createUnion
   ;
 
 unionAlt
-  : identifier COLON dataType
+  : identifier dataType
   ;
 
 fieldDef
@@ -149,7 +126,7 @@ fieldDef
   ;
 
 jsonString
-  : STRING_LIT
+  : STRING_V
   ;
 
 typeName
@@ -161,7 +138,11 @@ createStream
   ;
 
 streamTypeDef
-  : TYPE (inlineStruct | qname) AS typeAlias
+  : TYPE (inlineStruct | qname) AS typeAlias distributionClause?
+  ;
+
+distributionClause
+  : DISTRIBUTE BY LPAREN identifier (COMMA identifier)* RPAREN
   ;
 
 inlineStruct
@@ -189,18 +170,18 @@ primitiveType
   | UINT32
   | INT64
   | UINT64
-  | SINGLE
-  | DOUBLE
+  | FLOAT32
+  | FLOAT64
   | STRING
-  | FSTRING       LPAREN NUMBER RPAREN
+  | FSTRING       LPAREN INT32_V RPAREN
   | BYTES
-  | FBYTES        LPAREN NUMBER RPAREN
+  | FBYTES        LPAREN INT32_V RPAREN
   | UUID
   | DATE
-  | TIME          LPAREN NUMBER RPAREN
-  | TIMESTAMP     LPAREN NUMBER RPAREN
-  | TIMESTAMP_TZ  LPAREN NUMBER RPAREN
-  | DECIMAL       LPAREN NUMBER COMMA NUMBER RPAREN
+  | TIME          LPAREN INT32_V RPAREN
+  | TIMESTAMP     LPAREN INT32_V RPAREN
+  | TIMESTAMP_TZ  LPAREN INT32_V RPAREN
+  | DECIMAL       LPAREN INT32_V COMMA INT32_V RPAREN
   ;
 
 compositeType
@@ -239,19 +220,71 @@ predicate
 
 value
   : literal
-  | columnName
+  | fieldPath
   ;
 
-columnName
-  : identifier (DOT identifier)*
+fieldPath
+  : identifier fieldPathSeg*
+  ;
+
+fieldPathSeg
+  : DOT identifier
+  | LBRACK INT32_V RBRACK
+  | LBRACK STRING_V RBRACK
   ;
 
 literal
-  : STRING_LIT
-  | NUMBER
-  | TRUE
+  : nullLiteral
+  | primitiveLiteral
+  ;
+
+nullLiteral
+  : NULL
+  ;
+
+primitiveLiteral
+  : booleanLiteral
+  | numberLiteral
+  | characterLiteral
+  | uuidLiteral
+  | temporalLiteral
+  ;
+
+booleanLiteral
+  : TRUE
   | FALSE
-  | NULL
+  ;
+
+numberLiteral
+  : INT8_V
+  | UINT8_V
+  | INT16_V
+  | UINT16_V
+  | INT32_V
+  | UINT32_V
+  | INT64_V
+  | UINT64_V
+  | FLOAT32_V
+  | FLOAT64_V
+  | DECIMAL_V
+  ;
+
+characterLiteral
+  : STRING_V
+  | FSTRING_V
+  | BYTES_V
+  | FBYTES_V
+  ;
+
+uuidLiteral
+  : UUID_V
+  ;
+
+temporalLiteral
+  : DATE_V
+  | TIME_V
+  | TIMESTAMP_V
+  | TIMESTAMP_TZ_V
   ;
 
 cmpOp

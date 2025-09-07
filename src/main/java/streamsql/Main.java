@@ -1,7 +1,12 @@
 package streamsql;
 
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.nio.file.*;
 import java.util.*;
+
+import streamsql.ast.Stmt;
 
 public class Main {
 
@@ -105,7 +110,7 @@ public class Main {
         System.out.println("Errors:");
         diags.errors().forEach(e -> System.out.println(" - " + e));
       } else if (printAst) {
-        printAst(pr);
+        printAst(pr.stmts());
       }
     } else {
       // Normalize file args relative to workingDir (avoid double prefix)
@@ -124,7 +129,7 @@ public class Main {
         System.out.println("Errors:");
         diags.errors().forEach(e -> System.out.println(" - " + e));
       } else if (printAst) {
-        printAst(pr);
+        printAst(pr.stmts());
       }
     }
 
@@ -146,32 +151,11 @@ public class Main {
     }
   }
 
-  @SuppressWarnings("unchecked")
-  private static List<?> getStatements(Object pr) {
-    try {
-      return (List<?>) pr.getClass().getMethod("stmts").invoke(pr);
-    } catch (NoSuchMethodException e) {
-      try {
-        return (List<?>) pr.getClass().getMethod("statements").invoke(pr);
-      } catch (Exception ex) {
-        throw new RuntimeException("ParseResult missing stmts()/statements()", ex);
-      }
-    } catch (Exception e) {
-      throw new RuntimeException(e);
-    }
-  }
-
-  private static void printAst(Object pr) {
-    var stmts = getStatements(pr);
-    // Fallback simple print if AstPrinter not available
-    try {
-      Class<?> printer = Class.forName("streamsql.AstPrinter");
-      var m = printer.getMethod("print", List.class);
-      Object out = m.invoke(null, stmts);
-      System.out.println(out);
-    } catch (Exception ignore) {
-      stmts.forEach(s -> System.out.println(s.toString()));
-    }
+  private static void printAst(List<Stmt> stmts) throws IOException {
+    Writer out = new OutputStreamWriter(System.out);
+    Printer printer = new AstPrinter(out);
+    printer.write(stmts);
+    out.flush();
   }
 
   private static void err(String m) {

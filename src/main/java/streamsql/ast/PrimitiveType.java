@@ -1,6 +1,6 @@
 package streamsql.ast;
 
 public sealed interface PrimitiveType extends DataType
-    permits Primitive.Bool, Primitive.Int8, Primitive.UInt8, Primitive.Int16, Primitive.UInt16, Primitive.Int32, Primitive.UInt32, Primitive.Int64, Primitive.UInt64,
-            Primitive.Single, Primitive.Double, Primitive.Decimal, Primitive.String, Primitive.FString, Primitive.Bytes, Primitive.FBytes, Primitive.Uuid, Primitive.Date,
-            Primitive.Time, Primitive.Timestamp, Primitive.TimestampTz {}
+    permits BoolT, Int8T, UInt8T, Int16T, UInt16T, Int32T, UInt32T, Int64T, UInt64T,
+            Float32T, Float64T, DecimalT, StringT, FStringT, BytesT, FBytesT, UuidT, DateT,
+            TimeT, TimestampT, TimestampTzT {}

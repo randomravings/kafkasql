@@ -38,8 +38,8 @@ INT32         : [Ii][Nn][Tt] '32' ;
 UINT32        : [Uu][Ii][Nn][Tt] '32' ;
 INT64         : [Ii][Nn][Tt] '64' ;
 UINT64        : [Uu][Ii][Nn][Tt] '64' ;
-SINGLE        : [Ss][Ii][Nn][Gg][Ll][Ee] ;
-DOUBLE        : [Dd][Oo][Uu][Bb][Ll][Ee] ;
+FLOAT32       : [Ff][Ll][Oo][Tt] '32' ;
+FLOAT64       : [Ff][Ll][Oo][Tt] '64' ;
 DECIMAL       : [Dd][Ee][Cc][Ii][Mm][Aa][Ll] ;
 STRING        : [Ss][Tt][Rr][Ii][Nn][Gg] ;
 FSTRING       : [Ff][Ss][Tt][Rr][Ii][Nn][Gg] ;
@@ -52,6 +52,8 @@ TIMESTAMP     : [Tt][Ii][Mm][Ee][Ss][Tt][Aa][Mm][Pp] ;
 TIMESTAMP_TZ  : [Tt][Ii][Mm][Ee][Ss][Tt][Aa][Mm][Pp] '_' [Tt][Zz] ;
 LIST          : [Ll][Ii][Ss][Tt] ;
 MAP           : [Mm][Aa][Pp] ;
+DISTRIBUTE    : [Dd][Ii][Ss][Tt][Rr][Ii][Bb][Uu][Tt][Ee] ;
+BY            : [Bb][Yy] ;
 
 // Punctuation / operators
 STAR          : '*' ;
@@ -70,10 +72,45 @@ LTE           : '<=' ;
 GTE           : '>=' ;
 SEMI          : ';' ;
 
+
+
 // Literals / identifiers
-STRING_LIT : '\'' ( ~[\r\n'] | '\'\'' )* '\'' ;
-NUMBER     : '-'? [0-9]+ ('.' [0-9]+)? ;
-ID         : [a-zA-Z] [a-zA-Z0-9_]* ;
+INT8_V          : '-'? [0-9]+ 'y';
+UINT8_V         : [0-9]+ 'uy' ;
+INT16_V         : '-'? [0-9]+ 's' ;
+UINT16_V        : [0-9]+ 'us' ;
+INT32_V         : '-'? [0-9]+ 'i'? ;
+UINT32_V        : [0-9]+ 'u' ;
+INT64_V         : '-'? [0-9]+ 'l' ;
+UINT64_V        : [0-9]+ 'ul' ;
+FLOAT32_V       : '-'? [0-9]+ ('.' [0-9]+)? ([eE] [+-]? [0-9]+)? 'f' ;
+FLOAT64_V       : '-'? [0-9]+ ('.' [0-9]+)? ([eE] [+-]? [0-9]+)? 'd'? ;
+DECIMAL_V       : '-'? [0-9]+ ('.' [0-9]+)? 'm' ;
+STRING_V        : '\'' ( ~[\r\n'] | '\'\'' )* '\'' ;
+FSTRING_V       : '\'' ( ~[\r\n'] | '\'\'' )* '\'!' ;
+BYTES_V         : [0][xX][0-9a-fA-F]+ ;
+FBYTES_V        : [0][xX][0-9a-fA-F]+ '!';
+UUID_V          : 'id\'' HEX8 '-' HEX4 '-' HEX4 '-' HEX4 '-' HEX12 '\'' ;
+DATE_V          : 'dt\'' DEC4 '-' DEC2 '-' DEC2 '\'' ;
+TIME_V          : 'tm\'' YEAR ':' MONTH ':' DAY ('.' FRACTION)? '\'' ;
+TIMESTAMP_V     : 'ts\'' YEAR '-' MONTH '-' DAY 'T' HOUR ':' MINUTE ':' SECOND ('.' FRACTION)? 'Z' '\'' ;
+TIMESTAMP_TZ_V  : 'tz\'' YEAR '-' MONTH '-' DAY 'T' HOUR ':' MINUTE ':' SECOND ('.' FRACTION)? ([+-] HOUR ':' MINUTE) '\'' ;
+ID              : [a-zA-Z] [a-zA-Z0-9_]* ;
+
+fragment HEX12     : HEX8 HEX4 ;
+fragment HEX8      : HEX4 HEX4 ;
+fragment HEX4      : HEX HEX HEX HEX ;
+fragment DEC4      : DEC2 DEC2 ;
+fragment DEC2      : DEC DEC ;
+fragment YEAR      : DEC4 ;
+fragment MONTH     : DEC2 ;
+fragment DAY       : DEC2 ;
+fragment HOUR      : DEC2 ;
+fragment MINUTE    : DEC2 ;
+fragment SECOND    : DEC2 ;
+fragment FRACTION  : DEC DEC? DEC? DEC? DEC? DEC? DEC? DEC? DEC? ;
+fragment DEC       : [0-9] ;
+fragment HEX       : [0-9a-fA-F] ;
 
 // Whitespace / comments (default mode)
 WS       : [ \t\r\n]+ -> skip ;

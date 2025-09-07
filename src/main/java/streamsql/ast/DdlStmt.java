@@ -1,3 +1,3 @@
 package streamsql.ast;
 
-public sealed interface DdlStmt extends Stmt permits Create { }
+public sealed interface DdlStmt extends Stmt permits CreateStmt { }

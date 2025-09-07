@@ -25,7 +25,7 @@ public class CollectingErrorListener extends BaseErrorListener {
                 int charPositionInLine,
                 String msg,
                 RecognitionException e) {
-    diagnostics.error("src: " + source + ", ln: " + line + ", col: " + charPositionInLine + " - " + msg);
+    diagnostics.error("Syntax | src: " + source + ", ln: " + line + ", col: " + charPositionInLine + " | Symbol: " + offendingSymbol + " | Message: " + msg);
   }
 
 	@Override
@@ -37,7 +37,7 @@ public class CollectingErrorListener extends BaseErrorListener {
 								boolean exact,
 								BitSet ambigAlts,
 								ATNConfigSet configs) {
-    diagnostics.error("src: " + source + " - Ambiguity detected between tokens " + startIndex + " and " + stopIndex);
+    diagnostics.error("Ambiguity | src: " + source + " - Ambiguity detected between tokens " + startIndex + " and " + stopIndex);
   }
 
   @Override
@@ -48,7 +48,7 @@ public class CollectingErrorListener extends BaseErrorListener {
                 int stopIndex,
                 BitSet conflictingAlts,
                 ATNConfigSet configs) {
-    diagnostics.error("src: " + source + " - Attempting full context between tokens " + startIndex + " and " + stopIndex);
+    diagnostics.error("Full Context | src: " + source + " - Attempting full context between tokens " + startIndex + " and " + stopIndex);
   }
 
   @Override
@@ -59,7 +59,7 @@ public class CollectingErrorListener extends BaseErrorListener {
                 int stopIndex,
                 int prediction,
                 ATNConfigSet configs) {
-    diagnostics.error("src: " + source + ": Context sensitivity detected between tokens " + startIndex + " and " + stopIndex);
+    diagnostics.error("Context Sensitivity | src: " + source + ": Context sensitivity detected between tokens " + startIndex + " and " + stopIndex);
   }
   public static CollectingErrorListener withDiagnostics(String source, Diagnostics diagnostics) {
     return new CollectingErrorListener(source, diagnostics);

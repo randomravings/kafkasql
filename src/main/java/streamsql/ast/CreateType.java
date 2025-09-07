@@ -1,5 +1,6 @@
 package streamsql.ast;
 
-public final record CreateType(ComplexType complexType) implements Create {
-    public QName qName() { return complexType.qName(); }
+public sealed interface CreateType extends CreateStmt permits CreateScalar, CreateEnum, CreateStruct, CreateUnion {
+    public QName qName();
+    public ComplexType type();
 }
