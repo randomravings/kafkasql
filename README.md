@@ -245,17 +245,16 @@ TYPE com.example.User AS UserB
 DISTRIBUTE BY (Id);
 ```
 
-## Parser (EBNF)
+## Current Grammar (EBNF)
 
 ```EBNF
-/* converted on Sat Sep 13, 2025, 21:07 (UTC+02) by antlr_3-to-w3c v0.73-SNAPSHOT which is Copyright (c) 2011-2025 by Gunther Rademacher <grd@gmx.net> */
+/* converted on Sat Sep 13, 2025, 23:17 (UTC+02) by antlr_4-to-w3c v0.73-SNAPSHOT which is Copyright (c) 2011-2025 by Gunther Rademacher <grd@gmx.net> */
 
-script   ::= includeSection? ( statement SEMI )+ EOF
+script   ::= includeSection? ( statement ';' )+ EOF
 includeSection
-         ::= ( includePragma SEMI )+
+         ::= ( includePragma ';' )+
 includePragma
-         ::= INCLUDE filePath
-filePath ::= FILE_PATH
+         ::= INCLUDE STRING_LIT
 statement
          ::= useStmt
            | readStmt
@@ -268,7 +267,7 @@ statement
            | createStream
 useStmt  ::= useContext
 useContext
-         ::= USE CONTEXT DOT? qname
+         ::= USE CONTEXT '.'? qname
 readStmt ::= READ FROM streamName typeBlock+
 streamName
          ::= qname
@@ -277,28 +276,28 @@ typeBlock
 whereClause
          ::= WHERE expr
 writeStmt
-         ::= WRITE TO streamName TYPE typeName LPAREN projection RPAREN VALUES tuple ( COMMA tuple )*
+         ::= WRITE TO streamName TYPE typeName '(' projection ')' VALUES tuple ( ',' tuple )*
 projection
-         ::= STAR
-           | accessor ( COMMA accessor )*
-accessor ::= ( identifier | LBRACK literal RBRACK ) ( DOT ( identifier | LBRACK literal RBRACK ) )*
-tuple    ::= LPAREN literal ( COMMA literal )* RPAREN
+         ::= '*'
+           | accessor ( ',' accessor )*
+accessor ::= ( identifier | '[' literal ']' ) ( '.' ( identifier | '[' literal ']' ) )*
+tuple    ::= '(' literal ( ',' literal )* ')'
 createContext
          ::= CREATE CONTEXT identifier
 createScalar
-         ::= CREATE SCALAR typeName AS primitiveType ( CHECK LPAREN expr RPAREN )? ( DEFAULT literal )?
+         ::= CREATE SCALAR typeName AS primitiveType ( CHECK '(' expr ')' )? ( DEFAULT literal )?
 createEnum
-         ::= CREATE ( ENUM | MASK ) typeName ( AS enumType )? LPAREN enumSymbol ( COMMA enumSymbol )* RPAREN ( DEFAULT identifier )?
+         ::= CREATE ( ENUM | MASK ) typeName ( AS enumType )? '(' enumSymbol ( ',' enumSymbol )* ')' ( DEFAULT identifier )?
 enumType ::= INT8
            | INT16
            | INT32
            | INT64
 enumSymbol
-         ::= identifier COLON INTEGER_LIT
+         ::= identifier ':' INTEGER_LIT
 createStruct
-         ::= CREATE STRUCT typeName LPAREN fieldDef ( COMMA fieldDef )* RPAREN
+         ::= CREATE STRUCT typeName '(' fieldDef ( ',' fieldDef )* ')'
 createUnion
-         ::= CREATE UNION typeName LPAREN unionAlt ( COMMA unionAlt )* RPAREN
+         ::= CREATE UNION typeName '(' unionAlt ( ',' unionAlt )* ')'
 unionAlt ::= identifier dataType
 fieldDef ::= identifier dataType OPTIONAL? ( DEFAULT jsonString )?
 jsonString
@@ -309,9 +308,9 @@ createStream
 streamTypeDef
          ::= TYPE ( inlineStruct | qname ) AS typeAlias distributionClause?
 distributionClause
-         ::= DISTRIBUTE BY LPAREN identifier ( COMMA identifier )* RPAREN
+         ::= DISTRIBUTE BY '(' identifier ( ',' identifier )* ')'
 inlineStruct
-         ::= LPAREN fieldDef ( COMMA fieldDef )* RPAREN
+         ::= '(' fieldDef ( ',' fieldDef )* ')'
 typeAlias
          ::= identifier
 dataType ::= primitiveType
@@ -326,23 +325,23 @@ primitiveType
            | FLOAT32
            | FLOAT64
            | STRING
-           | ( ( CHAR | FIXED | TIME | TIMESTAMP | TIMESTAMP_TZ ) LPAREN | DECIMAL LPAREN INTEGER_LIT COMMA ) INTEGER_LIT RPAREN
+           | ( ( CHAR | FIXED | TIME | TIMESTAMP | TIMESTAMP_TZ ) '(' | DECIMAL '(' INTEGER_LIT ',' ) INTEGER_LIT ')'
            | BYTES
            | UUID
            | DATE
 compositeType
-         ::= ( LIST LPAREN | MAP LPAREN primitiveType COMMA ) dataType RPAREN
+         ::= ( LIST '<' | MAP '<' primitiveType ',' ) dataType '>'
 complexType
          ::= qname
 expr     ::= orExpr
 orExpr   ::= andExpr ( OR andExpr )*
 andExpr  ::= notExpr ( AND notExpr )*
 notExpr  ::= NOT* cmpExpr
-cmpExpr  ::= addExpr ( ( EQ | NEQ | GT | LT | GTE | LTE | BETWEEN addExpr AND ) addExpr | IS NOT? NULL | IN LPAREN literal ( COMMA literal )* RPAREN )*
-addExpr  ::= mulExpr ( ( PLUS | MINUS ) mulExpr )*
-mulExpr  ::= unaryExpr ( ( STAR | SLASH | PERCENT ) unaryExpr )*
+cmpExpr  ::= mulExpr ( ( '=' | '<>' | '>' | '<' | '>=' | '<=' | BETWEEN mulExpr AND ) mulExpr | IS NOT? NULL | IN '(' literal ( ',' literal )* ')' )*
+mulExpr  ::= unaryExpr ( ( '*' | '/' | '%' | '<<' | '>>' ) unaryExpr )*
+addExpr  ::= mulExpr ( ( '+' | '-' ) mulExpr )*
 unaryExpr
-         ::= MINUS* ( LPAREN expr RPAREN | literal | accessor )
+         ::= '-'* ( '(' expr ')' | literal | accessor )
 literal  ::= NULL
            | TRUE
            | FALSE
@@ -353,27 +352,15 @@ literal  ::= NULL
            | listLiteral
            | mapLiteral
 listLiteral
-         ::= LBRACK ( literal ( COMMA literal )* )? RBRACK
+         ::= '[' ( literal ( ',' literal )* )? ']'
 mapLiteral
-         ::= LBRACE ( mapEntry ( COMMA mapEntry )* )? RBRACE
-mapEntry ::= literal COLON literal
-qname    ::= identifier ( DOT identifier )*
+         ::= '{' ( mapEntry ( ',' mapEntry )* )? '}'
+mapEntry ::= literal ':' literal
+qname    ::= identifier ( '.' identifier )*
 identifier
          ::= ID
-
-<?TOKENS?>
-
-EOF      ::= $
-```
-
-## Lexer (EBNF)
-
-```EBNF
-/* converted on Sat Sep 13, 2025, 21:06 (UTC+02) by antlr_4-to-w3c v0.73-SNAPSHOT which is Copyright (c) 2011-2025 by Gunther Rademacher <grd@gmx.net> */
-
 _        ::= WS
            | COMMENT
-           | WS_PATH
           /* ws: definition */
 
 <?TOKENS?>
@@ -447,9 +434,5 @@ BYTES_LIT
 ID       ::= [a-zA-Z] [a-zA-Z0-9_]*
 WS       ::= [ #x9#xd#xa]+
 COMMENT  ::= '--' [^#xd#xa]*
-WS_PATH  ::= [ #x9#xd#xa]+
-FILE_PATH
-         ::= "'" PATH_SEG ( '/' PATH_SEG )* '.' FILE_EXT "'"
-PATH_SEG ::= [a-zA-Z0-9_#x2D]+
-FILE_EXT ::= [Ss] [Qq] [Ll] [Ss]
+EOF      ::= $
 ```

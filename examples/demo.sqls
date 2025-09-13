@@ -15,8 +15,8 @@ CREATE STRUCT Customer (
   Id Int64,
   Name STRING,
   Email STRING OPTIONAL,
-  Tags LIST(STRING),
-  Attrs MAP(STRING, STRING),
+  Tags LIST<STRING>,
+  Attrs MAP<STRING, List<STRING>>,
   Classification CHAR(5)
 );
 
@@ -31,7 +31,7 @@ CREATE LOG STREAM customers
   TYPE com.example.Customer AS CustomerV2;
 
 READ FROM customers
-TYPE CustomerV1 * WHERE Name = 'Alice' AND Id > 0.5
+TYPE CustomerV1 * WHERE Name = 'Alice' AND Id < 1 AND Id >> 1 >= 0.5
 TYPE CustomerV2 Id, Tags;
 
 WRITE TO customers TYPE CustomerV1

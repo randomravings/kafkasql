@@ -35,7 +35,7 @@ tasks.named('generateGrammarSource').configure { enabled = false }
 tasks.register('exportEbnf', Exec) {
   group = "documentation"
   description = "Convert ANTLR (split) to W3C EBNF"
-  dependsOn 'generateParserSource'
+  dependsOn 'generateParser'
   doFirst { file("$buildDir/generated-docs").mkdirs() }
   def warFile = { configurations.ebnfConvert.singleFile }
   def input  = file("src/main/antlr/SqlStreamParser.g4")
@@ -45,35 +45,21 @@ tasks.register('exportEbnf', Exec) {
   """
 }
 
-def antlrLexerOut  = file("$buildDir/generated-src/antlr/streamsql/lex")
 def antlrParserOut = file("$buildDir/generated-src/antlr/streamsql/parse")
 
-tasks.register('generateLexerSource', org.gradle.api.plugins.antlr.AntlrTask) {
-  description = "Generate lexer sources"
-  group = "antlr"
-  source = files('src/main/antlr/SqlStreamLexer.g4')
-  outputDirectory = antlrLexerOut
-  arguments += ['-visitor','-long-messages','-package','streamsql.lex']
-  maxHeapSize = '256m'
-}
-
-tasks.register('generateParserSource', org.gradle.api.plugins.antlr.AntlrTask) {
+tasks.register('generateParser', org.gradle.api.plugins.antlr.AntlrTask) {
   description = "Generate parser sources"
   group = "antlr"
-  dependsOn 'generateLexerSource'
-  source = files('src/main/antlr/SqlStreamParser.g4')
-  // Ensure lexer output (tokens) considered input
-  inputs.files(fileTree(antlrLexerOut))
+  source = files('src/main/antlr/SqlStream.g4')
   outputDirectory = antlrParserOut
   arguments += [
-    '-visitor','-long-messages','-package','streamsql.parse',
-    '-lib', antlrLexerOut.absolutePath
+    '-visitor','-long-messages','-package','streamsql.parse'
   ]
   maxHeapSize = '256m'
 }
 
-tasks.named('compileJava').configure { dependsOn 'generateParserSource' }
-tasks.named('compileTestJava').configure { dependsOn 'generateParserSource' }
+tasks.named('compileJava').configure { dependsOn 'generateParser' }
+tasks.named('compileTestJava').configure { dependsOn 'generateParser' }
 
 sourceSets {
   main { java.srcDirs += "$buildDir/generated-src/antlr" }

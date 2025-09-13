@@ -3,14 +3,14 @@ package streamsql;
 import streamsql.ast.*;
 import streamsql.ast.Enum;
 import streamsql.parse.SqlStreamParser;
-import streamsql.parse.SqlStreamParserBaseVisitor;
+import streamsql.parse.SqlStreamBaseVisitor;
 import org.antlr.v4.runtime.tree.TerminalNode;
 
 import java.util.*;
 
 import static java.util.stream.Collectors.toList;
 
-public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
+public class AstBuilder extends SqlStreamBaseVisitor<Object> {
 
   @Override
   public List<Stmt> visitScript(SqlStreamParser.ScriptContext ctx) {
@@ -283,34 +283,34 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
 
   @Override
   public Expr visitCmpExpr(SqlStreamParser.CmpExprContext ctx) {
-    // leftmost addExpr
-    Expr left = (Expr) visit(ctx.addExpr(0));
-    if (ctx.addExpr().size() == 1 && ctx.getChildCount() == 1) return left;
+    // leftmost mulExpr
+    Expr left = (Expr) visit(ctx.mulExpr().get(0));
+    if (ctx.mulExpr().size() == 1 && ctx.getChildCount() == 1) return left;
 
     Expr result = left;
-    int addIndex = 1;
+    int mulIndex = 1;
     for (int i = 1; i < ctx.getChildCount(); i++) {
       var child = ctx.getChild(i);
       String tokenText = child.getText();
-      switch (tokenText.toUpperCase(Locale.ROOT)) {
+      switch (tokenText) {
         case "=":
-          result = new Binary(BinaryOp.EQ, result, (Expr) visit(ctx.addExpr(addIndex++)));
+          result = new Binary(BinaryOp.EQ, result, (Expr) visit(ctx.mulExpr().get(mulIndex++)));
           break;
         case "<>":
         case "!=":
-          result = new Binary(BinaryOp.NEQ, result, (Expr) visit(ctx.addExpr(addIndex++)));
+          result = new Binary(BinaryOp.NEQ, result, (Expr) visit(ctx.mulExpr().get(mulIndex++)));
           break;
         case "<":
-          result = new Binary(BinaryOp.LT, result, (Expr) visit(ctx.addExpr(addIndex++)));
+          result = new Binary(BinaryOp.LT, result, (Expr) visit(ctx.mulExpr().get(mulIndex++)));
           break;
         case "<=":
-          result = new Binary(BinaryOp.LTE, result, (Expr) visit(ctx.addExpr(addIndex++)));
+          result = new Binary(BinaryOp.LTE, result, (Expr) visit(ctx.mulExpr().get(mulIndex++)));
           break;
         case ">":
-          result = new Binary(BinaryOp.GT, result, (Expr) visit(ctx.addExpr(addIndex++)));
+          result = new Binary(BinaryOp.GT, result, (Expr) visit(ctx.mulExpr().get(mulIndex++)));
           break;
         case ">=":
-          result = new Binary(BinaryOp.GTE, result, (Expr) visit(ctx.addExpr(addIndex++)));
+          result = new Binary(BinaryOp.GTE, result, (Expr) visit(ctx.mulExpr().get(mulIndex++)));
           break;
         default:
           if (child instanceof TerminalNode) {
@@ -332,8 +332,8 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
                 throw new IllegalStateException("Unsupported IS expression");
               }
             } else if (up.equals("BETWEEN")) {
-              Expr lower = (Expr) visit(ctx.addExpr(addIndex++));
-              Expr upper = (Expr) visit(ctx.addExpr(addIndex++));
+              Expr lower = (Expr) visit(ctx.mulExpr().get(mulIndex++));
+              Expr upper = (Expr) visit(ctx.mulExpr().get(mulIndex++));
               result = new Ternary(TernaryOp.BETWEEN, result, lower, upper);
             } else if (up.equals("IN")) {
               List<AnyV> lits = ctx.literal().stream().map(l -> (AnyV) visit(l)).collect(toList());
@@ -361,20 +361,34 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
 
   @Override
   public Expr visitMulExpr(SqlStreamParser.MulExprContext ctx) {
-    List<Expr> exprs = ctx.unaryExpr().stream().map(e -> (Expr) visit(e)).collect(toList());
-    if (exprs.size() == 1) return exprs.get(0);
-    Expr res = exprs.get(0);
-    for (int i = 1; i < exprs.size(); i++) {
+    List<SqlStreamParser.UnaryExprContext> parts = ctx.unaryExpr();
+    Expr result = (Expr) visit(parts.get(0));
+    if (parts.size() == 1) return result;
+
+    for (int i = 1; i < parts.size(); i++) {
       String op = ctx.getChild(2 * i - 1).getText();
-      BinaryOp bop = switch (op) {
-        case "*" -> BinaryOp.MUL;
-        case "/" -> BinaryOp.DIV;
-        case "%" -> BinaryOp.MOD;
-        default -> throw new IllegalStateException("Unknown mul operator: " + op);
-      };
-      res = new Binary(bop, res, exprs.get(i));
+      Expr right = (Expr) visit(parts.get(i));
+      switch (op) {
+        case "*":
+          result = new Binary(BinaryOp.MUL, result, right);
+          break;
+        case "/":
+          result = new Binary(BinaryOp.DIV, result, right);
+          break;
+        case "%":
+          result = new Binary(BinaryOp.MOD, result, right);
+          break;
+        case "<<":
+          result = new Binary(BinaryOp.SHL, result, right);
+          break;
+        case ">>":
+          result = new Binary(BinaryOp.SHR, result, right);
+          break;
+        default:
+          throw new IllegalStateException("Unknown multiplicative operator: " + op);
+      }
     }
-    return res;
+    return result;
   }
 
   @Override

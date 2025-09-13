@@ -63,8 +63,8 @@ public class CreateStatementsTest {
         Name STRING,
         Nick CHAR(16) OPTIONAL,
         Score DECIMAL(10,2),
-        Tags LIST(STRING),
-        Attrs MAP(STRING, INT32),
+        Tags LIST<STRING>,
+        Attrs MAP<STRING, INT32>,
         Friend com.example.User OPTIONAL DEFAULT 'null'
       );
       """);
@@ -150,7 +150,7 @@ public class CreateStatementsTest {
   void nestedCompositeTypes() {
     List<Stmt> p = TestHelpers.parseAssert("""
       CREATE STRUCT X (
-        Data LIST(MAP(STRING, LIST(INT32)))
+        Data LIST<MAP<STRING, LIST<INT32>>>
       );
       """);
     CreateType ct = TestHelpers.only(p, CreateType.class);
