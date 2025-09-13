@@ -13,7 +13,7 @@ public final class Catalog {
     put(QName.root(), new Context(QName.root()));
   }
 
-  public Boolean containsKey(String fqn) { return table.containsKey(fqn); }
+  public Boolean containsKey(QName fqn) { return table.containsKey(fqn.fullName()); }
 
   public Boolean put(Context ctx) { return put(ctx.qName(), ctx); }
   public Boolean put(Struct type) { return put(type.qName(), type); }

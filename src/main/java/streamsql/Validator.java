@@ -7,6 +7,7 @@ import java.util.stream.Collectors;
 public final class Validator {
   public final Catalog catalog;
   private final Diagnostics  diags = new Diagnostics();
+
   private QName currentContext = QName.root();
   private List<Stmt> stmts = new ArrayList<>();
 
@@ -56,14 +57,17 @@ public final class Validator {
   }
 
   private UseContext validateUseContext(UseContext uc){
-    Optional<Context> ctx = catalog.getContext(uc.context().qName());
+    var fqn = uc.absolute() ?
+      uc.context().qName() :
+      QName.join(currentContext, uc.context().qName());
+    Optional<Context> ctx = catalog.getContext(fqn);
     if (!ctx.isPresent()) {
-      diags.error("Unknown context '" + uc.context().qName().fullName() + "'");
+      diags.error("Unknown context '" + fqn.fullName() + "'");
     }
     else {
-      currentContext = uc.context().qName();
+      currentContext = fqn;
     }
-    return uc;
+    return new UseContext(new Context(fqn), true);
   }
 
   private CreateStmt validateCreateStmt(CreateStmt cs){
@@ -76,19 +80,20 @@ public final class Validator {
   }
 
   private CreateContext validateCreateContext(CreateContext cd){
-    var fqn = cd.qName().fullName();
+    var fqn = QName.join(currentContext, cd.qName());
+    var ctx = new Context(fqn);
     if (catalog.containsKey(fqn)) {
       diags.error("Context '" + fqn + "' already defined");
     } else {
-      catalog.put(cd.context());
+      catalog.put(ctx);
     }
-    return cd;
+    return new CreateContext(ctx);
   }
 
   // Now returns Optional<CreateType> so a normalized CreateEnum can be swapped into the statement list
   private CreateType validateCreateType(CreateType ct){
     if (contextNotSet()) return ct;
-    var fqn = ct.qName().fullName();
+    var fqn = QName.join(currentContext, ct.qName());
     if (catalog.containsKey(fqn)) {
       diags.error("Type '"+fqn+"' already defined");
       return ct;
@@ -97,14 +102,11 @@ public final class Validator {
       case CreateEnum ce:
         return validateCreateEnum(ce);
       case CreateStruct cs:
-        catalog.put(cs.type());
-        return cs;
+        return validateCreateStruct(cs);
       case CreateUnion cu:
-        catalog.put(cu.type());
-        return cu;
+        return validateCreateUnion(cu);
       case CreateScalar cs:
-        catalog.put(cs.type());
-        return cs;
+        return validateCreateScalar(cs);
       default:
         return ct;
     }
@@ -113,6 +115,7 @@ public final class Validator {
   private CreateEnum validateCreateEnum(CreateEnum ce){
       streamsql.ast.Enum e = ce.type();
       IntegerT enumBase = e.type();
+      var fqn = QName.join(currentContext, ce.qName());
 
       List<EnumSymbol> converted =  alignEnumSymbols(e.symbols(), enumBase);
       if (diags.hasErrors()) return ce;
@@ -126,7 +129,7 @@ public final class Validator {
         }
         if (diags.hasErrors()) return ce;
       }
-      var ne = new CreateEnum(new streamsql.ast.Enum(e.qName(), enumBase, e.isMask(), converted, e.defaultSymbol()));
+      var ne = new CreateEnum(new streamsql.ast.Enum(fqn, enumBase, e.isMask(), converted, e.defaultSymbol()));
       catalog.put(ne.type());
       return ne;
   }
@@ -170,9 +173,61 @@ public final class Validator {
     return converted;
   }
 
+  private CreateStruct validateCreateStruct(CreateStruct cs){
+    if (cs.type().fields().isEmpty()) {
+      diags.error("Struct '" + cs.qName().fullName() + "' must have at least one field");
+      return cs;
+    }
+    var fqn = QName.join(currentContext, cs.qName());
+    if (catalog.containsKey(fqn)) {
+      diags.error("Type '"+fqn+"' already defined");
+      return cs;
+    }
+    var seen = new HashSet<String>();
+    for (var field: cs.type().fields()){
+      if (!seen.add(field.name().value()))
+        diags.error("Struct '"+fqn+"' reuses field name '"+field.name().value()+"'");
+    }
+    if (diags.hasErrors()) return cs;
+    var struct = new CreateStruct(new Struct(fqn, cs.type().fields()));
+    catalog.put(struct.type());
+    return struct;
+  }
+
+  private CreateUnion validateCreateUnion(CreateUnion cu){
+    if (cu.type().types().isEmpty()) {
+      diags.error("Union '" + cu.qName().fullName() + "' must have at least one option");
+      return cu;
+    }
+    var fqn = QName.join(currentContext, cu.qName());
+    if (catalog.containsKey(fqn)) {
+      diags.error("Type '"+fqn+"' already defined");
+      return cu;
+    }
+    var seen = new HashSet<String>();
+    for (var opt: cu.type().types()){
+      if (!seen.add(opt.name().value()))
+        diags.error("Union '"+fqn+"' reuses option name '"+opt.name().value()+"'");
+    }
+    if (diags.hasErrors()) return cu;
+    var union = new CreateUnion(new Union(fqn, cu.type().types()));
+    catalog.put(union.type());
+    return union;
+  }
+
+  private CreateScalar validateCreateScalar(CreateScalar cs){
+    var fqn = QName.join(currentContext, cs.qName());
+    if (catalog.containsKey(fqn)) {
+      diags.error("Type '"+fqn+"' already defined");
+      return cs;
+    }
+    catalog.put(cs.type());
+    return new CreateScalar(new Scalar(fqn, cs.type().primitive(), cs.type().validation(), cs.type().defaultValue()));
+  }
+
   private CreateStream validateAppendStreamDecl(CreateStream cs){
     if (contextNotSet()) return null;
-    var fqn = cs.qName().fullName();
+    var fqn = QName.join(currentContext, cs.qName());
     if (catalog.containsKey(fqn)) {
       diags.error("Stream '"+fqn+"' already defined");
       return cs;
@@ -183,12 +238,13 @@ public final class Validator {
       Identifier alias = alt.alias();
       if (!seen.add(alias.value())) diags.error("Stream '"+fqn+"' reuses alias '"+alias.value()+"'");
       if (alt instanceof StreamReferenceT  ra) {
-        var tname = ra.ref().qName().fullName();
+        var tname = ra.ref().qName();
         if (!catalog.containsKey(tname)) diags.error("Stream '"+fqn+"' references unknown type '"+tname+"'");
       }
     }
-    catalog.put(cs.stream());
-    return cs;
+    var newStream = new StreamLog(fqn, stream.types());
+    catalog.put(newStream);
+    return new CreateStream(newStream);
   }
 
   private ReadStmt validateReadStmt(ReadStmt rs) {

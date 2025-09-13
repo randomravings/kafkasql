@@ -1,5 +1,5 @@
 package streamsql.ast;
 
-public enum TerniaryOp {
+public enum TernaryOp {
     BETWEEN
 }

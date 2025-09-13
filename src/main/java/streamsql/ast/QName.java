@@ -46,5 +46,6 @@ public final class QName {
 
   public static QName root() { return ROOT; }
   public static QName of(List<Identifier> parts) { return new QName(parts); }
+  public static QName of(Identifier part) { return new QName(List.of(part)); }
   public static QName join(QName a, QName b) { return new QName(Stream.concat(a.parts.stream(), b.parts.stream()).toList()); }
 }

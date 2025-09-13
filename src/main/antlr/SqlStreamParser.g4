@@ -36,7 +36,7 @@ useStmt
   ;
 
 useContext
-  : USE CONTEXT qname
+  : USE CONTEXT (DOT)? qname
   ;
 
 readStmt
@@ -86,9 +86,8 @@ createScalar
   ;
 
 createEnum
-  : CREATE ENUM typeName
-    (OF enumType)?
-    (AS MASK)?
+  : CREATE (ENUM | MASK) typeName
+    (AS enumType)?
     LPAREN enumSymbol (COMMA enumSymbol)* RPAREN
     (DEFAULT identifier)?
   ;

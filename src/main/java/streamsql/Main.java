@@ -20,7 +20,7 @@ public class Main {
     System.out.println("  -t, --text          Inline script (consumes all remaining args)");
     System.out.println("  -n, --no-include    Disable INCLUDE resolution");
     System.out.println("  -a, --print-ast     Print AST if parse succeeds");
-    System.out.println("  -T, --trace         Enable parser trace output");
+    System.out.println("  -v, --verbose       Enable antlr trace output");
     System.out.println("  -h, --help          Show this help");
   }
 
@@ -47,7 +47,7 @@ public class Main {
         }
         case "-n", "--no-include" -> resolveIncludes = false;
         case "-a", "--print-ast" -> printAst = true;
-        case "-T", "--trace" -> trace = true;
+        case "-v", "--verbose" -> trace = true;
         case "-t", "--text" -> {
           if (inlineText != null) { err("--text/-t specified multiple times"); return; }
           if (++i >= args.length) { err("missing inline script after --text/-t"); return; }
@@ -114,7 +114,6 @@ public class Main {
     ParseArgs parseArgs = new ParseArgs(resolveIncludes, trace);
 
     if (inlineText != null) {
-      System.out.println("==> (inline)");
       var pr = ParseHelpers.parse(parseArgs, inlineText);
       if (!pr.diags().errors().isEmpty()) {
         anyErrors = true;

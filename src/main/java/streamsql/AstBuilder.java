@@ -12,8 +12,6 @@ import static java.util.stream.Collectors.toList;
 
 public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
 
-  private QName currentContext = QName.root();
-
   @Override
   public List<Stmt> visitScript(SqlStreamParser.ScriptContext ctx) {
     return ctx.statement().stream()
@@ -38,23 +36,27 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
   // -- Contexts --------------------------------------------------------------
   @Override
   public Stmt visitUseContext(SqlStreamParser.UseContextContext c) {
-    QName qn = contextQName(currentContext, c.qname());
-    currentContext = qn;
-    return new UseContext(new Context(qn));
+    boolean absolute = c.DOT() != null;
+    QName qn = visitQname(c.qname());
+    return new UseContext(new Context(qn), absolute);
+  }
+
+  @Override public QName visitQname(SqlStreamParser.QnameContext q) {
+    List<Identifier> parts = q.identifier().stream().map(this::visitIdentifier).collect(toList());
+    return QName.of(parts);
   }
 
   @Override
   public Stmt visitCreateContext(SqlStreamParser.CreateContextContext c) {
     Identifier name = visitIdentifier(c.identifier());
-    QName qn = currentContext.append(name);
-    return new CreateContext(new Context(qn));
+    return new CreateContext(new Context(QName.of(name)));
   }
 
   // -- Type declarations -----------------------------------------------------
   @Override
   public Stmt visitCreateScalar(SqlStreamParser.CreateScalarContext c) {
     Identifier name = visitIdentifier(c.typeName().identifier());
-    QName qn = currentContext.append(name);
+    QName qn = QName.of(name);
     PrimitiveType pt = visitPrimitiveType(c.primitiveType());
     Optional<Expr> validation = c.expr() != null ? Optional.of((Expr)visitExpr(c.expr())) : Optional.empty();
     Optional<Literal> def = c.literal() != null ? Optional.of((Literal)visitLiteral(c.literal())) : Optional.empty();
@@ -64,7 +66,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
   @Override
   public CreateEnum visitCreateEnum(SqlStreamParser.CreateEnumContext c) {
     Identifier name = visitIdentifier(c.typeName().identifier());
-    QName qn = currentContext.append(name);
+    QName qn = QName.of(name);
     BoolV isMasked = c.MASK() != null ? new BoolV(true) : new BoolV(false);
     IntegerT enumType = (c.enumType() != null) ? visitEnumType(c.enumType()) : Int32T.get();
     List<EnumSymbol> symbols = c.enumSymbol().stream().map(this::visitEnumSymbol).collect(toList());
@@ -90,7 +92,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
   @Override
   public Stmt visitCreateStruct(SqlStreamParser.CreateStructContext c) {
     Identifier name = visitIdentifier(c.typeName().identifier());
-    QName qn = currentContext.append(name);
+    QName qn = QName.of(name);
     List<Field> fs = c.fieldDef().stream().map(this::visitStructField).collect(toList());
     return new CreateStruct(new Struct(qn, fs));
   }
@@ -98,7 +100,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
   @Override
   public Stmt visitCreateUnion(SqlStreamParser.CreateUnionContext c) {
     Identifier name = visitIdentifier(c.typeName().identifier());
-    QName qn = currentContext.append(name);
+    QName qn = QName.of(name);
     List<UnionAlt> alts = c.unionAlt().stream()
         .map(a -> new UnionAlt(visitIdentifier(a.identifier()), visitDataType(a.dataType())))
         .collect(toList());
@@ -183,7 +185,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
         return new StreamReferenceT(new TypeRef(typeRefQName(std.qname())), visitIdentifier(std.typeAlias().identifier()), dist);
       }
     }).collect(toList());
-    QName qn = currentContext.append(visitIdentifier(c.identifier()));
+    QName qn = QName.of(visitIdentifier(c.identifier()));
     DataStream s = c.LOG() != null ? new StreamLog(qn, alts) : new StreamCompact(qn, alts);
     return new CreateStream(s);
   }
@@ -332,7 +334,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
             } else if (up.equals("BETWEEN")) {
               Expr lower = (Expr) visit(ctx.addExpr(addIndex++));
               Expr upper = (Expr) visit(ctx.addExpr(addIndex++));
-              result = new Terniary(TerniaryOp.BETWEEN, result, lower, upper);
+              result = new Ternary(TernaryOp.BETWEEN, result, lower, upper);
             } else if (up.equals("IN")) {
               List<AnyV> lits = ctx.literal().stream().map(l -> (AnyV) visit(l)).collect(toList());
               result = new Binary(BinaryOp.IN, result, new ListV(lits));
@@ -408,11 +410,6 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
   // -- Helpers --------------------------------------------------------------
   private static Expr fold(List<Expr> xs, BinaryOp op) {
     return xs.stream().skip(1).reduce(xs.get(0), (a, b) -> new Binary(op, a, b));
-  }
-
-  private QName contextQName(QName cc, SqlStreamParser.QnameContext q) {
-    List<Identifier> parts = q.identifier().stream().map(this::visitIdentifier).collect(toList());
-    return QName.join(cc, QName.of(parts));
   }
 
   private QName typeRefQName(SqlStreamParser.QnameContext q) {

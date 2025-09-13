@@ -130,7 +130,7 @@ public final class ExprValidation {
                 }
             }
 
-            if (expr instanceof Terniary t) {
+            if (expr instanceof Ternary t) {
                 switch (t.op()) {
                     case BETWEEN -> {
                         TypeCheckResult left = typeCheckExpr(t.left(), context, catalog, stack);

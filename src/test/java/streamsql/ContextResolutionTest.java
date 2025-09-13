@@ -17,9 +17,9 @@ public class ContextResolutionTest {
     var uc2 = (UseContext)result.get(2);
     var sd  = (CreateType)result.get(3);
     assertEquals("com", uc1.context().qName().fullName());
-    assertEquals("com.example", cd.qName().fullName());
-    assertEquals("com.example", uc2.context().qName().fullName());
-    assertEquals("com.example.Foo", sd.qName().fullName());
+    assertEquals("example", cd.qName().fullName());
+    assertEquals("example", uc2.context().qName().fullName());
+    assertEquals("Foo", sd.qName().fullName());
   }
 
   @Test
@@ -30,7 +30,7 @@ public class ContextResolutionTest {
     var cd = (CreateContext)result.get(1);
     var sd = (CreateType)result.get(2);
     assertEquals("com", uc.context().qName().fullName());
-    assertEquals("com.example", cd.qName().fullName());
-    assertEquals("com.Foo", sd.qName().fullName());
+    assertEquals("example", cd.qName().fullName());
+    assertEquals("Foo", sd.qName().fullName());
   }
 }

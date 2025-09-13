@@ -141,9 +141,9 @@ public class CreateStatementsTest {
     Struct struct = TestHelpers.assertType(ct.type(), Struct.class);
     assertEquals("company", ctx0.qName().fullName().toString());
     assertEquals("company", utx0.context().qName().fullName().toString());
-    assertEquals("company.finance", ctx1.qName().fullName().toString());
-    assertEquals("company.finance", utx1.context().qName().fullName().toString());
-    assertEquals("company.finance.Account", struct.qName().fullName().toString());
+    assertEquals("finance", ctx1.qName().fullName().toString());
+    assertEquals("finance", utx1.context().qName().fullName().toString());
+    assertEquals("Account", struct.qName().fullName().toString());
   }
 
   @Test

@@ -47,6 +47,7 @@ public final class AstPrinter extends Printer {
     space();
     writeTypeListNode(Stmt.class);
     forEach(stmts, this::writeStmt, 0);
+    newLine();
   }
 
   private void branch(int indent, boolean last) throws IOException {
@@ -436,6 +437,7 @@ public final class AstPrinter extends Printer {
     switch (e) {
       case Unary u -> writeUnaryExpr(u, indent);
       case Binary b -> writeBinaryExpr(b, indent);
+      case Ternary t -> writeTernaryExpr(t, indent);
       case Literal l -> writeLiteral(l, indent);
       case Identifier id -> writeIdentifier(id, indent);
       case Segment ap -> writeAccessSegment(ap, indent);
@@ -459,6 +461,18 @@ public final class AstPrinter extends Printer {
     writeExpr(b.left(), indent + 1);
     writeKey("right", indent, true);
     writeExpr(b.right(), indent + 1);
+  }
+
+  private void writeTernaryExpr(Ternary t, int indent) throws IOException {
+    writeTypeNode(Ternary.class);
+    writeKey("op", indent, false);
+    write(t.op().toString());
+    writeKey("left", indent, false);
+    writeExpr(t.left(), indent + 1);
+    writeKey("middle", indent, false);
+    writeExpr(t.middle(), indent + 1);
+    writeKey("right", indent, true);
+    writeExpr(t.right(), indent + 1);
   }
 
   private void writeValue(AnyV v, int indent) throws IOException {
