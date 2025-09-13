@@ -2,17 +2,17 @@ package streamsql.ast;
 
 import java.util.HashMap;
 
-public final class DecimalT implements PrimitiveType {
+public final class DecimalT implements FractionalT {
     private static final HashMap<Integer, DecimalT> TYPES = new HashMap<>();
-    private final Int32V precision;
-    private final Int32V scale;
-    private DecimalT(Int32V precision, Int32V scale) {
+    private final Int8V precision;
+    private final Int8V scale;
+    private DecimalT(Int8V precision, Int8V scale) {
         this.precision = precision;
         this.scale = scale;
     }
-    public Int32V precision() { return precision; }
-    public Int32V scale() { return scale; }
-    public static DecimalT get(Int32V precision, Int32V scale) {
+    public Int8V precision() { return precision; }
+    public Int8V scale() { return scale; }
+    public static DecimalT get(Int8V precision, Int8V scale) {
         var key = precision.value() * 1000 + scale.value();
         return TYPES.computeIfAbsent(key, k -> new DecimalT(precision, scale));
     }

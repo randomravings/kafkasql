@@ -4,6 +4,8 @@ import streamsql.ast.*;
 import java.io.Writer;
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 public final class AstPrinter extends Printer {
 
@@ -12,7 +14,7 @@ public final class AstPrinter extends Printer {
   private static final String BRANCH_LAST = "└─ ";
   private static final String BRANCH_MID = "├─ ";
 
-  private final Boolean[] pipes = new Boolean[32];
+  private final Boolean[] pipes = new Boolean[64];
 
   public AstPrinter(Writer out) {
     super(out);
@@ -62,28 +64,23 @@ public final class AstPrinter extends Printer {
       write(BRANCH_MID);
   }
 
-  private void indentTree(int indent) throws IOException {
-    for (int i = 0; i < indent; i++) {
-      if (pipes[i])
-        write(BRANCH_PIPE_TAB);
-      else
-        write(BRANCH_EMPTY_TAB);
-    }
-  }
-
   private void writeStmt(Stmt stmt, int indent) throws IOException {
     if (stmt instanceof UseStmt us) {
-      writeUseStatement(us, indent + 1);
-    } else if (stmt instanceof DmlStmt dml) {
-      writeDmlStatement(dml, indent + 1);
-    } else if (stmt instanceof DdlStmt ddl) {
-      writeDdlStatement(ddl, indent + 1);
+      writeUseStatement(us, indent);
+    } else if (stmt instanceof CreateStmt createStmt) {
+      writeCreateStatement(createStmt, indent);
+    } else if (stmt instanceof ReadStmt readStmt) {
+      writeReadStmt(readStmt, indent);
+    } else if (stmt instanceof WriteStmt writeStmt) {
+      writeWriteStmt(writeStmt, indent);
+    } else {
+      writeTypeNode(stmt.getClass());
     }
   }
 
   private void writeQName(QName qName, int indent) throws IOException {
     writeTypeNode(QName.class);
-    writeKey("fullName", indent + 1, true);
+    writeKey("fullName", indent, true);
     write(qName.fullName());
   }
 
@@ -104,58 +101,40 @@ public final class AstPrinter extends Printer {
     writeContext(useContext.context(), indent + 1);
   }
 
-  private void writeDmlStatement(DmlStmt dmlStmt, int indent) throws IOException {
-    switch (dmlStmt) {
-      case ReadStmt r:
-        writeReadStmt(r, indent);
-        break;
-      case WriteStmt w:
-        writeWriteStmt(w, indent);
-        break;
-      default:
-        writeTypeNode(dmlStmt.getClass());
-        break;
-    }
-  }
-
   private void writeReadStmt(ReadStmt r, int indent) throws IOException {
     writeTypeNode(ReadStmt.class);
     writeKey("stream", indent, false);
-    writeQName(r.stream(), indent);
+    writeQName(r.stream(), indent + 1);
     writeKey("blocks", indent, true);
     writeTypeListNode(ReadSelection.class);
-    forEach(r.blocks(), (b, ind) -> writeTypeBlock(b, ind + 1), indent + 1);
+    forEach(r.blocks(), this::writeTypeBlock, indent + 1);
   }
 
   private void writeTypeBlock(ReadSelection b, int indent) throws IOException {
     writeTypeNode(ReadSelection.class);
     writeKey("alias", indent, false);
     writeIdentifier(b.alias(), indent + 1);
-    writeKey("projection", indent, !b.where().isPresent());
-    writeProjectionList(b.projection(), indent + 1);
-    if (b.where().isPresent()) {
-      writeKey("where", indent, true);
-      writeType(WhereClause.class);
-      writeKey("filter", indent + 1, true);
-      writeType(Binary.class);
-      branch(indent + 2, true);
-      writeExprPolish(b.where().get().filter(), indent + 2);
-    }
+    writeKey("projection", indent, false);
+    writeProjection(b.projection(), indent + 1);
+    writeKey("where", indent, true);
+    writeOptional(b.where(), this::writeWhereClause, indent);
   }
 
-  private void writeProjectionList(Projection pl, int indent) throws IOException {
+  private void writeWhereClause(WhereClause whereClause, int indent) throws IOException {
+    writeTypeNode(WhereClause.class);
+    writeKey("expr", indent, true);
+    writeExpr(whereClause.expr(), indent + 1);
+  }
+
+  private void writeProjection(Projection pl, int indent) throws IOException {
     if (pl instanceof ProjectionAll) {
       writeTypeNode(ProjectionAll.class);
     } else if (pl instanceof ProjectionList list) {
       writeTypeNode(ProjectionList.class);
       writeKey("fields", indent, true);
-      writePathList(list.fields(), indent + 1);
+      writeTypeListNode(Accessor.class);
+      forEach(list.fields(), this::writeAccessor, indent + 1);
     }
-  }
-
-  private void writePathList(List<Path> paths, int indent) throws IOException {
-    writeTypeListNode(Path.class);
-    forEach(paths, (p, i) -> writePath(p, i + 1), indent);
   }
 
   private void writeWriteStmt(WriteStmt w, int indent) throws IOException {
@@ -165,35 +144,16 @@ public final class AstPrinter extends Printer {
     writeKey("alias", indent, false);
     writeIdentifier(w.alias(), indent + 1);
     writeKey("projection", indent, false);
-    writePathList(w.projection(), indent + 1);
+    writeProjection(w.projection(), indent + 1);
     writeKey("rows", indent, true);
-    writeTypeListNode(Tuple.class);
-    forEach(w.rows(), (row, ind) -> writeRow(row, ind + 1), indent + 1);
+    writeTypeListNode(ListV.class);
+    forEach(w.rows(), (row, ind) -> writeRow(row, ind), indent + 1);
   }
 
-  private void writeRow(Tuple row, int indent) throws IOException {
-    writeTypeNode(Tuple.class);
-    writeKey("arity", indent, false);
-    write(Integer.toString(row.arity()));
+  private void writeRow(ListV row, int indent) throws IOException {
+    writeTypeNode(ListV.class);
     writeKey("values", indent, true);
-    forEach(row.values(), (v, i) -> writeLiteral(v, i + 1), indent + 1);
-  }
-
-  private void writeLiteral(Literal<?, ?> v, int indent) throws IOException {
-    writeTypeNode(v.getClass());
-    writeKey("value", indent, true);
-    write(valToString(v));
-  }
-
-  private void writeDdlStatement(DdlStmt ddl, int indent) throws IOException {
-    switch (ddl) {
-      case CreateStmt cs:
-        writeCreateStatement(cs, indent);
-        break;
-      default:
-        writeTypeNode(ddl.getClass());
-        break;
-    }
+    forEach(row.values(), (v, i) -> writeValue(v, i), indent + 1);
   }
 
   private void writeCreateStatement(CreateStmt createStatement, int indent) throws IOException {
@@ -227,11 +187,9 @@ public final class AstPrinter extends Printer {
 
   private void writeUnionAlt(UnionAlt alt, int indent) throws IOException {
     writeTypeNode(UnionAlt.class);
-    colon();
-    branch(indent, false);
-    write("name: " + alt.name());
-    branch(indent, true);
-    write("type: ");
+    writeKey("name", indent, false);
+    writeIdentifier(alt.name(), indent + 1);
+    writeKey("type", indent, true);
     writeDataType(alt.typ(), indent + 1);
   }
 
@@ -244,11 +202,11 @@ public final class AstPrinter extends Printer {
   private void writeContext(Context c, int indent) throws IOException {
     writeTypeNode(Context.class);
     writeKey("qName", indent, true);
-    writeQName(c.qName(), indent);
+    writeQName(c.qName(), indent + 1);
   }
 
   // Helpers for DataType, Path, Value, Expr
-  private void writeDataType(DataType t, int indent) throws IOException {
+  private void writeDataType(AnyT t, int indent) throws IOException {
     switch (t) {
       case PrimitiveType p:
         writePrimitive(p, indent);
@@ -271,44 +229,52 @@ public final class AstPrinter extends Printer {
   private void writePrimitive(PrimitiveType p, int indent) throws IOException {
     write(p.getClass().getSimpleName());
     switch (p) {
-      case FStringT f:
+      case CharT f:
         writeKey("size", indent, true);
-        writeNumber(f.size(), indent + 1);
+        writeLiteral(f.size(), indent + 1);
         break;
-      case FBytesT f:
+      case FixedT f:
         writeKey("size", indent, true);
-        writeNumber(f.size(), indent + 1);
+        writeLiteral(f.size(), indent + 1);
         break;
       case TimeT t:
         writeKey("precision", indent, true);
-        writeNumber(t.precision(), indent + 1);
+        writeLiteral(t.precision(), indent + 1);
         break;
       case TimestampT t:
         writeKey("precision", indent, true);
-        writeNumber(t.precision(), indent + 1);
+        writeLiteral(t.precision(), indent + 1);
         break;
       case TimestampTzT t:
         writeKey("precision", indent, true);
-        writeNumber(t.precision(), indent + 1);
+        writeLiteral(t.precision(), indent + 1);
         break;
       case DecimalT d:
         writeKey("precision", indent, false);
-        writeNumber(d.precision(), indent + 1);
+        writeLiteral(d.precision(), indent + 1);
         writeKey("scale", indent, true);
-        writeNumber(d.scale(), indent + 1);
+        writeLiteral(d.scale(), indent + 1);
         break;
       default:
         break;
     }
   }
 
+  protected void write(Int8V i) throws IOException {
+    write(i.value());
+  }
+
+    protected void write(Int32V l) throws IOException {
+        write(l.value());
+    }
+
   private void writeComposite(CompositeType ct, int indent) throws IOException {
-    if (ct instanceof Composite.List l) {
-      writeTypeNode(Composite.List.class);
+    if (ct instanceof ListT l) {
+      writeTypeNode(ListT.class);
       branch(indent, true);
       writeDataType(l.item(), indent + 1);
-    } else if (ct instanceof Composite.Map m) {
-      writeTypeNode(Composite.Map.class);
+    } else if (ct instanceof MapT m) {
+      writeTypeNode(MapT.class);
       branch(indent, false);
       writePrimitive(m.key(), indent + 1);
       branch(indent, true);
@@ -317,8 +283,6 @@ public final class AstPrinter extends Printer {
   }
 
   private void writeComplex(ComplexType ct, int indent) throws IOException {
-    writeTypeNode(ct.getClass());
-    writeKey("type", indent, true);
     switch (ct) {
       case streamsql.ast.Enum e:
         writeEnum(e, indent);
@@ -341,18 +305,28 @@ public final class AstPrinter extends Printer {
   private void writeScalar(Scalar s, int indent) throws IOException {
     writeTypeNode(Scalar.class);
     writeKey("qName", indent, false);
-    writeQName(s.qName(), indent);
-    writeKey("type", indent, true);
+    writeQName(s.qName(), indent + 1);
+    writeKey("type", indent, false);
     writePrimitive(s.primitive(), indent + 1);
+    writeKey("check", indent, false);
+    writeOptional(s.validation(), (v, i) -> writeExpr(v, i), indent);
+    writeKey("default", indent, true);
+    writeOptional(s.defaultValue(), (v, i) -> writeLiteral(v, i), indent);
   }
 
   private void writeEnum(streamsql.ast.Enum e, int indent) throws IOException {
     writeTypeNode(streamsql.ast.Enum.class);
     writeKey("qName", indent, false);
-    writeQName(e.qName(), indent);
-    writeKey("symbols", indent, true);
+    writeQName(e.qName(), indent + 1);
+    writeKey("type", indent, false);
+    writePrimitive(e.type(), indent + 1);
+    writeKey("isMask", indent, false);
+    writeLiteral(e.isMask(), indent + 1);
+    writeKey("symbols", indent, false);
     writeTypeListNode(EnumSymbol.class);
-    forEach(e.symbols(), (s, i) -> writeEnumSymbol(s, i + 1), indent + 1);
+    forEach(e.symbols(), (s, i) -> writeEnumSymbol(s, i), indent + 1);
+    writeKey("default", indent, true);
+    writeOptional(e.defaultSymbol(), (v, i) -> writeIdentifier(v, i), indent);
   }
 
   private void writeEnumSymbol(EnumSymbol s, int indent) throws IOException {
@@ -360,7 +334,7 @@ public final class AstPrinter extends Printer {
     writeKey("symbol", indent, false);
     writeIdentifier(s.name(), indent + 1);
     writeKey("value", indent, true);
-    writeNumber(s.value(), indent + 1);
+    writeLiteral(s.value(), indent + 1);
   }
 
   private void writeStructType(Struct st, int indent) throws IOException {
@@ -369,7 +343,7 @@ public final class AstPrinter extends Printer {
     writeQName(st.qName(), indent + 1);
     writeKey("fields", indent, true);
     writeTypeListNode(Field.class);
-    forEach(st.fields(), (f, ind) -> writeStructField(f, ind + 1), indent + 1);
+    forEach(st.fields(), (f, i) -> writeStructField(f, i), indent + 1);
   }
 
   private void writeStructField(Field f, int indent) throws IOException {
@@ -379,9 +353,9 @@ public final class AstPrinter extends Printer {
     writeKey("type", indent, false);
     writeDataType(f.typ(), indent + 1);
     writeKey("optional", indent, false);
-    write(f.optional());
-    writeKey("defaultJson", indent, true);
-    write(f.defaultJson());
+    writeLiteral(f.optional(), indent + 1);
+    writeKey("default", indent, true);
+    writeOptional(f.defaultValue(), (v, i) -> writeLiteral(v, i), indent + 1);
   }
 
   private void writeUnion(Union u, int indent) throws IOException {
@@ -390,7 +364,7 @@ public final class AstPrinter extends Printer {
     writeQName(u.qName(), indent + 1);
     writeKey("types", indent, true);
     writeTypeListNode(UnionAlt.class);
-    forEach(u.types(), (alt, ind) -> writeUnionAlt(alt, ind + 1), indent + 1);
+    forEach(u.types(), (a, i) -> writeUnionAlt(a, i), indent + 1);
   }
 
   private void writeTypeRef(TypeRef r, int indent) throws IOException {
@@ -402,10 +376,10 @@ public final class AstPrinter extends Printer {
   private void writeStream(DataStream s, int indent) throws IOException {
     writeTypeNode(s.getClass());
     writeKey("qName", indent, false);
-    writeQName(s.qName(), indent);
+    writeQName(s.qName(), indent + 1);
     writeKey("types", indent, true);
     writeTypeListNode(StreamType.class);
-    forEach(s.types(), (def, ind) -> writeStreamType(def, ind + 1), indent + 1);
+    forEach(s.types(), (d, i) -> writeStreamType(d, i), indent + 1);
   }
 
   private void writeStreamType(StreamType streamType, int indent) throws IOException {
@@ -415,19 +389,13 @@ public final class AstPrinter extends Printer {
     if (streamType instanceof StreamInlineT it) {
       writeKey("fields", indent, false);
       writeTypeListNode(Field.class);
-      forEach(it.fields(), (f, ind) -> writeStructField(f, ind + 1), indent + 1);
+      forEach(it.fields(), (f, i) -> writeStructField(f, i), indent + 1);
     } else if (streamType instanceof StreamReferenceT rt) {
       writeKey("ref", indent, false);
       writeTypeRef(rt.ref(), indent + 1);
     }
     writeKey("distributionKeys", indent, true);
-    forEach(streamType.distributionKeys(), (k, ind) -> writeIdentifier(k, ind + 1), indent + 1);
-  }
-
-  private void writeNumber(Numeric<?, ?> n, int indent) throws IOException {
-    writeTypeNode(n.getClass());
-    writeKey("value", indent, true);
-    write(numToString(n));
+    forEach(streamType.distributionKeys(), (k, i) -> writeIdentifier(k, i), indent + 1);
   }
 
   private void writeIdentifier(Identifier id, int indent) throws IOException {
@@ -436,163 +404,122 @@ public final class AstPrinter extends Printer {
     write(id.value());
   }
 
-  private void writePath(Path p, int indent) throws IOException {
-    writeTypeNode(Path.class);
-    writeKey("fullName", indent, true);
-    write(p.fullName());
+  // AccessPath printing
+  private void writeAccessSegment(Segment p, int indent) throws IOException {
+    writeTypeNode(Segment.class);
+    writeKey("head", indent, false);
+    writeAccessor(p.head(), indent + 1);
+    writeKey("tail", indent, true);
+    writeAccessor(p.tail(), indent + 1);
   }
 
-  private static String valToString(Literal<?, ?> v) {
-    switch (v) {
-      case NullV __:
-        return "NULL";
-      case BoolV b:
-        return Boolean.toString(b.value());
-      case Numeric<?, ?> n:
-        return numToString(n);
-      case Chars<?, ?> c:
-        return chrToString(c);
-      case Temporal<?, ?> t:
-        return tmpToString(t);
-      case UuidV u:
-        return u.value().toString();
-      case Path p:
-        return p.fullName();
-      case Identifier id:
-        return id.value();
-      default:
-        return v.toString();
-    }
-  }
-
-  private static String numToString(Numeric<?, ?> n) {
-    switch (n) {
-      case Int8V v:
-        return Long.toString(v.value());
-      case Int16V v:
-        return Long.toString(v.value());
-      case Int32V v:
-        return Long.toString(v.value());
-      case Int64V v:
-        return Long.toString(v.value());
-      case Float32V v:
-        return Float.toString(v.value());
-      case Float64V v:
-        return Double.toString(v.value());
-      default:
-        return n.toString();
-    }
-  }
-
-  private static String chrToString(Chars<?, ?> s) {
-    switch (s) {
-      case StringV v:
-        return "'" + v.value() + "'";
-      case FStringV v:
-        return "f'" + v.value() + "'";
-      case BytesV v:
-        return "0x" + bytesToHex(v.value());
-      case FBytesV v:
-        return "f'" + bytesToHex(v.value()) + "'";
-      default:
-        return s.toString();
+  private void writeAccessor(Accessor seg, int indent) throws IOException {
+    switch (seg) {
+      case Identifier va -> writeIdentifier(va, indent);
+      case Indexer ia -> writeLiteral(ia.index(), indent);
+      case Segment ap -> writeAccessSegment(ap, indent);
     }
   }
 
   private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();
-
-  private static String bytesToHex(byte[] bytes) {
-    char[] hexChars = new char[bytes.length * 2];
-    for (int j = 0; j < bytes.length; j++) {
-      int v = bytes[j] & 0xFF;
-      hexChars[j * 2] = HEX_ARRAY[v >>> 4];
-      hexChars[j * 2 + 1] = HEX_ARRAY[v & 0x0F];
-    }
-    return new String(hexChars);
-  }
-
-  private static String tmpToString(Temporal<?, ?> t) {
-    switch (t) {
-      case DateV v:
-        return v.toString();
-      case TimeV v:
-        return v.toString();
-      case TimestampV v:
-        return v.toString();
-      case TimestampTzV v:
-        return v.toString();
-      default:
-        return t.toString();
+  private void writeBytesToHex(byte[] bytes) throws IOException {
+    for (byte b : bytes) {
+      int v = b & 0xFF;
+      write(HEX_ARRAY[v >>> 4]);
+      write(HEX_ARRAY[v & 0x0F]);
     }
   }
 
-  private void writeExprPolish(Expr e, int indent) throws IOException {
-    if (e instanceof Unary u) {
-        lbracket();
-        write(switch (u.op()) {
-            case NEG -> "-";
-            case NOT -> "NOT";
-        });
-        comma();
-        space();
-        writeExprPolish(u.expr(), indent + 1);
-        rbracket();
-        return;
+
+  // Expr dispatch: one write method per Expr subtype
+  private void writeExpr(Expr e, int indent) throws IOException {
+    switch (e) {
+      case Unary u -> writeUnaryExpr(u, indent);
+      case Binary b -> writeBinaryExpr(b, indent);
+      case Literal l -> writeLiteral(l, indent);
+      case Identifier id -> writeIdentifier(id, indent);
+      case Segment ap -> writeAccessSegment(ap, indent);
+      default -> write(e.toString());
     }
-    if (e instanceof Binary b) {
-        String op = switch (b.op()) {
-            case EQ -> "EQ";
-            case NEQ -> "NEQ";
-            case LT -> "LT";
-            case LTE -> "LTE";
-            case GT -> "GT";
-            case GTE -> "GTE";
-            case AND -> "AND";
-            case OR -> "OR";
-            case IS_NULL -> "IS_NULL";
-            case IS_NOT_NULL -> "IS_NOT_NULL";
-        };
-        boolean leftIsLiteral = b.left() instanceof Literal<?, ?>;
-        boolean rightIsLiteral = b.right() instanceof Literal<?, ?>;
-        if (b.op() == BinaryOp.IS_NULL || b.op() == BinaryOp.IS_NOT_NULL) {
-            lbracket();
-            write(op);
-            comma();
-            space();
-            writeExprPolish(b.left(), indent + 1);
-            rbracket();
-        } else if (leftIsLiteral && rightIsLiteral) {
-            lbracket();
-            write(op);
-            comma();
-            space();
-            writeExprPolish(b.left(), indent + 1);
-            comma();
-            space();
-            writeExprPolish(b.right(), indent + 1);
-            rbracket();
-        } else {
-            lbracket();
-            write(op);
-            comma();
-            newLine();
-            indentTree(indent + 2);
-            writeExprPolish(b.left(), indent + 1);
-            comma();
-            newLine();
-            indentTree(indent + 2);
-            writeExprPolish(b.right(), indent + 1);
-            newLine();
-            indentTree(indent + 1);
-            rbracket();
-        }
-        return;
+  }
+
+  private void writeUnaryExpr(Unary u, int indent) throws IOException {
+    writeTypeNode(Unary.class);
+    writeKey("op", indent, false);
+    write(u.op().toString());
+    writeKey("expr", indent, true);
+    writeExpr(u.expr(), indent + 1);
+  }
+
+  private void writeBinaryExpr(Binary b, int indent) throws IOException {
+    writeTypeNode(Binary.class);
+    writeKey("op", indent, false);
+    write(b.op().toString());
+    writeKey("left", indent, false);
+    writeExpr(b.left(), indent + 1);
+    writeKey("right", indent, true);
+    writeExpr(b.right(), indent + 1);
+  }
+
+  private void writeValue(AnyV v, int indent) throws IOException {
+    if (v == null) { nil(); return; }
+    switch (v) {
+      case Literal l -> writeLiteral(l, indent);
+      case ListV l -> writeListV(l, indent);
+      case MapV m -> writeMapV(m, indent);
+      default -> write(v.toString());
     }
-    if (e instanceof Literal<?, ?> l) {
-        write(valToString(l));
-        return;
+  }
+
+  private void writeListV(ListV l, int indent) throws IOException {
+    writeTypeNode(ListV.class);
+    writeKey("values", indent, true);
+    forEach(l.values(), (v, i) -> writeValue(v, i), indent + 1);
+  }
+
+  private void writeMapV(MapV m, int indent) throws IOException {
+    writeTypeNode(MapV.class);
+    writeKey("entries", indent, true);
+    forEach(m.values(), (kv, i) -> writeMapEntry(kv, i + 1), indent + 1);
+  }
+
+  private void writeMapEntry(Map.Entry<Literal, AnyV> entry, int indent) throws IOException {
+    writeTypeNode(Map.Entry.class);
+    writeKey("key", indent, false);
+    writeValue(entry.getKey(), indent + 1);
+    writeKey("value", indent, true);
+    writeValue(entry.getValue(), indent + 1);
+  }
+
+  private void writeLiteral(Literal v, int indent) throws IOException {
+    if (v == null) { nil(); return; }
+
+    writeTypeNode(v.getClass());
+    writeKey("value", indent, true);
+
+    if (v.value() == null) { nil(); return; }
+
+    switch (v) {
+      case NullV __ -> write("NULL");
+      case BoolV b -> write(Boolean.toString(b.value()));
+      case StringV s -> writeSq(s.value());
+      case CharV f -> { writeSq(f.value()); }
+      case BytesV b -> { write("0x"); writeBytesToHex(b.value()); }
+      case FixedV f -> { write("0x"); writeBytesToHex(f.value()); }
+      case UuidV u -> write(u.value().toString());
+      case Int8V i -> { write(i.value().toString()); }
+      case Int16V i -> { write(i.value().toString()); }
+      case Int32V i -> write(i.value().toString());
+      case Int64V i -> { write(i.value().toString()); }
+      case Float32V f -> { write(f.value().toString()); }
+      case Float64V f -> write(f.value().toString());
+      case DecimalV d -> { write(d.value().toString()); }
+      case DateV d -> { write(d.value().toString()); }
+      case TimeV t -> { write(t.value().toString()); }
+      case TimestampV t -> { write(t.value().toString()); }
+      case TimestampTzV t -> { write(t.value().toString()); }
+      default -> write(v.toString());
     }
-    write("NULL");
   }
 
   // Utility for forEach with last-element detection
@@ -600,17 +527,50 @@ public final class AstPrinter extends Printer {
     void each(T t, int indent) throws IOException;
   }
 
+  private interface BiForEach<K, V> {
+    void each(Map.Entry<K, V> entry, int indent) throws IOException;
+  }
+
+  private interface IfPresent<T> {
+    void value(T t, int indent) throws IOException;
+
+  }
+
   private <T> void forEach(List<T> xs, ForEach<T> fn, int indent) throws IOException {
     int size = xs.size();
     if (size == 0) {
-      write("<empty>");
+      empty();
     }
     else {
       int last = size - 1;
       for (int i = 0; i < size; i++) {
         branch(indent, i == last);
-        fn.each(xs.get(i), indent);
+        fn.each(xs.get(i), indent + 1);
       }
+    }
+  }
+
+private <K, V> void forEach(Map<K, V> map, BiForEach<K, V> fn, int indent) throws IOException {
+    int size = map.size();
+    if (size == 0) {
+      empty();
+    }
+    else {
+      int last = size - 1;
+      int i = 0;
+      for (Map.Entry<K, V> entry : map.entrySet()) {
+        branch(indent, i == last);
+        fn.each(entry, indent + 1);
+        i++;
+      }
+    }
+  }
+
+  private <T> void writeOptional(Optional<T> optional, IfPresent<T> ifPresent, int indent) throws IOException {
+    if (optional.isPresent()) {
+      ifPresent.value(optional.get(), indent + 1);
+    } else {
+      nil();
     }
   }
 }

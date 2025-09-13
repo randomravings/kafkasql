@@ -20,6 +20,7 @@ public class Main {
     System.out.println("  -t, --text          Inline script (consumes all remaining args)");
     System.out.println("  -n, --no-include    Disable INCLUDE resolution");
     System.out.println("  -a, --print-ast     Print AST if parse succeeds");
+    System.out.println("  -T, --trace         Enable parser trace output");
     System.out.println("  -h, --help          Show this help");
   }
 
@@ -27,6 +28,7 @@ public class Main {
     Path workingDir = null;
     boolean printAst = false;
     boolean resolveIncludes = true;
+    boolean trace = false;
     String inlineText = null;
     List<Path> fileArgs = new ArrayList<>();
 
@@ -45,6 +47,7 @@ public class Main {
         }
         case "-n", "--no-include" -> resolveIncludes = false;
         case "-a", "--print-ast" -> printAst = true;
+        case "-T", "--trace" -> trace = true;
         case "-t", "--text" -> {
           if (inlineText != null) { err("--text/-t specified multiple times"); return; }
           if (++i >= args.length) { err("missing inline script after --text/-t"); return; }
@@ -67,6 +70,11 @@ public class Main {
           }
         }
       }
+    }
+
+    if (trace) {
+      // make trace flag available globally as well (keeps compatibility)
+      System.setProperty("kafkasql.trace", "true");
     }
 
     if (inlineText != null && !fileArgs.isEmpty()) {
@@ -97,18 +105,21 @@ public class Main {
       System.exit(2);
     }
 
+    // catalog still created for later phases (validation, etc.)
     var catalog = new Catalog();
 
     boolean anyErrors = false;
 
+    // Build ParseArgs and pass to ParseHelpers
+    ParseArgs parseArgs = new ParseArgs(resolveIncludes, trace);
+
     if (inlineText != null) {
       System.out.println("==> (inline)");
-      var pr = ParseHelpers.parse(catalog, inlineText);
-      var diags = getDiagnostics(pr);
-      if (!diags.errors().isEmpty()) {
+      var pr = ParseHelpers.parse(parseArgs, inlineText);
+      if (!pr.diags().errors().isEmpty()) {
         anyErrors = true;
         System.out.println("Errors:");
-        diags.errors().forEach(e -> System.out.println(" - " + e));
+        pr.diags().errors().forEach(e -> System.out.println(" - " + e));
       } else if (printAst) {
         printAst(pr.stmts());
       }
@@ -121,34 +132,24 @@ public class Main {
         return p;
       }).toList();
 
-      var pr = ParseHelpers.parseFiles(catalog, resolveIncludes, wd,
-        fileArgs.toArray(Path[]::new));
-      var diags = getDiagnostics(pr);
-      if (!diags.errors().isEmpty()) {
+      var pr = ParseHelpers.parseFiles(wd, fileArgs, parseArgs);
+      if (pr.diags().hasErrors()) {
         anyErrors = true;
-        System.out.println("Errors:");
-        diags.errors().forEach(e -> System.out.println(" - " + e));
+        System.out.println("Syntax errors:");
+        pr.diags().errors().forEach(e -> System.out.println(" - " + e));
+      }
+
+      var vr = ParseHelpers.validate(catalog, pr.stmts());
+      if (vr.diags().hasErrors()) {
+        anyErrors = true;
+        System.out.println("Validation errors:");
+        vr.diags().errors().forEach(e -> System.out.println(" - " + e));
       } else if (printAst) {
-        printAst(pr.stmts());
+        printAst(vr.stmts());
       }
     }
 
     if (anyErrors) System.exit(1);
-  }
-
-  // Helpers to adapt to possible naming differences
-  private static Diagnostics getDiagnostics(Object pr) {
-    try {
-      return (Diagnostics) pr.getClass().getMethod("diags").invoke(pr);
-    } catch (NoSuchMethodException e) {
-      try {
-        return (Diagnostics) pr.getClass().getMethod("diagnostics").invoke(pr);
-      } catch (Exception ex) {
-        throw new RuntimeException("ParseResult missing diags()/diagnostics()", ex);
-      }
-    } catch (Exception e) {
-      throw new RuntimeException(e);
-    }
   }
 
   private static void printAst(List<Stmt> stmts) throws IOException {

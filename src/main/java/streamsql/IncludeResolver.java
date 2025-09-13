@@ -16,7 +16,7 @@ public final class IncludeResolver {
     Result(List<Path> ordered) { this.orderedFiles = ordered; }
   }
 
-  public static Result resolve(Diagnostics diags, Path workingDir, Path... roots) {
+  public static Result resolve(Diagnostics diags, Path workingDir, List<Path> roots) {
     if (workingDir == null) workingDir = Paths.get(".");
     workingDir = workingDir.toAbsolutePath().normalize();
 

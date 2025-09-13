@@ -25,7 +25,7 @@ public class CollectingErrorListener extends BaseErrorListener {
                 int charPositionInLine,
                 String msg,
                 RecognitionException e) {
-    diagnostics.error("Syntax | src: " + source + ", ln: " + line + ", col: " + charPositionInLine + " | Symbol: " + offendingSymbol + " | Message: " + msg);
+    diagnostics.error("Syntax | src: " + source + ", ln: " + line + ", col: " + (charPositionInLine + 1) + " | Symbol: " + offendingSymbol + " | Message: " + msg);
   }
 
 	@Override

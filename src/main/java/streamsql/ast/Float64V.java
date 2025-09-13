@@ -1,9 +1,7 @@
 package streamsql.ast;
 
-public final class Float64V implements Numeric<Float64V, Double> {
-    private final double value;
-    public Float64V(double value) { this.value = value; }
-    public double value() { return value; }
+@SuppressWarnings("unchecked")
+public final record Float64V(Double value) implements FractionalV {
     public Float64V add(Float64V other) { return new Float64V(this.value + other.value); }
     public Float64V subtract(Float64V other) { return new Float64V(this.value - other.value); }
     public Float64V multiply(Float64V other) { return new Float64V(this.value * other.value); }

@@ -23,6 +23,7 @@ OPTIONAL      : [Oo][Pp][Tt][Ii][Oo][Nn][Aa][Ll] ;
 VALUES        : [Vv][Aa][Ll][Uu][Ee][Ss] ;
 OR            : [Oo][Rr] ;
 AND           : [Aa][Nn][Dd] ;
+XOR           : [Xx][Oo][Rr] ;
 IS            : [Ii][Ss] ;
 NOT           : [Nn][Oo][Tt] ;
 DEFAULT       : [Dd][Ee][Ff][Aa][Uu][Ll][Tt] ;
@@ -31,20 +32,16 @@ FALSE         : [Ff][Aa][Ll][Ss][Ee] ;
 NULL          : [Nn][Uu][Ll][Ll] ;
 BOOL          : [Bb][Oo][Oo][Ll] ;
 INT8          : [Ii][Nn][Tt] '8' ;
-UINT8         : [Uu][Ii][Nn][Tt] '8' ;
 INT16         : [Ii][Nn][Tt] '16' ;
-UINT16        : [Uu][Ii][Nn][Tt] '16' ;
 INT32         : [Ii][Nn][Tt] '32' ;
-UINT32        : [Uu][Ii][Nn][Tt] '32' ;
 INT64         : [Ii][Nn][Tt] '64' ;
-UINT64        : [Uu][Ii][Nn][Tt] '64' ;
 FLOAT32       : [Ff][Ll][Oo][Tt] '32' ;
 FLOAT64       : [Ff][Ll][Oo][Tt] '64' ;
 DECIMAL       : [Dd][Ee][Cc][Ii][Mm][Aa][Ll] ;
 STRING        : [Ss][Tt][Rr][Ii][Nn][Gg] ;
-FSTRING       : [Ff][Ss][Tt][Rr][Ii][Nn][Gg] ;
+CHAR          : [Cc][Hh][Aa][Rr] ;
 BYTES         : [Bb][Yy][Tt][Ee][Ss] ;
-FBYTES        : [Ff][Bb][Yy][Tt][Ee][Ss] ;
+FIXED         : [Ff][Ii][Xx][Ee][Dd] ;
 UUID          : [Uu][Uu][Ii][Dd] ;
 DATE          : [Dd][Aa][Tt][Ee] ;
 TIME          : [Tt][Ii][Mm][Ee] ;
@@ -54,6 +51,11 @@ LIST          : [Ll][Ii][Ss][Tt] ;
 MAP           : [Mm][Aa][Pp] ;
 DISTRIBUTE    : [Dd][Ii][Ss][Tt][Rr][Ii][Bb][Uu][Tt][Ee] ;
 BY            : [Bb][Yy] ;
+BETWEEN       : [Bb][Ee][Tt][Ww][Ee][Ee][Nn] ;
+IN            : [Ii][Nn] ;
+OF            : [Oo][Ff] ;
+MASK          : [Mm][Aa][Ss][Kk] ;
+CHECK         : [Cc][Hh][Ee][Cc][Kk] ;
 
 // Punctuation / operators
 STAR          : '*' ;
@@ -64,53 +66,34 @@ LPAREN        : '(' ;
 RPAREN        : ')' ;
 LBRACK        : '[' ;
 RBRACK        : ']' ;
+LBRACE        : '{' ;
+RBRACE        : '}' ;
 LT            : '<' ;
 GT            : '>' ;
 EQ            : '=' ;
-NEQ           : '!=' | '<>' ;
+NEQ           : '<>' ;
 LTE           : '<=' ;
 GTE           : '>=' ;
 SEMI          : ';' ;
+PLUS          : '+' ;
+MINUS         : '-' ;
+SLASH         : '/' ;
+PERCENT       : '%' ;
+AMP           : '&' ;
+PIPE          : '|' ;
+CARET         : '^' ;
+TILDE         : '~' ;
+SHL           : '<<' ;
+SHR           : '>>' ;
 
 
 
 // Literals / identifiers
-INT8_V          : '-'? [0-9]+ 'y';
-UINT8_V         : [0-9]+ 'uy' ;
-INT16_V         : '-'? [0-9]+ 's' ;
-UINT16_V        : [0-9]+ 'us' ;
-INT32_V         : '-'? [0-9]+ 'i'? ;
-UINT32_V        : [0-9]+ 'u' ;
-INT64_V         : '-'? [0-9]+ 'l' ;
-UINT64_V        : [0-9]+ 'ul' ;
-FLOAT32_V       : '-'? [0-9]+ ('.' [0-9]+)? ([eE] [+-]? [0-9]+)? 'f' ;
-FLOAT64_V       : '-'? [0-9]+ ('.' [0-9]+)? ([eE] [+-]? [0-9]+)? 'd'? ;
-DECIMAL_V       : '-'? [0-9]+ ('.' [0-9]+)? 'm' ;
-STRING_V        : '\'' ( ~[\r\n'] | '\'\'' )* '\'' ;
-FSTRING_V       : '\'' ( ~[\r\n'] | '\'\'' )* '\'!' ;
-BYTES_V         : [0][xX][0-9a-fA-F]+ ;
-FBYTES_V        : [0][xX][0-9a-fA-F]+ '!';
-UUID_V          : 'id\'' HEX8 '-' HEX4 '-' HEX4 '-' HEX4 '-' HEX12 '\'' ;
-DATE_V          : 'dt\'' DEC4 '-' DEC2 '-' DEC2 '\'' ;
-TIME_V          : 'tm\'' YEAR ':' MONTH ':' DAY ('.' FRACTION)? '\'' ;
-TIMESTAMP_V     : 'ts\'' YEAR '-' MONTH '-' DAY 'T' HOUR ':' MINUTE ':' SECOND ('.' FRACTION)? 'Z' '\'' ;
-TIMESTAMP_TZ_V  : 'tz\'' YEAR '-' MONTH '-' DAY 'T' HOUR ':' MINUTE ':' SECOND ('.' FRACTION)? ([+-] HOUR ':' MINUTE) '\'' ;
+INTEGER_LIT     : '-'? [0-9]+ ;
+NUMBER_LIT      : '-'? [0-9]+ '.' ([0-9]+ | [eE] [+-]? [0-9]+)? ;
+STRING_LIT      : '\'' ( ~[\r\n'] | '\'\'' )* '\'' ;
+BYTES_LIT       : [0][xX][0-9a-fA-F]+ ;
 ID              : [a-zA-Z] [a-zA-Z0-9_]* ;
-
-fragment HEX12     : HEX8 HEX4 ;
-fragment HEX8      : HEX4 HEX4 ;
-fragment HEX4      : HEX HEX HEX HEX ;
-fragment DEC4      : DEC2 DEC2 ;
-fragment DEC2      : DEC DEC ;
-fragment YEAR      : DEC4 ;
-fragment MONTH     : DEC2 ;
-fragment DAY       : DEC2 ;
-fragment HOUR      : DEC2 ;
-fragment MINUTE    : DEC2 ;
-fragment SECOND    : DEC2 ;
-fragment FRACTION  : DEC DEC? DEC? DEC? DEC? DEC? DEC? DEC? DEC? ;
-fragment DEC       : [0-9] ;
-fragment HEX       : [0-9a-fA-F] ;
 
 // Whitespace / comments (default mode)
 WS       : [ \t\r\n]+ -> skip ;
@@ -130,3 +113,4 @@ FILE_PATH
 
 fragment PATH_SEG : [a-zA-Z0-9_-]+ ;
 fragment FILE_EXT : [Ss][Qq][Ll][Ss] ;
+

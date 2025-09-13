@@ -1,7 +1,0 @@
-INCLUDE 'com/example/example.sqls';
-INCLUDE 'com/example/Foo.sqls';
-
-CREATE STRUCT Bar (
-    Id INT32,
-    Ref com.example.Foo
-);

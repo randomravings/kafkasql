@@ -21,8 +21,14 @@ filePath
 
 statement
   : useStmt
-  | dmlStmt
-  | ddlStmt
+  | readStmt
+  | writeStmt
+  | createContext
+  | createScalar
+  | createEnum
+  | createStruct
+  | createUnion
+  | createStream
   ;
 
 useStmt
@@ -31,11 +37,6 @@ useStmt
 
 useContext
   : USE CONTEXT qname
-  ;
-
-dmlStmt
-  : readStmt
-  | writeStmt
   ;
 
 readStmt
@@ -50,44 +51,28 @@ typeBlock
   : TYPE typeName projection whereClause?
   ;
 
-projection
-  : STAR
-  | fieldPath (COMMA fieldPath)*
-  ;
-
 whereClause
-  : WHERE booleanExpr
+  : WHERE expr
   ;
 
 writeStmt
   : WRITE TO streamName TYPE typeName
-    LPAREN fieldPathList RPAREN
+    LPAREN projection RPAREN
     VALUES tuple (COMMA tuple)*
   ;
 
-fieldPathList
-  : fieldPath (COMMA fieldPath)*
+projection
+  : STAR
+  | accessor (COMMA accessor)*
+  ;
+  
+accessor
+  : identifier (DOT accessor)?
+  | LBRACK literal RBRACK (DOT accessor)?
   ;
 
 tuple
-  : LPAREN literalOnlyList RPAREN
-  ;
-
-literalOnlyList
-  : literal (COMMA literal)*
-  ;
-
-ddlStmt
-  : createStmt
-  ;
-
-createStmt
-  : createContext
-  | createScalar
-  | createEnum
-  | createStruct
-  | createUnion
-  | createStream
+  : LPAREN literal (COMMA literal)* RPAREN
   ;
 
 createContext
@@ -96,15 +81,27 @@ createContext
 
 createScalar
   : CREATE SCALAR typeName AS primitiveType
+    (CHECK LPAREN expr RPAREN)?
+    (DEFAULT literal)?
   ;
 
 createEnum
   : CREATE ENUM typeName
+    (OF enumType)?
+    (AS MASK)?
     LPAREN enumSymbol (COMMA enumSymbol)* RPAREN
+    (DEFAULT identifier)?
+  ;
+
+enumType
+  : INT8
+  | INT16
+  | INT32
+  | INT64
   ;
 
 enumSymbol
-  : identifier EQ INT32_V
+  : identifier COLON INTEGER_LIT
   ;
 
 createStruct
@@ -126,7 +123,7 @@ fieldDef
   ;
 
 jsonString
-  : STRING_V
+  : STRING_LIT
   ;
 
 typeName
@@ -163,30 +160,26 @@ dataType
 primitiveType
   : BOOL
   | INT8
-  | UINT8
   | INT16
-  | UINT16
   | INT32
-  | UINT32
   | INT64
-  | UINT64
   | FLOAT32
   | FLOAT64
   | STRING
-  | FSTRING       LPAREN INT32_V RPAREN
+  | CHAR          LPAREN INTEGER_LIT RPAREN
   | BYTES
-  | FBYTES        LPAREN INT32_V RPAREN
+  | FIXED         LPAREN INTEGER_LIT RPAREN
   | UUID
   | DATE
-  | TIME          LPAREN INT32_V RPAREN
-  | TIMESTAMP     LPAREN INT32_V RPAREN
-  | TIMESTAMP_TZ  LPAREN INT32_V RPAREN
-  | DECIMAL       LPAREN INT32_V COMMA INT32_V RPAREN
+  | TIME          LPAREN INTEGER_LIT RPAREN
+  | TIMESTAMP     LPAREN INTEGER_LIT RPAREN
+  | TIMESTAMP_TZ  LPAREN INTEGER_LIT RPAREN
+  | DECIMAL       LPAREN INTEGER_LIT COMMA INTEGER_LIT RPAREN
   ;
 
 compositeType
-  : LIST LT dataType GT
-  | MAP  LT primitiveType COMMA dataType GT
+  : LIST LPAREN dataType RPAREN
+  | MAP  LPAREN primitiveType COMMA dataType RPAREN
   ;
 
 complexType
@@ -194,7 +187,8 @@ complexType
   ;
 
 /* ──────────────── Expressions (WHERE) ──────────────── */
-booleanExpr
+
+expr
   : orExpr
   ;
 
@@ -208,96 +202,59 @@ andExpr
 
 notExpr
   : NOT notExpr
-  | predicate
+  | cmpExpr
   ;
 
-predicate
-  : value cmpOp value                 # cmpPredicate
-  | value IS NULL                     # isNullPredicate
-  | value IS NOT NULL                 # isNotNullPredicate
-  | LPAREN booleanExpr RPAREN         # parenPredicate
+cmpExpr
+  : addExpr ((EQ | NEQ | GT | LT | GTE | LTE) addExpr
+           | IS NULL
+           | IS NOT NULL
+           | BETWEEN addExpr AND addExpr
+           | IN LPAREN literal (COMMA literal)* RPAREN
+           )*
   ;
 
-value
-  : literal
-  | fieldPath
+addExpr
+  : mulExpr ((PLUS | MINUS) mulExpr)*
   ;
 
-fieldPath
-  : identifier fieldPathSeg*
+mulExpr
+  : unaryExpr ((STAR | SLASH | PERCENT) unaryExpr)*
   ;
 
-fieldPathSeg
-  : DOT identifier
-  | LBRACK INT32_V RBRACK
-  | LBRACK STRING_V RBRACK
+unaryExpr
+  : MINUS unaryExpr
+  | LPAREN expr RPAREN
+  | literal
+  | accessor
   ;
 
 literal
-  : nullLiteral
-  | primitiveLiteral
-  ;
-
-nullLiteral
   : NULL
-  ;
-
-primitiveLiteral
-  : booleanLiteral
-  | numberLiteral
-  | characterLiteral
-  | uuidLiteral
-  | temporalLiteral
-  ;
-
-booleanLiteral
-  : TRUE
+  | TRUE
   | FALSE
+  | INTEGER_LIT
+  | NUMBER_LIT
+  | STRING_LIT
+  | BYTES_LIT
+  | listLiteral
+  | mapLiteral
   ;
 
-numberLiteral
-  : INT8_V
-  | UINT8_V
-  | INT16_V
-  | UINT16_V
-  | INT32_V
-  | UINT32_V
-  | INT64_V
-  | UINT64_V
-  | FLOAT32_V
-  | FLOAT64_V
-  | DECIMAL_V
+listLiteral
+  : LBRACK (literal (COMMA literal)*)? RBRACK
   ;
 
-characterLiteral
-  : STRING_V
-  | FSTRING_V
-  | BYTES_V
-  | FBYTES_V
+mapLiteral
+  : LBRACE (mapEntry (COMMA mapEntry)*)? RBRACE
   ;
 
-uuidLiteral
-  : UUID_V
-  ;
-
-temporalLiteral
-  : DATE_V
-  | TIME_V
-  | TIMESTAMP_V
-  | TIMESTAMP_TZ_V
-  ;
-
-cmpOp
-  : EQ
-  | NEQ
-  | LT
-  | LTE
-  | GT
-  | GTE
+mapEntry
+  : literal COLON literal
   ;
 
 qname
-  : (DOT)? identifier (DOT identifier)*
+  : identifier (DOT identifier)*
   ;
 
 identifier

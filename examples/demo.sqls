@@ -3,17 +3,18 @@ USE CONTEXT com;
 CREATE CONTEXT example;
 USE CONTEXT example;
 
-CREATE SCALAR Money AS DECIMAL(18,2);
-CREATE ENUM Status ( ACTIVE = 0, PENDING = 1, DISABLED = 4096 );
+CREATE SCALAR Money AS DECIMAL(18,2) CHECK (value >= 0) DEFAULT 0;
+
+CREATE ENUM Status ( ACTIVE: 0, PENDING: 1, DISABLED: 4096 ) DEFAULT DISABLED;
 
 CREATE STRUCT Address ( Street STRING, Zip STRING OPTIONAL );
 CREATE STRUCT Customer (
-  Id UInt64,
+  Id Int64,
   Name STRING,
   Email STRING OPTIONAL,
-  Tags LIST<STRING>,
-  Attrs MAP<STRING, STRING>,
-  Classification FSTRING(5)
+  Tags LIST(STRING),
+  Attrs MAP(STRING, STRING),
+  Classification CHAR(5)
 );
 
 CREATE UNION CustomerIdOrName (
@@ -22,9 +23,9 @@ CREATE UNION CustomerIdOrName (
 );
 
 CREATE LOG STREAM customers
-  TYPE ( Id UInt64, Name STRING, Email STRING OPTIONAL ) AS V1
+  TYPE ( Id Int64, Name STRING, Email STRING OPTIONAL ) AS CustomerV1
     DISTRIBUTE BY (Id, Name)
-  TYPE com.example.Customer AS V2;
+  TYPE com.example.Customer AS CustomerV2;
 
 READ FROM customers
 TYPE CustomerV1 * WHERE Name = 'Alice' AND Id > 0.5

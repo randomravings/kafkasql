@@ -1,3 +1,5 @@
 package streamsql.ast;
 
-public final record Field(Identifier name, DataType typ, boolean optional, String defaultJson) {}
+import java.util.Optional;
+
+public final record Field(Identifier name, AnyT typ, BoolV optional, Optional<StringV> defaultValue) {}

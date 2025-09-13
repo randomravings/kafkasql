@@ -1,3 +1,3 @@
 package streamsql.ast;
 
-public record UnionAlt(Identifier name, DataType typ) {}
+public record UnionAlt(Identifier name, AnyT typ) {}

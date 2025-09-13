@@ -1,3 +1,3 @@
 package streamsql.ast;
 
-public record EnumSymbol(Identifier name, Int32V value) {}
+public record EnumSymbol(Identifier name, IntegerV value) {}

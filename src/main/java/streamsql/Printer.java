@@ -2,7 +2,6 @@ package streamsql;
 
 import java.io.Writer;
 import java.util.List;
-
 import streamsql.ast.Stmt;
 
 import java.io.IOException;
@@ -34,14 +33,33 @@ public abstract class Printer {
     public abstract void write(List<Stmt> stmts) throws IOException;
 
     protected void write(String s) throws IOException {
-        if (s == null)
-            out.write("<null>");
-        else
-            out.write(s);
+        out.write(s);
+    }
+
+    protected void write(char c) throws IOException {
+        out.write(c);
+    }
+
+    protected void write(long i) throws IOException {
+        out.write(Long.toString(i));
+    }
+
+    protected void nil() throws IOException {
+        write("<nil>");
+    }
+
+    protected void empty() throws IOException {
+        write("<empty>");
     }
 
     protected void write(boolean b) throws IOException {
-        out.write(Boolean.toString(b));
+        write(Boolean.toString(b));
+    }
+
+    public void writeSq(String s) throws IOException {
+        write("'");
+        write(s);
+        write("'");
     }
 
     protected void space() throws IOException {
@@ -113,9 +131,5 @@ public abstract class Printer {
             write(sep);
             write(ss[i]);
         }
-    }
-
-    protected <T> void writeType(Class<T> clazz) throws IOException {
-        write(clazz.getSimpleName());
     }
 }

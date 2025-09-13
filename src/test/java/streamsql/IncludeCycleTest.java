@@ -33,7 +33,7 @@ public class IncludeCycleTest {
 
       Diagnostics diags = new Diagnostics();
       IncludeResolver.Result res =
-        IncludeResolver.resolve(diags, wd, wd.resolve("com/example/Foo.sqls"));
+        IncludeResolver.resolve(diags, wd, List.of(wd.resolve("com/example/Foo.sqls")));
 
       assertTrue(diags.hasErrors(), "Should report a cycle");
       String all = String.join("\n", diags.errors());
@@ -60,7 +60,7 @@ public class IncludeCycleTest {
 
       Diagnostics diags = new Diagnostics();
       IncludeResolver.Result res =
-        IncludeResolver.resolve(diags, wd, wd.resolve("com/example/A.sqls"));
+        IncludeResolver.resolve(diags, wd, List.of(wd.resolve("com/example/A.sqls")));
 
       assertFalse(diags.hasErrors(), "No cycle expected");
       assertEquals(List.of(c.toAbsolutePath().normalize(),

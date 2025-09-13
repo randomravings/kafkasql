@@ -1,5 +1,3 @@
 package streamsql.ast;
 
-public sealed interface CompositeType extends DataType permits Composite.List, Composite.Map {
-
-}
+public sealed interface CompositeType extends AnyT permits ListT, MapT { }

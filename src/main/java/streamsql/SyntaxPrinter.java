@@ -6,18 +6,19 @@ import java.util.List;
 
 import streamsql.ast.BoolT;
 import streamsql.ast.BytesT;
-import streamsql.ast.Composite;
-import streamsql.ast.DataType;
+import streamsql.ast.AnyT;
 import streamsql.ast.DateT;
 import streamsql.ast.DecimalT;
-import streamsql.ast.FBytesT;
-import streamsql.ast.FStringT;
+import streamsql.ast.FixedT;
+import streamsql.ast.CharT;
 import streamsql.ast.Float32T;
 import streamsql.ast.Float64T;
 import streamsql.ast.Int16T;
 import streamsql.ast.Int32T;
 import streamsql.ast.Int64T;
 import streamsql.ast.Int8T;
+import streamsql.ast.ListT;
+import streamsql.ast.MapT;
 import streamsql.ast.PrimitiveType;
 import streamsql.ast.Stmt;
 import streamsql.ast.StringT;
@@ -25,10 +26,6 @@ import streamsql.ast.TimeT;
 import streamsql.ast.TimestampT;
 import streamsql.ast.TimestampTzT;
 import streamsql.ast.TypeRef;
-import streamsql.ast.UInt16T;
-import streamsql.ast.UInt32T;
-import streamsql.ast.UInt64T;
-import streamsql.ast.UInt8T;
 import streamsql.ast.UuidT;
 
 public final class SyntaxPrinter extends Printer {
@@ -41,12 +38,12 @@ public final class SyntaxPrinter extends Printer {
   }
 
   // Helpers for DataType, Path, Value, Expr
-  private static String dataTypeToString(DataType t) {
+  private static String dataTypeToString(AnyT t) {
     if (t instanceof PrimitiveType p)
       return typeToString(p);
-    if (t instanceof Composite.List l)
+    if (t instanceof ListT l)
       return "LIST<" + dataTypeToString(l.item()) + ">";
-    if (t instanceof Composite.Map m)
+    if (t instanceof MapT m)
       return "MAP<" + typeToString(m.key()) + ", " + dataTypeToString(m.value()) + ">";
     if (t instanceof TypeRef r)
       return "REF " + r.qName().fullName();
@@ -57,19 +54,15 @@ public final class SyntaxPrinter extends Printer {
     return switch (p) {
       case BoolT __ -> "BOOL";
       case Int8T __ -> "INT8";
-      case UInt8T __ -> "UINT8";
       case Int16T __ -> "INT16";
-      case UInt16T __ -> "UINT16";
       case Int32T __ -> "INT32";
-      case UInt32T __ -> "UINT32";
       case Int64T __ -> "INT64";
-      case UInt64T __ -> "UINT64";
-      case Float32T __ -> "SINGLE";
-      case Float64T __ -> "DOUBLE";
+      case Float32T __ -> "FLOAT32";
+      case Float64T __ -> "FLOAT64";
       case StringT __ -> "STRING";
-      case FStringT f -> "FSTRING(" + f.size() + ")";
+      case CharT f -> "CHAR(" + f.size() + ")";
       case BytesT __ -> "BYTES";
-      case FBytesT f -> "FBYTES(" + f.size() + ")";
+      case FixedT f -> "FIXED(" + f.size() + ")";
       case UuidT __ -> "UUID";
       case DateT __ -> "DATE";
       case TimeT t -> "TIME(" + t.precision() + ")";

@@ -9,6 +9,17 @@ public enum BinaryOp {
     GTE,
     AND,
     OR,
+    XOR,
+    IN,
     IS_NULL,
-    IS_NOT_NULL
+    IS_NOT_NULL,
+    MUL,
+    DIV,
+    MOD,
+    ADD,
+    SUB,
+    BITAND,
+    BITOR,
+    SHL,
+    SHR
 }
