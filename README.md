@@ -96,7 +96,7 @@ USE CONTEXT .com            -- Set the current context to 'com' since '.' means 
 
 Thoughs here could be to add some permission sets or rules that are inherited.
 
-### Scalars (Type)
+### Scalars
 
 Scalars are intended for strongly typed primitive types that can have validation and default value.
 
@@ -245,10 +245,131 @@ TYPE com.example.User AS UserB
 DISTRIBUTE BY (Id);
 ```
 
+## Parser (EBNF)
+
+```EBNF
+/* converted on Sat Sep 13, 2025, 21:07 (UTC+02) by antlr_3-to-w3c v0.73-SNAPSHOT which is Copyright (c) 2011-2025 by Gunther Rademacher <grd@gmx.net> */
+
+script   ::= includeSection? ( statement SEMI )+ EOF
+includeSection
+         ::= ( includePragma SEMI )+
+includePragma
+         ::= INCLUDE filePath
+filePath ::= FILE_PATH
+statement
+         ::= useStmt
+           | readStmt
+           | writeStmt
+           | createContext
+           | createScalar
+           | createEnum
+           | createStruct
+           | createUnion
+           | createStream
+useStmt  ::= useContext
+useContext
+         ::= USE CONTEXT DOT? qname
+readStmt ::= READ FROM streamName typeBlock+
+streamName
+         ::= qname
+typeBlock
+         ::= TYPE typeName projection whereClause?
+whereClause
+         ::= WHERE expr
+writeStmt
+         ::= WRITE TO streamName TYPE typeName LPAREN projection RPAREN VALUES tuple ( COMMA tuple )*
+projection
+         ::= STAR
+           | accessor ( COMMA accessor )*
+accessor ::= ( identifier | LBRACK literal RBRACK ) ( DOT ( identifier | LBRACK literal RBRACK ) )*
+tuple    ::= LPAREN literal ( COMMA literal )* RPAREN
+createContext
+         ::= CREATE CONTEXT identifier
+createScalar
+         ::= CREATE SCALAR typeName AS primitiveType ( CHECK LPAREN expr RPAREN )? ( DEFAULT literal )?
+createEnum
+         ::= CREATE ( ENUM | MASK ) typeName ( AS enumType )? LPAREN enumSymbol ( COMMA enumSymbol )* RPAREN ( DEFAULT identifier )?
+enumType ::= INT8
+           | INT16
+           | INT32
+           | INT64
+enumSymbol
+         ::= identifier COLON INTEGER_LIT
+createStruct
+         ::= CREATE STRUCT typeName LPAREN fieldDef ( COMMA fieldDef )* RPAREN
+createUnion
+         ::= CREATE UNION typeName LPAREN unionAlt ( COMMA unionAlt )* RPAREN
+unionAlt ::= identifier dataType
+fieldDef ::= identifier dataType OPTIONAL? ( DEFAULT jsonString )?
+jsonString
+         ::= STRING_LIT
+typeName ::= identifier
+createStream
+         ::= CREATE ( LOG | COMPACT ) STREAM identifier streamTypeDef+
+streamTypeDef
+         ::= TYPE ( inlineStruct | qname ) AS typeAlias distributionClause?
+distributionClause
+         ::= DISTRIBUTE BY LPAREN identifier ( COMMA identifier )* RPAREN
+inlineStruct
+         ::= LPAREN fieldDef ( COMMA fieldDef )* RPAREN
+typeAlias
+         ::= identifier
+dataType ::= primitiveType
+           | compositeType
+           | complexType
+primitiveType
+         ::= BOOL
+           | INT8
+           | INT16
+           | INT32
+           | INT64
+           | FLOAT32
+           | FLOAT64
+           | STRING
+           | ( ( CHAR | FIXED | TIME | TIMESTAMP | TIMESTAMP_TZ ) LPAREN | DECIMAL LPAREN INTEGER_LIT COMMA ) INTEGER_LIT RPAREN
+           | BYTES
+           | UUID
+           | DATE
+compositeType
+         ::= ( LIST LPAREN | MAP LPAREN primitiveType COMMA ) dataType RPAREN
+complexType
+         ::= qname
+expr     ::= orExpr
+orExpr   ::= andExpr ( OR andExpr )*
+andExpr  ::= notExpr ( AND notExpr )*
+notExpr  ::= NOT* cmpExpr
+cmpExpr  ::= addExpr ( ( EQ | NEQ | GT | LT | GTE | LTE | BETWEEN addExpr AND ) addExpr | IS NOT? NULL | IN LPAREN literal ( COMMA literal )* RPAREN )*
+addExpr  ::= mulExpr ( ( PLUS | MINUS ) mulExpr )*
+mulExpr  ::= unaryExpr ( ( STAR | SLASH | PERCENT ) unaryExpr )*
+unaryExpr
+         ::= MINUS* ( LPAREN expr RPAREN | literal | accessor )
+literal  ::= NULL
+           | TRUE
+           | FALSE
+           | INTEGER_LIT
+           | NUMBER_LIT
+           | STRING_LIT
+           | BYTES_LIT
+           | listLiteral
+           | mapLiteral
+listLiteral
+         ::= LBRACK ( literal ( COMMA literal )* )? RBRACK
+mapLiteral
+         ::= LBRACE ( mapEntry ( COMMA mapEntry )* )? RBRACE
+mapEntry ::= literal COLON literal
+qname    ::= identifier ( DOT identifier )*
+identifier
+         ::= ID
+
+<?TOKENS?>
+
+EOF      ::= $
+```
+
 ## Lexer (EBNF)
 
 ```EBNF
-/* converted on Sat Sep 13, 2025, 17:59 (UTC+02) by antlr_4-to-w3c v0.73-SNAPSHOT which is Copyright (c) 2011-2025 by Gunther Rademacher <grd@gmx.net> */
+/* converted on Sat Sep 13, 2025, 21:06 (UTC+02) by antlr_4-to-w3c v0.73-SNAPSHOT which is Copyright (c) 2011-2025 by Gunther Rademacher <grd@gmx.net> */
 
 _        ::= WS
            | COMMENT
@@ -332,125 +453,3 @@ FILE_PATH
 PATH_SEG ::= [a-zA-Z0-9_#x2D]+
 FILE_EXT ::= [Ss] [Qq] [Ll] [Ss]
 ```
-
-## Parser (EBNF)
-
-```EBNF
-/* converted on Sat Sep 13, 2025, 18:01 (UTC+02) by antlr_3-to-w3c v0.73-SNAPSHOT which is Copyright (c) 2011-2025 by Gunther Rademacher <grd@gmx.net> */
-
-script   ::= includeSection? ( statement SEMI )+ EOF
-includeSection
-         ::= ( includePragma SEMI )+
-includePragma
-         ::= INCLUDE filePath
-filePath ::= FILE_PATH
-statement
-         ::= useStmt
-           | readStmt
-           | writeStmt
-           | createContext
-           | createScalar
-           | createEnum
-           | createStruct
-           | createUnion
-           | createStream
-useStmt  ::= useContext
-useContext
-         ::= USE CONTEXT qname
-readStmt ::= READ FROM streamName typeBlock+
-streamName
-         ::= qname
-typeBlock
-         ::= TYPE typeName projection whereClause?
-whereClause
-         ::= WHERE expr
-writeStmt
-         ::= WRITE TO streamName TYPE typeName LPAREN projection RPAREN VALUES tuple ( COMMA tuple )*
-projection
-         ::= STAR
-           | accessor ( COMMA accessor )*
-accessor ::= ( identifier | LBRACK literal RBRACK ) ( DOT ( identifier | LBRACK literal RBRACK ) )*
-tuple    ::= LPAREN literal ( COMMA literal )* RPAREN
-createContext
-         ::= CREATE CONTEXT identifier
-createScalar
-         ::= CREATE SCALAR typeName AS primitiveType ( CHECK LPAREN expr RPAREN )? ( DEFAULT literal )?
-createEnum
-         ::= CREATE ENUM typeName ( OF enumType )? ( AS MASK )? LPAREN enumSymbol ( COMMA enumSymbol )* RPAREN ( DEFAULT identifier )?
-enumType ::= INT8
-           | INT16
-           | INT32
-           | INT64
-enumSymbol
-         ::= identifier COLON INTEGER_LIT
-createStruct
-         ::= CREATE STRUCT typeName LPAREN fieldDef ( COMMA fieldDef )* RPAREN
-createUnion
-         ::= CREATE UNION typeName LPAREN unionAlt ( COMMA unionAlt )* RPAREN
-unionAlt ::= identifier dataType
-fieldDef ::= identifier dataType OPTIONAL? ( DEFAULT jsonString )?
-jsonString
-         ::= STRING_LIT
-typeName ::= identifier
-createStream
-         ::= CREATE ( LOG | COMPACT ) STREAM identifier streamTypeDef+
-streamTypeDef
-         ::= TYPE ( inlineStruct | qname ) AS typeAlias distributionClause?
-distributionClause
-         ::= DISTRIBUTE BY LPAREN identifier ( COMMA identifier )* RPAREN
-inlineStruct
-         ::= LPAREN fieldDef ( COMMA fieldDef )* RPAREN
-typeAlias
-         ::= identifier
-dataType ::= primitiveType
-           | compositeType
-           | complexType
-primitiveType
-         ::= BOOL
-           | INT8
-           | INT16
-           | INT32
-           | INT64
-           | FLOAT32
-           | FLOAT64
-           | STRING
-           | ( ( CHAR | FIXED | TIME | TIMESTAMP | TIMESTAMP_TZ ) LPAREN | DECIMAL LPAREN INTEGER_LIT COMMA ) INTEGER_LIT RPAREN
-           | BYTES
-           | UUID
-           | DATE
-compositeType
-         ::= ( LIST LPAREN | MAP LPAREN primitiveType COMMA ) dataType RPAREN
-complexType
-         ::= qname
-expr     ::= orExpr
-orExpr   ::= andExpr ( OR andExpr )*
-andExpr  ::= notExpr ( AND notExpr )*
-notExpr  ::= NOT* cmpExpr
-cmpExpr  ::= addExpr ( ( EQ | NEQ | GT | LT | GTE | LTE | BETWEEN addExpr AND ) addExpr | IS NOT? NULL | IN LPAREN literal ( COMMA literal )* RPAREN )*
-addExpr  ::= mulExpr ( ( PLUS | MINUS ) mulExpr )*
-mulExpr  ::= unaryExpr ( ( STAR | SLASH | PERCENT ) unaryExpr )*
-unaryExpr
-         ::= MINUS* ( LPAREN expr RPAREN | literal | accessor )
-literal  ::= NULL
-           | TRUE
-           | FALSE
-           | INTEGER_LIT
-           | NUMBER_LIT
-           | STRING_LIT
-           | BYTES_LIT
-           | listLiteral
-           | mapLiteral
-listLiteral
-         ::= LBRACK ( literal ( COMMA literal )* )? RBRACK
-mapLiteral
-         ::= LBRACE ( mapEntry ( COMMA mapEntry )* )? RBRACE
-mapEntry ::= literal COLON literal
-qname    ::= identifier ( DOT identifier )*
-identifier
-         ::= ID
-
-<?TOKENS?>
-
-EOF      ::= $
-```
-
