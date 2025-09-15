@@ -2,6 +2,7 @@ package streamsql.ast;
 
 @SuppressWarnings("unchecked")
 public final record BytesV(byte[] value) implements BinaryV {
+    public AnyT type() { return BytesT.get(); }
     public BytesV concat(BytesV other) {
         byte[] newValue = new byte[this.value.length + other.value.length];
         System.arraycopy(this.value, 0, newValue, 0, this.value.length);

@@ -8,10 +8,10 @@ public final class AstValidator {
   private AstValidator() {}
 
   public static void validate(List<Stmt> stmts, Catalog catalog) {
-    Map<String, Struct> structs = new HashMap<>();
+    Map<String, StructT> structs = new HashMap<>();
 
     for (Stmt s : stmts) {
-      if (s instanceof CreateType ct && ct.type() instanceof Struct st) {
+      if (s instanceof CreateType ct && ct.type() instanceof StructT st) {
         structs.put(st.qName().fullName(), st);
       }
     }

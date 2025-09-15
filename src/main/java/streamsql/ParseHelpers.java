@@ -9,7 +9,7 @@ import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 
 import streamsql.ast.Stmt;
-import streamsql.parse.SqlStreamLexer;
+import streamsql.lex.SqlStreamLexer;
 import streamsql.parse.SqlStreamParser;
 
 public class ParseHelpers {

@@ -1,4 +1,4 @@
 package streamsql.ast;
 
-public sealed interface NumberT extends PrimitiveType
+public sealed interface NumberT extends PrimitiveT
     permits IntegerT, FractionalT {  }

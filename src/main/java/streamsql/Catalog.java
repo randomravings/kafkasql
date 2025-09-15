@@ -4,7 +4,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import streamsql.ast.*;
-import streamsql.ast.Enum;
+import streamsql.ast.EnumT;
 
 public final class Catalog {
   private final Map<String, Object> table = new HashMap<>();
@@ -16,10 +16,10 @@ public final class Catalog {
   public Boolean containsKey(QName fqn) { return table.containsKey(fqn.fullName()); }
 
   public Boolean put(Context ctx) { return put(ctx.qName(), ctx); }
-  public Boolean put(Struct type) { return put(type.qName(), type); }
-  public Boolean put(Enum type) { return put(type.qName(), type); }
-  public Boolean put(Union type) { return put(type.qName(), type); }
-  public Boolean put(Scalar type) { return put(type.qName(), type); }
+  public Boolean put(StructT type) { return put(type.qName(), type); }
+  public Boolean put(EnumT type) { return put(type.qName(), type); }
+  public Boolean put(UnionT type) { return put(type.qName(), type); }
+  public Boolean put(ScalarT type) { return put(type.qName(), type); }
   public Boolean put(DataStream stream) { return put(stream.qName(), stream); }
 
   private Boolean put(QName key, Object value) {
@@ -29,21 +29,21 @@ public final class Catalog {
   }
 
   public List<Object> all() { return new ArrayList<>(table.values()); }
-  public List<ComplexType> allTypes() { return allT(ComplexType.class); }
+  public List<ComplexT> allTypes() { return allT(ComplexT.class); }
   public List<Context> allContexts() { return allT(Context.class); }
-  public List<Struct> allStructs() { return allT(Struct.class); }
-  public List<Enum> allEnums() { return allT(Enum.class); }
-  public List<Union> allUnions() { return allT(Union.class); }
-  public List<Scalar> allScalars() { return allT(Scalar.class); }
+  public List<StructT> allStructs() { return allT(StructT.class); }
+  public List<EnumT> allEnums() { return allT(EnumT.class); }
+  public List<UnionT> allUnions() { return allT(UnionT.class); }
+  public List<ScalarT> allScalars() { return allT(ScalarT.class); }
   public List<DataStream> allStreams() { return allT(DataStream.class); }
   
   public Optional<Object> get(String fqn) { return Optional.ofNullable(table.get(fqn)); }
-  public Optional<ComplexType> getType (QName fqn){ return getT(fqn, ComplexType.class); }
+  public Optional<ComplexT> getType (QName fqn){ return getT(fqn, ComplexT.class); }
   public Optional<Context> getContext (QName fqn){ return getT(fqn, Context.class); }
-  public Optional<Struct> getStruct (QName fqn){ return getT(fqn, Struct.class); }
-  public Optional<Enum> getEnum (QName fqn){ return getT(fqn, Enum.class); }
-  public Optional<Union> getUnion (QName fqn){ return getT(fqn, Union.class); }
-  public Optional<Scalar> getScalar (QName fqn){ return getT(fqn, Scalar.class); }
+  public Optional<StructT> getStruct (QName fqn){ return getT(fqn, StructT.class); }
+  public Optional<EnumT> getEnum (QName fqn){ return getT(fqn, EnumT.class); }
+  public Optional<UnionT> getUnion (QName fqn){ return getT(fqn, UnionT.class); }
+  public Optional<ScalarT> getScalar (QName fqn){ return getT(fqn, ScalarT.class); }
   public Optional<DataStream> getStream (QName fqn){ return getT(fqn, DataStream.class); }
 
   private <T> Optional<T> getT(QName fqn, Class<T> clazz) {

@@ -1,16 +1,16 @@
 package streamsql;
 
 import streamsql.ast.*;
-import streamsql.ast.Enum;
+import streamsql.ast.EnumT;
 import streamsql.parse.SqlStreamParser;
-import streamsql.parse.SqlStreamBaseVisitor;
+import streamsql.parse.SqlStreamParserBaseVisitor;
 import org.antlr.v4.runtime.tree.TerminalNode;
 
 import java.util.*;
 
 import static java.util.stream.Collectors.toList;
 
-public class AstBuilder extends SqlStreamBaseVisitor<Object> {
+public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
 
   @Override
   public List<Stmt> visitScript(SqlStreamParser.ScriptContext ctx) {
@@ -57,10 +57,16 @@ public class AstBuilder extends SqlStreamBaseVisitor<Object> {
   public Stmt visitCreateScalar(SqlStreamParser.CreateScalarContext c) {
     Identifier name = visitIdentifier(c.typeName().identifier());
     QName qn = QName.of(name);
-    PrimitiveType pt = visitPrimitiveType(c.primitiveType());
+    PrimitiveT pt = visitPrimitiveType(c.primitiveType());
     Optional<Expr> validation = c.expr() != null ? Optional.of((Expr)visitExpr(c.expr())) : Optional.empty();
-    Optional<Literal> def = c.literal() != null ? Optional.of((Literal)visitLiteral(c.literal())) : Optional.empty();
-    return new CreateScalar(new Scalar(qn, pt, validation, def));
+    Optional<PrimitiveV> def;
+    if (c.literalValue() != null) {
+      PrimitiveV l = visitLiteralValue(c.literalValue());
+      def = Optional.of(l);
+    } else {
+      def = Optional.empty();
+    }
+    return new CreateScalar(new ScalarT(qn, pt, validation, def));
   }
 
   @Override
@@ -71,12 +77,12 @@ public class AstBuilder extends SqlStreamBaseVisitor<Object> {
     IntegerT enumType = (c.enumType() != null) ? visitEnumType(c.enumType()) : Int32T.get();
     List<EnumSymbol> symbols = c.enumSymbol().stream().map(this::visitEnumSymbol).collect(toList());
     Optional<Identifier> def = c.DEFAULT() != null ? Optional.of(visitIdentifier(c.identifier())) : Optional.empty();
-    return new CreateEnum(new Enum(qn, enumType, isMasked, symbols, def));
+    return new CreateEnum(new EnumT(qn, enumType, isMasked, symbols, def));
   }
 
   @Override
   public EnumSymbol visitEnumSymbol(SqlStreamParser.EnumSymbolContext c) {
-    Int64V value = integer(c.INTEGER_LIT());
+    Int64V value = int64(c.NUMBER_LIT());
     return new EnumSymbol(visitIdentifier(c.identifier()), value);
   }
 
@@ -94,7 +100,7 @@ public class AstBuilder extends SqlStreamBaseVisitor<Object> {
     Identifier name = visitIdentifier(c.typeName().identifier());
     QName qn = QName.of(name);
     List<Field> fs = c.fieldDef().stream().map(this::visitStructField).collect(toList());
-    return new CreateStruct(new Struct(qn, fs));
+    return new CreateStruct(new StructT(qn, fs));
   }
 
   @Override
@@ -104,11 +110,18 @@ public class AstBuilder extends SqlStreamBaseVisitor<Object> {
     List<UnionAlt> alts = c.unionAlt().stream()
         .map(a -> new UnionAlt(visitIdentifier(a.identifier()), visitDataType(a.dataType())))
         .collect(toList());
-    return new CreateUnion(new Union(qn, alts));
+    return new CreateUnion(new UnionT(qn, alts));
   }
 
   private Field visitStructField(SqlStreamParser.FieldDefContext f) {
-    Optional<StringV> def = f.jsonString() != null ? Optional.of(string(f.jsonString().STRING_LIT())) : Optional.empty();
+    // DEFAULT on a field may be any literal (including jsonLiteral). visitLiteral returns AnyV.
+    Optional<AnyV> def = Optional.empty();
+    if (f.DEFAULT() != null) {
+      if (f.literal() == null) {
+        throw new IllegalStateException("DEFAULT must be followed by a literal");
+      }
+      def = Optional.of((AnyV) visit(f.literal()));
+    }
     BoolV isOptional = f.OPTIONAL() != null ? new BoolV(true) : new BoolV(false);
     return new Field(visitIdentifier(f.identifier()), visitDataType(f.dataType()), isOptional, def);
   }
@@ -122,7 +135,7 @@ public class AstBuilder extends SqlStreamBaseVisitor<Object> {
   }
 
   @Override
-  public PrimitiveType visitPrimitiveType(SqlStreamParser.PrimitiveTypeContext p) {
+  public PrimitiveT visitPrimitiveType(SqlStreamParser.PrimitiveTypeContext p) {
     if (p.BOOL() != null) return BoolT.get();
     if (p.INT8() != null) return Int8T.get();
     if (p.INT16() != null) return Int16T.get();
@@ -130,27 +143,17 @@ public class AstBuilder extends SqlStreamBaseVisitor<Object> {
     if (p.INT64() != null) return Int64T.get();
     if (p.FLOAT32() != null) return Float32T.get();
     if (p.FLOAT64() != null) return Float64T.get();
-    if (p.DECIMAL() != null) return DecimalT.get(int8FromIntegerLit(p.INTEGER_LIT(0)), int8FromIntegerLit(p.INTEGER_LIT(1)));
+    if (p.DECIMAL() != null) return DecimalT.get(int8(p.NUMBER_LIT(0)), int8(p.NUMBER_LIT(1)));
     if (p.STRING() != null) return StringT.get();
-    if (p.CHAR() != null) return CharT.get(int32FromIntegerLit(p.INTEGER_LIT(0)));
+    if (p.CHAR() != null) return CharT.get(int32(p.NUMBER_LIT(0)));
     if (p.BYTES() != null) return BytesT.get();
-    if (p.FIXED() != null) return FixedT.get(int32FromIntegerLit(p.INTEGER_LIT(0)));
+    if (p.FIXED() != null) return FixedT.get(int32(p.NUMBER_LIT(0)));
     if (p.UUID() != null) return UuidT.get();
     if (p.DATE() != null) return DateT.get();
-    if (p.TIME() != null) return TimeT.get(int8FromIntegerLit(p.INTEGER_LIT(0)));
-    if (p.TIMESTAMP() != null) return TimestampT.get(int8FromIntegerLit(p.INTEGER_LIT(0)));
-    if (p.TIMESTAMP_TZ() != null) return TimestampTzT.get(int8FromIntegerLit(p.INTEGER_LIT(0)));
+    if (p.TIME() != null) return TimeT.get(int8(p.NUMBER_LIT(0)));
+    if (p.TIMESTAMP() != null) return TimestampT.get(int8(p.NUMBER_LIT(0)));
+    if (p.TIMESTAMP_TZ() != null) return TimestampTzT.get(int8(p.NUMBER_LIT(0)));
     throw new IllegalStateException("unknown primitive type");
-  }
-
-  private static Int32V int32FromIntegerLit(TerminalNode v) {
-    if (v == null) return new Int32V(0);
-    return new Int32V(Integer.parseInt(v.getText()));
-  }
-
-  private static Int8V int8FromIntegerLit(TerminalNode v) {
-    if (v == null) return new Int8V((byte) 0);
-    return new Int8V(Byte.parseByte(v.getText()));
   }
 
   @Override
@@ -159,7 +162,7 @@ public class AstBuilder extends SqlStreamBaseVisitor<Object> {
       AnyT item = visitDataType(c.dataType());
       return new ListT(item);
     } else {
-      PrimitiveType key = visitPrimitiveType(c.primitiveType());
+      PrimitiveT key = visitPrimitiveType(c.primitiveType());
       AnyT val = visitDataType(c.dataType());
       return new MapT(key, val);
     }
@@ -196,121 +199,128 @@ public class AstBuilder extends SqlStreamBaseVisitor<Object> {
     QName stream = typeRefQName(c.streamName().qname());
     List<ReadSelection> blocks = c.typeBlock().stream().map(tb -> {
       Identifier tn = visitIdentifier(tb.typeName().identifier());
-      Projection proj;
-      if (tb.projection().getStart().getType() == SqlStreamParser.STAR) {
-        proj = ProjectionAll.getInstance();
-      } else {
-        List<Accessor> items = tb.projection().accessor().stream().map(this::visitAccessor).collect(toList());
-        proj = new ProjectionList(items);
-      }
+      Projection proj = visitReadProjection(tb.readProjection());
       Optional<WhereClause> where = tb.whereClause() != null ? Optional.of(new WhereClause((Expr) visit(tb.whereClause().expr()))) : Optional.empty();
       return new ReadSelection(tn, proj, where);
     }).collect(toList());
     return new ReadStmt(stream, blocks);
   }
 
-  // -- WRITE --------------------------------------------------------------
   @Override
-  public Stmt visitWriteStmt(SqlStreamParser.WriteStmtContext c) {
-    QName stream = typeRefQName(c.streamName().qname());
-    Identifier typeName = visitIdentifier(c.typeName().identifier());
-
-    Projection proj;
-    if (c.projection().getStart().getType() == SqlStreamParser.STAR) {
-      proj = ProjectionAll.getInstance();
+  public Projection visitReadProjection(SqlStreamParser.ReadProjectionContext ctx) {
+    if (ctx.getStart().getType() == SqlStreamParser.STAR) {
+      return ProjectionAll.getInstance();
     } else {
-      List<Accessor> items = c.projection().accessor().stream().map(this::visitAccessor).collect(toList());
-      proj = new ProjectionList(items);
+      List<ProjectionExpr> items = new ArrayList<>();
+      ctx.readProjectionExpr().stream().map(this::visitReadProjectionExpr).forEach(items::add);
+      return new ProjectionList(items);
     }
-
-    List<ListV> rows = c.tuple().stream().map(t -> {
-      List<AnyV> values = t.literal().stream().map(l -> (AnyV) visit(l)).collect(toList());
-      return new ListV(values);
-    }).collect(toList());
-
-    var counts = rows.stream().map(row -> row.values().size()).distinct().count();
-    if(counts == 0) throw new IllegalArgumentException("No VALUES provided");
-    if(counts > 1) throw new IllegalArgumentException("VALUES arity mismatch");
-
-    return new WriteStmt(stream, typeName, proj, rows);
   }
 
   @Override
-  public Accessor visitAccessor(SqlStreamParser.AccessorContext ctx) {
-    // identifier form
-    if (ctx.identifier() != null) {
-      Identifier head = visitIdentifier(ctx.identifier());
-      if (ctx.accessor() == null) return head;
+  public ProjectionExpr visitReadProjectionExpr(SqlStreamParser.ReadProjectionExprContext ctx) {
+    Expr expr = visitExpr(ctx.expr());
+    Optional<Identifier> alias = ctx.identifier() != null ? Optional.of(visitIdentifier(ctx.identifier())) : Optional.empty();
+    return new ProjectionExpr(expr, alias);
+  }
 
-      Accessor tail = visitAccessor(ctx.accessor());
-      // recursive Segment: head + tail (tail itself may be Identifier, Indexer or Segment)
-      return new Segment(head, tail);
+
+  // -- WRITE --------------------------------------------------------------
+  @Override
+  public WriteStmt visitWriteStmt(SqlStreamParser.WriteStmtContext c) {
+    QName stream = typeRefQName(c.streamName().qname());
+    Identifier typeName = visitIdentifier(c.typeName().identifier());
+    List<StructV> rows = visitWriteValues(c.writeValues());
+    if(rows.isEmpty()) throw new IllegalArgumentException("No VALUES provided");
+    return new WriteStmt(stream, typeName, rows);
+  }
+
+  @Override
+  public List<StructV> visitWriteValues(SqlStreamParser.WriteValuesContext ctx) {
+    return ctx.structLiteral().stream().map(this::visitStructLiteral).collect(toList());
+  }
+
+  @Override
+  public StructV visitStructLiteral(SqlStreamParser.StructLiteralContext ctx) {
+    Map<Identifier, AnyV> entries = new LinkedHashMap<>();
+    ctx.structEntry().stream().map(this::visitStructEntry).forEach(e -> entries.put(e.getKey(), e.getValue()));
+    return new StructV(entries);
+  }
+
+  @Override
+  public Map.Entry<Identifier, AnyV> visitStructEntry(SqlStreamParser.StructEntryContext ctx) {
+    Identifier key = visitIdentifier(ctx.identifier());
+    AnyV val = visitLiteral(ctx.literal());
+    return Map.entry(key, val);
+  }
+
+  @Override
+  public MapV visitMapLiteral(SqlStreamParser.MapLiteralContext ctx) {
+    Map<PrimitiveV, AnyV> m = new LinkedHashMap<>();
+    for (var e : ctx.mapEntry()) {
+      PrimitiveV key = visitLiteralValue(e.literalValue());
+      AnyV val = visitLiteral(e.literal());
+      m.put(key, val);
     }
+    return new MapV(m);
+  }
 
-    // indexer form: '[' literal ']' (DOT accessor)?
-    if (ctx.literal() != null) {
-      Literal lit = (Literal) visit(ctx.literal());
-      Indexer head = new Indexer(lit);
-      if (ctx.accessor() == null) return head;
-
-      Accessor tail = visitAccessor(ctx.accessor());
-      return new Segment(head, tail);
-    }
-
-    throw new IllegalStateException("Unknown accessor form");
+  @Override
+  public Expr visitExpr(SqlStreamParser.ExprContext ctx) {
+    return visitOrExpr(ctx.orExpr());
   }
 
   @Override
   public Expr visitOrExpr(SqlStreamParser.OrExprContext ctx) {
     List<Expr> exprs = ctx.andExpr().stream().map(e -> (Expr) visit(e)).collect(toList());
-    return exprs.size() == 1 ? exprs.get(0) : fold(exprs, BinaryOp.OR);
+    return exprs.size() == 1 ? exprs.get(0) : fold(exprs, InfixOp.OR);
   }
 
   @Override
   public Expr visitAndExpr(SqlStreamParser.AndExprContext ctx) {
     List<Expr> exprs = ctx.notExpr().stream().map(e -> (Expr) visit(e)).collect(toList());
-    return exprs.size() == 1 ? exprs.get(0) : fold(exprs, BinaryOp.AND);
+    return exprs.size() == 1 ? exprs.get(0) : fold(exprs, InfixOp.AND);
   }
 
   @Override
   public Expr visitNotExpr(SqlStreamParser.NotExprContext ctx) {
     if (ctx.NOT() != null) {
       Expr inner = (Expr) visit(ctx.notExpr());
-      return new Unary(UnaryOp.NOT, inner);
+      return new PrefixExpr(PrefixOp.NOT, inner, VoidT.get());
     }
     return (Expr) visit(ctx.cmpExpr());
   }
 
   @Override
   public Expr visitCmpExpr(SqlStreamParser.CmpExprContext ctx) {
-    // leftmost mulExpr
-    Expr left = (Expr) visit(ctx.mulExpr().get(0));
-    if (ctx.mulExpr().size() == 1 && ctx.getChildCount() == 1) return left;
+    // leftmost shiftExpr (grammar changed from mulExpr -> shiftExpr)
+    Expr left = (Expr) visit(ctx.shiftExpr().get(0));
+    if (ctx.shiftExpr().size() == 1 && ctx.getChildCount() == 1) return left;
 
     Expr result = left;
-    int mulIndex = 1;
+    int shiftIndex = 1;
     for (int i = 1; i < ctx.getChildCount(); i++) {
       var child = ctx.getChild(i);
       String tokenText = child.getText();
       switch (tokenText) {
         case "=":
-          result = new Binary(BinaryOp.EQ, result, (Expr) visit(ctx.mulExpr().get(mulIndex++)));
+          result = new InfixExpr(InfixOp.EQ, result, (Expr) visit(ctx.shiftExpr().get(shiftIndex++)), VoidT.get());
           break;
         case "<>":
         case "!=":
-          result = new Binary(BinaryOp.NEQ, result, (Expr) visit(ctx.mulExpr().get(mulIndex++)));
+          result = new InfixExpr(InfixOp.NEQ, result, (Expr) visit(ctx.shiftExpr().get(shiftIndex++)), VoidT.get());
           break;
         case "<":
-          result = new Binary(BinaryOp.LT, result, (Expr) visit(ctx.mulExpr().get(mulIndex++)));
+          result = new InfixExpr(InfixOp.LT, result, (Expr) visit(ctx.shiftExpr().get(shiftIndex++)), VoidT.get());
           break;
         case "<=":
-          result = new Binary(BinaryOp.LTE, result, (Expr) visit(ctx.mulExpr().get(mulIndex++)));
+          result = new InfixExpr(InfixOp.LTE, result, (Expr) visit(ctx.shiftExpr().get(shiftIndex++)), VoidT.get());
           break;
         case ">":
-          result = new Binary(BinaryOp.GT, result, (Expr) visit(ctx.mulExpr().get(mulIndex++)));
+          result = new InfixExpr(InfixOp.GT, result, (Expr) visit(ctx.shiftExpr().get(shiftIndex++)), VoidT.get());
           break;
         case ">=":
-          result = new Binary(BinaryOp.GTE, result, (Expr) visit(ctx.mulExpr().get(mulIndex++)));
+          result = new InfixExpr(InfixOp.GTE, result, (Expr) visit(ctx.shiftExpr().get(shiftIndex++)), VoidT.get());
           break;
         default:
           if (child instanceof TerminalNode) {
@@ -318,12 +328,12 @@ public class AstBuilder extends SqlStreamBaseVisitor<Object> {
             if (up.equals("IS")) {
               String nxt = ctx.getChild(i + 1).getText().toUpperCase(Locale.ROOT);
               if (nxt.equals("NULL")) {
-                result = new Binary(BinaryOp.IS_NULL, result, NullV.INSTANCE);
+                result = new InfixExpr(InfixOp.IS_NULL, result, NullV.INSTANCE, VoidT.get());
                 i++;
               } else if (nxt.equals("NOT")) {
                 String nxt2 = ctx.getChild(i + 2).getText().toUpperCase(Locale.ROOT);
                 if (nxt2.equals("NULL")) {
-                  result = new Binary(BinaryOp.IS_NOT_NULL, result, NullV.INSTANCE);
+                  result = new InfixExpr(InfixOp.IS_NOT_NULL, result, NullV.INSTANCE, VoidT.get());
                   i += 2;
                 } else {
                   throw new IllegalStateException("Unsupported IS expression");
@@ -332,12 +342,12 @@ public class AstBuilder extends SqlStreamBaseVisitor<Object> {
                 throw new IllegalStateException("Unsupported IS expression");
               }
             } else if (up.equals("BETWEEN")) {
-              Expr lower = (Expr) visit(ctx.mulExpr().get(mulIndex++));
-              Expr upper = (Expr) visit(ctx.mulExpr().get(mulIndex++));
-              result = new Ternary(TernaryOp.BETWEEN, result, lower, upper);
+              Expr lower = (Expr) visit(ctx.shiftExpr().get(shiftIndex++));
+              Expr upper = (Expr) visit(ctx.shiftExpr().get(shiftIndex++));
+              result = new Ternary(TernaryOp.BETWEEN, result, lower, upper, VoidT.get());
             } else if (up.equals("IN")) {
               List<AnyV> lits = ctx.literal().stream().map(l -> (AnyV) visit(l)).collect(toList());
-              result = new Binary(BinaryOp.IN, result, new ListV(lits));
+              result = new InfixExpr(InfixOp.IN, result, new ListV(lits), VoidT.get());
             }
           }
           break;
@@ -353,8 +363,8 @@ public class AstBuilder extends SqlStreamBaseVisitor<Object> {
     Expr res = exprs.get(0);
     for (int i = 1; i < exprs.size(); i++) {
       String op = ctx.getChild(2 * i - 1).getText();
-      BinaryOp bop = op.equals("+") ? BinaryOp.ADD : BinaryOp.SUB;
-      res = new Binary(bop, res, exprs.get(i));
+      InfixOp bop = op.equals("+") ? InfixOp.ADD : InfixOp.SUB;
+      res = new InfixExpr(bop, res, exprs.get(i), VoidT.get());
     }
     return res;
   }
@@ -370,19 +380,13 @@ public class AstBuilder extends SqlStreamBaseVisitor<Object> {
       Expr right = (Expr) visit(parts.get(i));
       switch (op) {
         case "*":
-          result = new Binary(BinaryOp.MUL, result, right);
+          result = new InfixExpr(InfixOp.MUL, result, right, VoidT.get());
           break;
         case "/":
-          result = new Binary(BinaryOp.DIV, result, right);
+          result = new InfixExpr(InfixOp.DIV, result, right, VoidT.get());
           break;
         case "%":
-          result = new Binary(BinaryOp.MOD, result, right);
-          break;
-        case "<<":
-          result = new Binary(BinaryOp.SHL, result, right);
-          break;
-        case ">>":
-          result = new Binary(BinaryOp.SHR, result, right);
+          result = new InfixExpr(InfixOp.MOD, result, right, VoidT.get());
           break;
         default:
           throw new IllegalStateException("Unknown multiplicative operator: " + op);
@@ -392,38 +396,119 @@ public class AstBuilder extends SqlStreamBaseVisitor<Object> {
   }
 
   @Override
+  public Expr visitShiftExpr(SqlStreamParser.ShiftExprContext ctx) {
+    List<Expr> parts = ctx.addExpr().stream().map(e -> (Expr) visit(e)).collect(toList());
+    if (parts.size() == 1) return parts.get(0);
+    Expr res = parts.get(0);
+    for (int i = 1; i < parts.size(); i++) {
+      String op = ctx.getChild(2 * i - 1).getText();
+      Expr right = parts.get(i);
+      if (op.equals("<<")) {
+        res = new InfixExpr(InfixOp.SHL, res, right, VoidT.get());
+      } else if (op.equals(">>")) {
+        res = new InfixExpr(InfixOp.SHR, res, right, VoidT.get());
+      } else {
+        throw new IllegalStateException("Unknown shift operator: " + op);
+      }
+    }
+    return res;
+  }
+
+  @Override
   public Expr visitUnaryExpr(SqlStreamParser.UnaryExprContext ctx) {
     if (ctx.MINUS() != null) {
       Expr inner = (Expr) visit(ctx.unaryExpr());
-      return new Unary(UnaryOp.NEG, inner);
+      return new PrefixExpr(PrefixOp.NEG, inner, VoidT.get());
     }
-    if (ctx.expr() != null) {
+    // otherwise it's a postfixExpr
+    return (Expr) visit(ctx.postfixExpr());
+  }
+
+  // add visitPostfixExpr to build accessor/member/index chains (conservative mapping)
+  @Override
+  public Expr visitPostfixExpr(SqlStreamParser.PostfixExprContext ctx) {
+    Expr node = visitPrimary(ctx.primary());
+    if (ctx.getChildCount() == 1)
+      return node;
+
+    // We will conservatively map postfix chains to the old Accessor/Segment/IndexAccessor
+    // structures when possible (identifier-based chains or literal indexers).
+    // If an index expr is non-literal we reject (unsupported here).
+    int childCount = ctx.getChildCount();
+    // primary is child 0, subsequent children are member/index nodes/terminals
+    for (int i = 1; i < childCount; i++) {
+      var ch = ctx.getChild(i);
+      switch (ch) {
+        case SqlStreamParser.MemberAccessContext ma:
+          Identifier member = visitIdentifier(ma.identifier());
+          node = new MemberExpr(node, member, VoidT.get());
+          break;
+        case SqlStreamParser.IndexAccessContext ix:
+          Expr index = visitExpr(ix.expr());
+          node = new IndexExpr(node, index, VoidT.get());
+          break;
+        default:
+          String t = ch.getText();
+          if (t.equals("." ) || t.equals("[" ) || t.equals("]"))
+            continue;
+          throw new IllegalStateException("Unexpected token in postfix expression: " + t);
+      }
+    }
+    return node;
+  }
+
+  @Override
+  public Expr visitPrimary(SqlStreamParser.PrimaryContext ctx) {
+    if (ctx.LPAREN() != null) {
       return (Expr) visit(ctx.expr());
     }
     if (ctx.literal() != null) {
       return (Expr) visit(ctx.literal());
     }
-    if (ctx.accessor() != null) {
-      // Accessor implements Accessor and therefore Expr
-      return visitAccessor(ctx.accessor());
+    if (ctx.identifier() != null) {
+      return new Symbol(visitIdentifier(ctx.identifier()), VoidT.get());
     }
-    throw new IllegalStateException("Unknown unaryExpr");
+    throw new IllegalStateException("unknown primary");
   }
 
+  // dispatch between literalValue and literalSeq (new grammar)
   @Override
-  public Literal visitLiteral(SqlStreamParser.LiteralContext c) {
+  public AnyV visitLiteral(SqlStreamParser.LiteralContext c) {
     if (c.NULL() != null) return NullV.INSTANCE;
-    if (c.TRUE() != null) return new BoolV(true);
-    if (c.FALSE() != null) return new BoolV(false);
-    if (c.STRING_LIT() != null) return string(c.STRING_LIT());
-    if (c.INTEGER_LIT() != null) return integer(c.INTEGER_LIT());
-    if (c.NUMBER_LIT() != null) return fractional(c.NUMBER_LIT());
+    if (c.literalValue() != null) return (AnyV) visitLiteralValue(c.literalValue());
+    if (c.literalSeq() != null) return (AnyV) visitLiteralSeq(c.literalSeq());
+    if (c.structLiteral() != null) return (AnyV) visitStructLiteral(c.structLiteral());
+    if (c.enumLiteral() != null) return (AnyV) visitEnumLiteral(c.enumLiteral());
+    if (c.unionLiteral() != null) return (AnyV) visitUnionLiteral(c.unionLiteral());
     throw new IllegalStateException("unknown literal");
   }
 
+  @Override
+  public PrimitiveV visitLiteralValue(SqlStreamParser.LiteralValueContext c) {
+    if (c.STRING_LIT() != null) return string(c.STRING_LIT());
+    if (c.NUMBER_LIT() != null) return fractional(c.NUMBER_LIT());
+    if (c.TRUE() != null) return new BoolV(true);
+    if (c.FALSE() != null) return new BoolV(false);
+    throw new IllegalStateException("unknown literalValue");
+  }
+
+  @Override
+  public EnumV visitEnumLiteral(SqlStreamParser.EnumLiteralContext c) {
+    Identifier name = visitIdentifier(c.identifier(0));
+    Identifier value = visitIdentifier(c.identifier(1));
+    return new EnumV(name, value);
+  }
+
+  @Override
+  public UnionV visitUnionLiteral(SqlStreamParser.UnionLiteralContext c) {
+    Identifier alt = visitIdentifier(c.identifier());
+    AnyV value = visitLiteral(c.literal());
+    return new UnionV(alt, value);
+  }
+
   // -- Helpers --------------------------------------------------------------
-  private static Expr fold(List<Expr> xs, BinaryOp op) {
-    return xs.stream().skip(1).reduce(xs.get(0), (a, b) -> new Binary(op, a, b));
+  private static Expr fold(List<Expr> xs, InfixOp op) {
+    return xs.stream().skip(1).reduce(xs.get(0), (a, b) -> new InfixExpr(op, a, b, VoidT.get()));
   }
 
   private QName typeRefQName(SqlStreamParser.QnameContext q) {
@@ -431,17 +516,38 @@ public class AstBuilder extends SqlStreamBaseVisitor<Object> {
     return QName.of(parts);
   }
 
-  private static Int64V integer(TerminalNode v) {
-    return new Int64V(Long.parseLong(v.getText()));
-  }
-
-  private static Float64V fractional(TerminalNode v) {
-    return new Float64V(Double.parseDouble(v.getText()));
-  }
-
   private static StringV string(TerminalNode v) {
     String raw = v.getText();
     return new StringV(unquote(raw));
+  }
+
+  private static Float64V fractional(TerminalNode v) {
+    if (v == null || v.getText().isEmpty())
+      throw new IllegalArgumentException("Expected non-empty NUMBER_LIT");
+    return new Float64V(Double.parseDouble(v.getText()));
+  }
+
+  private static Int64V int64(TerminalNode v) {
+    Float64V f = fractional(v);
+    if (f.value() % 1 != 0)
+      throw new IllegalArgumentException("Expected integer value, got: " + v.getText());
+    if(f.value() < Long.MIN_VALUE || f.value() > Long.MAX_VALUE)
+      throw new IllegalArgumentException("Expected 64-bit integer value, got: " + v.getText());
+    return new Int64V((f.value().longValue()));
+  }
+
+  private static Int32V int32(TerminalNode v) {
+    Int64V i = int64(v);
+    if(i.value() < Integer.MIN_VALUE || i.value() > Integer.MAX_VALUE)
+      throw new IllegalArgumentException("Expected 32-bit integer value, got: " + v.getText());
+    return new Int32V(i.value().intValue());
+  }
+
+  private static Int8V int8(TerminalNode v) {
+    Int64V i = int64(v);
+    if(i.value() < Byte.MIN_VALUE || i.value() > Byte.MAX_VALUE)
+      throw new IllegalArgumentException("Expected 8-bit integer value, got: " + v.getText());
+    return new Int8V(i.value().byteValue());
   }
 
   @Override

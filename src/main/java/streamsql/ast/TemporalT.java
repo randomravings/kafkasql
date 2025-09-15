@@ -1,4 +1,4 @@
 package streamsql.ast;
 
-public sealed interface TemporalT extends PrimitiveType 
+public sealed interface TemporalT extends PrimitiveT 
     permits DateT, TimeT, TimestampT, TimestampTzT { }

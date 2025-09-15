@@ -12,7 +12,7 @@ import streamsql.ast.Identifier;
 import streamsql.ast.StreamInlineT;
 import streamsql.ast.StreamReferenceT;
 import streamsql.ast.StreamType;
-import streamsql.ast.Struct;
+import streamsql.ast.StructT;
 
 public final class StreamValidator {
     private StreamValidator() {}
@@ -48,14 +48,14 @@ public final class StreamValidator {
             } else {
                 var rt = (StreamReferenceT) def;
                 // referenced type must be a struct
-                Optional<Struct> structOpt = catalog.getStruct(rt.ref().qName());
+                Optional<StructT> structOpt = catalog.getStruct(rt.ref().qName());
                 if (structOpt.isEmpty()) {
                     throw new IllegalArgumentException(
                             "Referenced type '" + rt.ref().qName().fullName() +
                                     "' not found for DISTRIBUTE clause in stream " +
                                     stream.qName().fullName());
                 }
-                Struct struct = structOpt.get();
+                StructT struct = structOpt.get();
                 available = struct.fields().stream()
                         .map(Field::name)
                         .collect(HashSet::new, HashSet::add, HashSet::addAll);

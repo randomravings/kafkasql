@@ -133,9 +133,17 @@ public final class AstPrinter extends Printer {
     } else if (pl instanceof ProjectionList list) {
       writeTypeNode(ProjectionList.class);
       writeKey("fields", indent, true);
-      writeTypeListNode(Accessor.class);
-      forEach(list.fields(), this::writeAccessor, indent + 1);
+      writeTypeListNode(ProjectionList.class);
+      forEach(list.items(), this::writeProjectionExpr, indent + 1);
     }
+  }
+
+  private void writeProjectionExpr(ProjectionExpr pe, int indent) throws IOException {
+    writeTypeNode(ProjectionExpr.class);
+    writeKey("expr", indent, false);
+    writeExpr(pe.expr(), indent + 1);
+    writeKey("alias", indent, true);
+    writeOptional(pe.alias(), this::writeIdentifier, indent);
   }
 
   private void writeWriteStmt(WriteStmt w, int indent) throws IOException {
@@ -144,17 +152,17 @@ public final class AstPrinter extends Printer {
     writeQName(w.stream(), indent + 1);
     writeKey("alias", indent, false);
     writeIdentifier(w.alias(), indent + 1);
-    writeKey("projection", indent, false);
-    writeProjection(w.projection(), indent + 1);
     writeKey("rows", indent, true);
     writeTypeListNode(ListV.class);
-    forEach(w.rows(), (row, ind) -> writeRow(row, ind), indent + 1);
+    forEach(w.values(), (row, ind) -> writeStructV(row, ind), indent + 1);
   }
 
-  private void writeRow(ListV row, int indent) throws IOException {
-    writeTypeNode(ListV.class);
-    writeKey("values", indent, true);
-    forEach(row.values(), (v, i) -> writeValue(v, i), indent + 1);
+  private void writeField(Map.Entry<Identifier, AnyV> field, int indent) throws IOException {
+    writeTypeNode(Map.Entry.class);
+    writeKey("name", indent, false);
+    writeIdentifier(field.getKey(), indent + 1);
+    writeKey("value", indent, true);
+    writeValue(field.getValue(), indent + 1);
   }
 
   private void writeCreateStatement(CreateStmt createStatement, int indent) throws IOException {
@@ -209,13 +217,13 @@ public final class AstPrinter extends Printer {
   // Helpers for DataType, Path, Value, Expr
   private void writeDataType(AnyT t, int indent) throws IOException {
     switch (t) {
-      case PrimitiveType p:
+      case PrimitiveT p:
         writePrimitive(p, indent);
         break;
-      case CompositeType ct:
+      case CompositeT ct:
         writeComposite(ct, indent);
         break;
-      case ComplexType ct:
+      case ComplexT ct:
         writeComplex(ct, indent);
         break;
       case TypeRef r:
@@ -227,34 +235,34 @@ public final class AstPrinter extends Printer {
     }
   }
 
-  private void writePrimitive(PrimitiveType p, int indent) throws IOException {
+  private void writePrimitive(PrimitiveT p, int indent) throws IOException {
     write(p.getClass().getSimpleName());
     switch (p) {
       case CharT f:
         writeKey("size", indent, true);
-        writeLiteral(f.size(), indent + 1);
+        writeLiteralValue(f.size(), indent + 1);
         break;
       case FixedT f:
         writeKey("size", indent, true);
-        writeLiteral(f.size(), indent + 1);
+        writeLiteralValue(f.size(), indent + 1);
         break;
       case TimeT t:
         writeKey("precision", indent, true);
-        writeLiteral(t.precision(), indent + 1);
+        writeLiteralValue(t.precision(), indent + 1);
         break;
       case TimestampT t:
         writeKey("precision", indent, true);
-        writeLiteral(t.precision(), indent + 1);
+        writeLiteralValue(t.precision(), indent + 1);
         break;
       case TimestampTzT t:
         writeKey("precision", indent, true);
-        writeLiteral(t.precision(), indent + 1);
+        writeLiteralValue(t.precision(), indent + 1);
         break;
       case DecimalT d:
         writeKey("precision", indent, false);
-        writeLiteral(d.precision(), indent + 1);
+        writeLiteralValue(d.precision(), indent + 1);
         writeKey("scale", indent, true);
-        writeLiteral(d.scale(), indent + 1);
+        writeLiteralValue(d.scale(), indent + 1);
         break;
       default:
         break;
@@ -269,7 +277,7 @@ public final class AstPrinter extends Printer {
         write(l.value());
     }
 
-  private void writeComposite(CompositeType ct, int indent) throws IOException {
+  private void writeComposite(CompositeT ct, int indent) throws IOException {
     if (ct instanceof ListT l) {
       writeTypeNode(ListT.class);
       branch(indent, true);
@@ -277,24 +285,24 @@ public final class AstPrinter extends Printer {
     } else if (ct instanceof MapT m) {
       writeTypeNode(MapT.class);
       branch(indent, false);
-      writePrimitive(m.key(), indent + 1);
+      writeDataType(m.key(), indent + 1);
       branch(indent, true);
       writeDataType(m.value(), indent + 1);
     }
   }
 
-  private void writeComplex(ComplexType ct, int indent) throws IOException {
+  private void writeComplex(ComplexT ct, int indent) throws IOException {
     switch (ct) {
-      case streamsql.ast.Enum e:
+      case EnumT e:
         writeEnum(e, indent);
         break;
-      case Scalar s:
+      case ScalarT s:
         writeScalar(s, indent);
         break;
-      case Struct st:
+      case StructT st:
         writeStructType(st, indent);
         break;
-      case Union u:
+      case UnionT u:
         writeUnion(u, indent);
         break;
       default:
@@ -303,8 +311,8 @@ public final class AstPrinter extends Printer {
     }
   }
 
-  private void writeScalar(Scalar s, int indent) throws IOException {
-    writeTypeNode(Scalar.class);
+  private void writeScalar(ScalarT s, int indent) throws IOException {
+    writeTypeNode(ScalarT.class);
     writeKey("qName", indent, false);
     writeQName(s.qName(), indent + 1);
     writeKey("type", indent, false);
@@ -312,17 +320,17 @@ public final class AstPrinter extends Printer {
     writeKey("check", indent, false);
     writeOptional(s.validation(), (v, i) -> writeExpr(v, i), indent);
     writeKey("default", indent, true);
-    writeOptional(s.defaultValue(), (v, i) -> writeLiteral(v, i), indent);
+    writeOptional(s.defaultValue(), (v, i) -> writeLiteralValue(v, i), indent);
   }
 
-  private void writeEnum(streamsql.ast.Enum e, int indent) throws IOException {
-    writeTypeNode(streamsql.ast.Enum.class);
+  private void writeEnum(streamsql.ast.EnumT e, int indent) throws IOException {
+    writeTypeNode(streamsql.ast.EnumT.class);
     writeKey("qName", indent, false);
     writeQName(e.qName(), indent + 1);
     writeKey("type", indent, false);
     writePrimitive(e.type(), indent + 1);
     writeKey("isMask", indent, false);
-    writeLiteral(e.isMask(), indent + 1);
+    writeLiteralValue(e.isMask(), indent + 1);
     writeKey("symbols", indent, false);
     writeTypeListNode(EnumSymbol.class);
     forEach(e.symbols(), (s, i) -> writeEnumSymbol(s, i), indent + 1);
@@ -335,11 +343,11 @@ public final class AstPrinter extends Printer {
     writeKey("symbol", indent, false);
     writeIdentifier(s.name(), indent + 1);
     writeKey("value", indent, true);
-    writeLiteral(s.value(), indent + 1);
+    writeLiteralValue(s.value(), indent + 1);
   }
 
-  private void writeStructType(Struct st, int indent) throws IOException {
-    writeTypeNode(Struct.class);
+  private void writeStructType(StructT st, int indent) throws IOException {
+    writeTypeNode(StructT.class);
     writeKey("qName", indent, false);
     writeQName(st.qName(), indent + 1);
     writeKey("fields", indent, true);
@@ -354,13 +362,13 @@ public final class AstPrinter extends Printer {
     writeKey("type", indent, false);
     writeDataType(f.typ(), indent + 1);
     writeKey("optional", indent, false);
-    writeLiteral(f.optional(), indent + 1);
+    writeLiteralValue(f.optional(), indent + 1);
     writeKey("default", indent, true);
-    writeOptional(f.defaultValue(), (v, i) -> writeLiteral(v, i), indent + 1);
+    writeOptional(f.defaultValue(), (v, i) -> writeValue(v, i), indent + 1);
   }
 
-  private void writeUnion(Union u, int indent) throws IOException {
-    writeTypeNode(Union.class);
+  private void writeUnion(UnionT u, int indent) throws IOException {
+    writeTypeNode(UnionT.class);
     writeKey("qName", indent, false);
     writeQName(u.qName(), indent + 1);
     writeKey("types", indent, true);
@@ -405,23 +413,6 @@ public final class AstPrinter extends Printer {
     write(id.value());
   }
 
-  // AccessPath printing
-  private void writeAccessSegment(Segment p, int indent) throws IOException {
-    writeTypeNode(Segment.class);
-    writeKey("head", indent, false);
-    writeAccessor(p.head(), indent + 1);
-    writeKey("tail", indent, true);
-    writeAccessor(p.tail(), indent + 1);
-  }
-
-  private void writeAccessor(Accessor seg, int indent) throws IOException {
-    switch (seg) {
-      case Identifier va -> writeIdentifier(va, indent);
-      case Indexer ia -> writeLiteral(ia.index(), indent);
-      case Segment ap -> writeAccessSegment(ap, indent);
-    }
-  }
-
   private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();
   private void writeBytesToHex(byte[] bytes) throws IOException {
     for (byte b : bytes) {
@@ -435,26 +426,36 @@ public final class AstPrinter extends Printer {
   // Expr dispatch: one write method per Expr subtype
   private void writeExpr(Expr e, int indent) throws IOException {
     switch (e) {
-      case Unary u -> writeUnaryExpr(u, indent);
-      case Binary b -> writeBinaryExpr(b, indent);
+      case PostfixExpr p -> writePostfixExpr(p, indent);
+      case PrefixExpr u -> writePrefixExpr(u, indent);
+      case InfixExpr b -> writeInfixExpr(b, indent);
       case Ternary t -> writeTernaryExpr(t, indent);
-      case Literal l -> writeLiteral(l, indent);
-      case Identifier id -> writeIdentifier(id, indent);
-      case Segment ap -> writeAccessSegment(ap, indent);
-      default -> write(e.toString());
+      case PrimitiveV l -> writeLiteralValue(l, indent);
+      case MemberExpr m -> writeMemberExpr(m, indent);
+      case IndexExpr i -> writeIndexExpr(i, indent);
+      case Symbol id -> writeSymbol(id, indent);
+      case AnyV v -> writeValue(v, indent);
     }
   }
 
-  private void writeUnaryExpr(Unary u, int indent) throws IOException {
-    writeTypeNode(Unary.class);
+  private void writePostfixExpr(PostfixExpr p, int indent) throws IOException {
+    writeTypeNode(PostfixExpr.class);
+    writeKey("expr", indent, false);
+    writeExpr(p.expr(), indent + 1);
+    writeKey("op", indent, true);
+    write(p.op().toString());
+  }
+
+  private void writePrefixExpr(PrefixExpr u, int indent) throws IOException {
+    writeTypeNode(PrefixExpr.class);
     writeKey("op", indent, false);
     write(u.op().toString());
     writeKey("expr", indent, true);
     writeExpr(u.expr(), indent + 1);
   }
 
-  private void writeBinaryExpr(Binary b, int indent) throws IOException {
-    writeTypeNode(Binary.class);
+  private void writeInfixExpr(InfixExpr b, int indent) throws IOException {
+    writeTypeNode(InfixExpr.class);
     writeKey("op", indent, false);
     write(b.op().toString());
     writeKey("left", indent, false);
@@ -475,13 +476,42 @@ public final class AstPrinter extends Printer {
     writeExpr(t.right(), indent + 1);
   }
 
+  private void writeMemberExpr(MemberExpr m, int indent) throws IOException {
+    writeTypeNode(MemberExpr.class);
+    writeKey("expr", indent, false);
+    writeExpr(m.target(), indent + 1);
+    writeKey("member", indent, true);
+    writeIdentifier(m.name(), indent + 1);
+  }
+
+  public void writeIndexExpr(IndexExpr i, int indent) throws IOException {
+    writeTypeNode(IndexExpr.class);
+    writeKey("expr", indent, false);
+    writeExpr(i.index(), indent + 1);
+    writeKey("index", indent, true);
+    writeExpr(i.index(), indent + 1);
+  }
+
+  private void writeSymbol(Symbol s, int indent) throws IOException {
+    writeTypeNode(Symbol.class);
+    writeKey("name", indent, true);
+    write(s.name().value());
+  }
+
   private void writeValue(AnyV v, int indent) throws IOException {
     if (v == null) { nil(); return; }
     switch (v) {
-      case Literal l -> writeLiteral(l, indent);
+      case PrimitiveV l -> writeLiteralValue(l, indent);
+      case CompositeV l -> writeCompositeValue(l, indent);
+      case ComplexV c -> writeComplexValue(c, indent);
+      case NullV __ -> writeNullValue();
+    }
+  }
+
+  private void writeCompositeValue(CompositeV v, int indent) throws IOException {
+    switch (v) {
       case ListV l -> writeListV(l, indent);
       case MapV m -> writeMapV(m, indent);
-      default -> write(v.toString());
     }
   }
 
@@ -497,7 +527,47 @@ public final class AstPrinter extends Printer {
     forEach(m.values(), (kv, i) -> writeMapEntry(kv, i + 1), indent + 1);
   }
 
-  private void writeMapEntry(Map.Entry<Literal, AnyV> entry, int indent) throws IOException {
+  private void writeComplexValue(ComplexV v, int indent) throws IOException {
+    switch (v) {
+      case ScalarV s -> writeScalarV(s, indent);
+      case EnumV e -> writeEnumV(e, indent);
+      case StructV s -> writeStructV(s, indent);
+      case UnionV u -> writeUnionV(u, indent);
+    }
+  }
+
+  private void writeScalarV(ScalarV s, int indent) throws IOException {
+    writeTypeNode(ScalarV.class);
+    writeKey("type", indent, false);
+    writeLiteralValue(s.value(), indent + 1);
+    writeKey("value", indent, true);
+    writeValue(s.value(), indent + 1);
+  }
+
+  private void writeEnumV(EnumV e, int indent) throws IOException {
+    writeTypeNode(EnumV.class);
+    writeKey("enum", indent, false);
+    writeIdentifier(e.enumName(), indent + 1);
+    writeKey("symbol", indent, true);
+    writeIdentifier(e.symbol(), indent + 1);
+  }
+
+  private void writeUnionV(UnionV u, int indent) throws IOException {
+    writeTypeNode(UnionV.class);
+    writeKey("name", indent, false);
+    writeIdentifier(u.name(), indent + 1);
+    writeKey("value", indent, true);
+    writeValue(u.value(), indent + 1);
+  }
+
+  private void writeStructV(StructV struct, int indent) throws IOException {
+    writeTypeNode(StructV.class);
+    writeKey("fields", indent, true);
+    writeTypeListNode(Field.class);
+    forEach(struct.values(), (field, ind) -> writeField(field, ind), indent + 1);
+  }
+
+  private void writeMapEntry(Map.Entry<PrimitiveV, AnyV> entry, int indent) throws IOException {
     writeTypeNode(Map.Entry.class);
     writeKey("key", indent, false);
     writeValue(entry.getKey(), indent + 1);
@@ -505,7 +575,7 @@ public final class AstPrinter extends Printer {
     writeValue(entry.getValue(), indent + 1);
   }
 
-  private void writeLiteral(Literal v, int indent) throws IOException {
+  private void writeLiteralValue(PrimitiveV v, int indent) throws IOException {
     if (v == null) { nil(); return; }
 
     writeTypeNode(v.getClass());
@@ -514,7 +584,6 @@ public final class AstPrinter extends Printer {
     if (v.value() == null) { nil(); return; }
 
     switch (v) {
-      case NullV __ -> write("NULL");
       case BoolV b -> write(Boolean.toString(b.value()));
       case StringV s -> writeSq(s.value());
       case CharV f -> { writeSq(f.value()); }
@@ -534,6 +603,10 @@ public final class AstPrinter extends Printer {
       case TimestampTzV t -> { write(t.value().toString()); }
       default -> write(v.toString());
     }
+  }
+
+  private void writeNullValue() throws IOException {
+    write("NULL");
   }
 
   // Utility for forEach with last-element detection

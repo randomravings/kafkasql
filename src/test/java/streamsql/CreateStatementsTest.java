@@ -10,11 +10,11 @@ import streamsql.ast.StreamCompact;
 import streamsql.ast.StreamInlineT;
 import streamsql.ast.StreamLog;
 import streamsql.ast.StreamReferenceT;
-import streamsql.ast.Struct;
-import streamsql.ast.Union;
+import streamsql.ast.StructT;
+import streamsql.ast.UnionT;
 import streamsql.ast.UseContext;
 import streamsql.util.TestHelpers;
-import streamsql.ast.Scalar;
+import streamsql.ast.ScalarT;
 import streamsql.ast.Stmt;
 
 import java.util.List;
@@ -35,7 +35,7 @@ public class CreateStatementsTest {
     List<Stmt> p = TestHelpers.parseAssert("CREATE SCALAR MyInt AS INT32;");
     CreateType ct = TestHelpers.only(p, CreateType.class);
     assertEquals("MyInt", ct.qName().fullName().toString());
-    Scalar scalar = TestHelpers.assertType(ct.type(), Scalar.class);
+    ScalarT scalar = TestHelpers.assertType(ct.type(), ScalarT.class);
     assertTrue(scalar.primitive() instanceof Int32T, "Expected Int32 primitive");
   }
 
@@ -49,7 +49,7 @@ public class CreateStatementsTest {
       );
       """);
     CreateType ct = TestHelpers.only(p, CreateType.class);
-    streamsql.ast.Enum en = TestHelpers.assertType(ct.type(), streamsql.ast.Enum.class);
+    streamsql.ast.EnumT en = TestHelpers.assertType(ct.type(), streamsql.ast.EnumT.class);
     assertEquals("Color", ct.qName().fullName());
     assertEquals(3, en.symbols().size());
     assertEquals("Green", en.symbols().get(1).name().value());
@@ -65,11 +65,11 @@ public class CreateStatementsTest {
         Score DECIMAL(10,2),
         Tags LIST<STRING>,
         Attrs MAP<STRING, INT32>,
-        Friend com.example.User OPTIONAL DEFAULT 'null'
+        Friend com.example.User OPTIONAL
       );
       """);
     CreateType ct = TestHelpers.only(p, CreateType.class);
-    Struct st = TestHelpers.assertType(ct.type(), Struct.class);
+    StructT st = TestHelpers.assertType(ct.type(), StructT.class);
     assertEquals("Person", ct.qName().fullName());
     assertEquals(7, st.fields().size());
     assertEquals("Nick", st.fields().get(2).name().value());
@@ -85,7 +85,7 @@ public class CreateStatementsTest {
       );
       """);
     CreateType ct = TestHelpers.only(p, CreateType.class);
-    Union un = TestHelpers.assertType(ct.type(), Union.class);
+    UnionT un = TestHelpers.assertType(ct.type(), UnionT.class);
     assertEquals("Value", ct.qName().fullName());
     assertEquals(3, un.types().size());
     assertEquals("Ref", un.types().get(2).name().value());
@@ -138,7 +138,7 @@ public class CreateStatementsTest {
     CreateContext ctx1 = TestHelpers.at(p, 2, CreateContext.class);
     UseContext utx1 = TestHelpers.at(p, 3, UseContext.class);
     CreateType ct = TestHelpers.at(p, 4, CreateType.class);
-    Struct struct = TestHelpers.assertType(ct.type(), Struct.class);
+    StructT struct = TestHelpers.assertType(ct.type(), StructT.class);
     assertEquals("company", ctx0.qName().fullName().toString());
     assertEquals("company", utx0.context().qName().fullName().toString());
     assertEquals("finance", ctx1.qName().fullName().toString());
@@ -154,7 +154,7 @@ public class CreateStatementsTest {
       );
       """);
     CreateType ct = TestHelpers.only(p, CreateType.class);
-    Struct st = TestHelpers.assertType(ct.type(), Struct.class);
+    StructT st = TestHelpers.assertType(ct.type(), StructT.class);
     assertEquals(1, st.fields().size());
     assertEquals("Data", st.fields().get(0).name().value());
   }
@@ -168,7 +168,7 @@ public class CreateStatementsTest {
       List<Stmt> p = TestHelpers.parseAssert("CREATE ENUM Dups ( A: 1, B: 1 );");
       CreateType ct = TestHelpers.only(p, CreateType.class);
       assertEquals("Dups", ct.qName().fullName());
-      assertTrue(ct.type() instanceof streamsql.ast.Enum);
+      assertTrue(ct.type() instanceof streamsql.ast.EnumT);
     }
   }
 }

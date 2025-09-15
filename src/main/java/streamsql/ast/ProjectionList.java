@@ -2,4 +2,4 @@ package streamsql.ast;
 
 import java.util.List;
 
-public final record ProjectionList(List<Accessor> fields) implements Projection {}
+public final record ProjectionList(List<ProjectionExpr> items) implements Projection {}

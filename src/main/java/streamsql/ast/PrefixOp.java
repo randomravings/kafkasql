@@ -1,6 +1,6 @@
 package streamsql.ast;
 
-public enum UnaryOp {
+public enum PrefixOp {
     NOT,
     NEG
 }

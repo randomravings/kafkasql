@@ -10,6 +10,9 @@ public final class FixedT implements BinaryT {
     }
     public Int32V size() { return size; }
     public static FixedT get(Int32V size) {
-        return TYPES.computeIfAbsent(size.value(), k -> new FixedT(size));
+        return get(size.value());
+    }
+    public static FixedT get(int size) {
+        return TYPES.computeIfAbsent(size, k -> new FixedT(new Int32V(size)));
     }
 }

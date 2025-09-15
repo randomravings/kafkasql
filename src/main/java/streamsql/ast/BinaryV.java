@@ -1,3 +1,3 @@
 package streamsql.ast;
 
-public sealed interface BinaryV extends Literal permits BytesV, FixedV { }
+public sealed interface BinaryV extends PrimitiveV permits BytesV, FixedV { }

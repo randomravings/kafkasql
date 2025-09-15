@@ -1,12 +1,8 @@
 package streamsql.ast;
 
-public final class NullV implements Literal {
+public final class NullV implements AnyV {
     public static final NullV INSTANCE = new NullV();
+    public AnyT type() { return VoidT.get(); }
     private NullV() {}
     public static NullV getInstance() { return INSTANCE; }
-    @SuppressWarnings("unchecked")
-    @Override
-    public Void value() {
-        return null;
-    }
 }

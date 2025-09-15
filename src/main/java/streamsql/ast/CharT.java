@@ -10,6 +10,9 @@ public final class CharT implements AlphaT {
     }
     public Int32V size() { return size; }
     public static CharT get(Int32V size) {
-        return TYPES.computeIfAbsent(size.value(), k -> new CharT(size));
+        return get(size.value());
+    }
+    public static CharT get(int size) {
+        return TYPES.computeIfAbsent(size, k -> new CharT(new Int32V(size)));
     }
 }

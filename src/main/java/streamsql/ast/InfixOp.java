@@ -1,6 +1,6 @@
 package streamsql.ast;
 
-public enum BinaryOp {
+public enum InfixOp {
     EQ,
     NEQ,
     LT,

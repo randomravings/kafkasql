@@ -19,7 +19,7 @@ import streamsql.ast.Int64T;
 import streamsql.ast.Int8T;
 import streamsql.ast.ListT;
 import streamsql.ast.MapT;
-import streamsql.ast.PrimitiveType;
+import streamsql.ast.PrimitiveT;
 import streamsql.ast.Stmt;
 import streamsql.ast.StringT;
 import streamsql.ast.TimeT;
@@ -27,6 +27,7 @@ import streamsql.ast.TimestampT;
 import streamsql.ast.TimestampTzT;
 import streamsql.ast.TypeRef;
 import streamsql.ast.UuidT;
+import streamsql.ast.VoidT;
 
 public final class SyntaxPrinter extends Printer {
     protected SyntaxPrinter(Writer out) {
@@ -39,18 +40,18 @@ public final class SyntaxPrinter extends Printer {
 
   // Helpers for DataType, Path, Value, Expr
   private static String dataTypeToString(AnyT t) {
-    if (t instanceof PrimitiveType p)
+    if (t instanceof PrimitiveT p)
       return typeToString(p);
     if (t instanceof ListT l)
       return "LIST<" + dataTypeToString(l.item()) + ">";
     if (t instanceof MapT m)
-      return "MAP<" + typeToString(m.key()) + ", " + dataTypeToString(m.value()) + ">";
+      return "MAP<" + dataTypeToString(m.key()) + ", " + dataTypeToString(m.value()) + ">";
     if (t instanceof TypeRef r)
       return "REF " + r.qName().fullName();
     return "<unknown-type>";
   }
 
-  private static String typeToString(PrimitiveType p) {
+  private static String typeToString(PrimitiveT p) {
     return switch (p) {
       case BoolT __ -> "BOOL";
       case Int8T __ -> "INT8";

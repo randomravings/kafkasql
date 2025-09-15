@@ -10,6 +10,9 @@ public final class TimestampT implements TemporalT {
     }
     public Int8V precision() { return precision; }
     public static TimestampT get(Int8V precision) {
-        return TYPES.computeIfAbsent(precision.value(), k -> new TimestampT(precision));
+        return get(precision.value());
+    }
+    public static TimestampT get(byte precision) {
+        return TYPES.computeIfAbsent(precision, k -> new TimestampT(new Int8V(precision)));
     }
 }
