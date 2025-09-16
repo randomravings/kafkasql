@@ -245,14 +245,31 @@ TYPE com.example.User AS UserB
 DISTRIBUTE BY (Id);
 ```
 
-## Current Grammar (EBNF)
+```SQL
+-- Showcasing Default litterals for complext types.
+CREATE STRUCT ComplexDefaults (
+  ScalarDefault com.example.IntScalar DEFAULT 10,               -- Same as primitives.
+  EnumDefault com.example.SomeEnum DEFAULT SomeEnum::Symbol,    -- Static access.
+  UnionDefault com.example.SomeUnion DEFAULT StringField$'ABC', -- Dollar separating an identifier and literal.
+  StructDefault com.example.SomeStruct DEFAULT {                -- JSON style but with Identifier for fields and literal values.
+    Id: 1001,
+    Name: 'John',
+    Address: {
+      Street: 'Far away street',
+      Zip: 'pick one'
+    }
+  }
+);
+```
+
+## Current Parser (EBNF)
 
 ```EBNF
-/* converted on Sat Sep 13, 2025, 23:17 (UTC+02) by antlr_4-to-w3c v0.73-SNAPSHOT which is Copyright (c) 2011-2025 by Gunther Rademacher <grd@gmx.net> */
+/* converted on Tue Sep 16, 2025, 01:50 (UTC+02) by antlr_3-to-w3c v0.73-SNAPSHOT which is Copyright (c) 2011-2025 by Gunther Rademacher <grd@gmx.net> */
 
-script   ::= includeSection? ( statement ';' )+ EOF
+script   ::= includeSection? ( statement SEMI )+ EOF
 includeSection
-         ::= ( includePragma ';' )+
+         ::= ( includePragma SEMI )+
 includePragma
          ::= INCLUDE STRING_LIT
 statement
@@ -267,50 +284,49 @@ statement
            | createStream
 useStmt  ::= useContext
 useContext
-         ::= USE CONTEXT '.'? qname
+         ::= USE CONTEXT DOT? qname
 readStmt ::= READ FROM streamName typeBlock+
 streamName
          ::= qname
 typeBlock
-         ::= TYPE typeName projection whereClause?
+         ::= TYPE typeName readProjection whereClause?
+readProjection
+         ::= ( STAR | readProjectionExpr ( COMMA readProjectionExpr )* )?
+readProjectionExpr
+         ::= expr ( AS identifier )?
 whereClause
          ::= WHERE expr
 writeStmt
-         ::= WRITE TO streamName TYPE typeName '(' projection ')' VALUES tuple ( ',' tuple )*
-projection
-         ::= '*'
-           | accessor ( ',' accessor )*
-accessor ::= ( identifier | '[' literal ']' ) ( '.' ( identifier | '[' literal ']' ) )*
-tuple    ::= '(' literal ( ',' literal )* ')'
+         ::= WRITE TO streamName TYPE typeName VALUES LPAREN writeValues RPAREN
+writeValues
+         ::= structLiteral ( COMMA structLiteral )*
 createContext
          ::= CREATE CONTEXT identifier
 createScalar
-         ::= CREATE SCALAR typeName AS primitiveType ( CHECK '(' expr ')' )? ( DEFAULT literal )?
+         ::= CREATE SCALAR typeName AS primitiveType ( CHECK LPAREN expr RPAREN )? ( DEFAULT literalValue )?
 createEnum
-         ::= CREATE ( ENUM | MASK ) typeName ( AS enumType )? '(' enumSymbol ( ',' enumSymbol )* ')' ( DEFAULT identifier )?
+         ::= CREATE ( ENUM | MASK ) typeName ( AS enumType )? LPAREN enumSymbol ( COMMA enumSymbol )* RPAREN ( DEFAULT identifier )?
 enumType ::= INT8
            | INT16
            | INT32
            | INT64
 enumSymbol
-         ::= identifier ':' INTEGER_LIT
+         ::= identifier COLON NUMBER_LIT
 createStruct
-         ::= CREATE STRUCT typeName '(' fieldDef ( ',' fieldDef )* ')'
+         ::= CREATE STRUCT typeName LPAREN fieldDef ( COMMA fieldDef )* RPAREN
 createUnion
-         ::= CREATE UNION typeName '(' unionAlt ( ',' unionAlt )* ')'
+         ::= CREATE UNION typeName LPAREN unionAlt ( COMMA unionAlt )* RPAREN
 unionAlt ::= identifier dataType
-fieldDef ::= identifier dataType OPTIONAL? ( DEFAULT jsonString )?
-jsonString
-         ::= STRING_LIT
+fieldDef ::= identifier dataType OPTIONAL? ( DEFAULT literal )?
 typeName ::= identifier
 createStream
          ::= CREATE ( LOG | COMPACT ) STREAM identifier streamTypeDef+
 streamTypeDef
          ::= TYPE ( inlineStruct | qname ) AS typeAlias distributionClause?
 distributionClause
-         ::= DISTRIBUTE BY '(' identifier ( ',' identifier )* ')'
+         ::= DISTRIBUTE BY LPAREN identifier ( COMMA identifier )* RPAREN
 inlineStruct
-         ::= '(' fieldDef ( ',' fieldDef )* ')'
+         ::= LPAREN fieldDef ( COMMA fieldDef )* RPAREN
 typeAlias
          ::= identifier
 dataType ::= primitiveType
@@ -325,40 +341,76 @@ primitiveType
            | FLOAT32
            | FLOAT64
            | STRING
-           | ( ( CHAR | FIXED | TIME | TIMESTAMP | TIMESTAMP_TZ ) '(' | DECIMAL '(' INTEGER_LIT ',' ) INTEGER_LIT ')'
+           | ( ( CHAR | FIXED | TIME | TIMESTAMP | TIMESTAMP_TZ ) LPAREN | DECIMAL LPAREN NUMBER_LIT COMMA ) NUMBER_LIT RPAREN
            | BYTES
            | UUID
            | DATE
 compositeType
-         ::= ( LIST '<' | MAP '<' primitiveType ',' ) dataType '>'
+         ::= ( LIST LT | MAP LT primitiveType COMMA ) dataType GT
 complexType
          ::= qname
 expr     ::= orExpr
 orExpr   ::= andExpr ( OR andExpr )*
 andExpr  ::= notExpr ( AND notExpr )*
 notExpr  ::= NOT* cmpExpr
-cmpExpr  ::= mulExpr ( ( '=' | '<>' | '>' | '<' | '>=' | '<=' | BETWEEN mulExpr AND ) mulExpr | IS NOT? NULL | IN '(' literal ( ',' literal )* ')' )*
-mulExpr  ::= unaryExpr ( ( '*' | '/' | '%' | '<<' | '>>' ) unaryExpr )*
-addExpr  ::= mulExpr ( ( '+' | '-' ) mulExpr )*
+cmpExpr  ::= shiftExpr ( ( EQ | NEQ | GT | LT | GTE | LTE | BETWEEN shiftExpr AND ) shiftExpr | IS NOT? NULL | IN LPAREN literal ( COMMA literal )* RPAREN )*
+shiftExpr
+         ::= addExpr ( ( SHL | SHR ) addExpr )*
+addExpr  ::= mulExpr ( ( PLUS | MINUS ) mulExpr )*
+mulExpr  ::= unaryExpr ( ( STAR | SLASH | PERCENT ) unaryExpr )*
 unaryExpr
-         ::= '-'* ( '(' expr ')' | literal | accessor )
+         ::= MINUS* postfixExpr
+postfixExpr
+         ::= primary ( memberAccess | indexAccess )*
+memberAccess
+         ::= DOT identifier
+indexAccess
+         ::= LBRACK expr RBRACK
+primary  ::= LPAREN expr RPAREN
+           | literal
+           | identifier
 literal  ::= NULL
-           | TRUE
+           | literalValue
+           | structLiteral
+           | enumLiteral
+           | unionLiteral
+           | literalSeq
+literalValue
+         ::= TRUE
            | FALSE
-           | INTEGER_LIT
            | NUMBER_LIT
            | STRING_LIT
            | BYTES_LIT
-           | listLiteral
+literalSeq
+         ::= listLiteral
            | mapLiteral
 listLiteral
-         ::= '[' ( literal ( ',' literal )* )? ']'
+         ::= LBRACK ( literal ( COMMA literal )* )? RBRACK
 mapLiteral
-         ::= '{' ( mapEntry ( ',' mapEntry )* )? '}'
-mapEntry ::= literal ':' literal
-qname    ::= identifier ( '.' identifier )*
+         ::= LBRACE ( mapEntry ( COMMA mapEntry )* )? RBRACE
+mapEntry ::= literalValue COLON literal
+structLiteral
+         ::= LBRACE ( structEntry ( COMMA structEntry )* )? RBRACE
+structEntry
+         ::= identifier COLON literal
+unionLiteral
+         ::= identifier DOLLAR literal
+enumLiteral
+         ::= identifier DOUBLE_COLON identifier
+qname    ::= identifier ( DOT identifier )*
 identifier
          ::= ID
+
+<?TOKENS?>
+
+EOF      ::= $
+```
+
+## Current Lexer (EBNF)
+
+```EBNF
+/* converted on Tue Sep 16, 2025, 01:52 (UTC+02) by antlr_4-to-w3c v0.73-SNAPSHOT which is Copyright (c) 2011-2025 by Gunther Rademacher <grd@gmx.net> */
+
 _        ::= WS
            | COMMENT
           /* ws: definition */
@@ -423,10 +475,8 @@ IN       ::= [Ii] [Nn]
 OF       ::= [Oo] [Ff]
 MASK     ::= [Mm] [Aa] [Ss] [Kk]
 CHECK    ::= [Cc] [Hh] [Ee] [Cc] [Kk]
-INTEGER_LIT
-         ::= '-'? [0-9]+
 NUMBER_LIT
-         ::= '-'? [0-9]+ '.' ( ( [eE] [+#x2D]? )? [0-9]+ )?
+         ::= '-'? [0-9]+ ( ( '.' | [eE] [+#x2D]? ) [0-9]+ )?
 STRING_LIT
          ::= "'" ( [^'#xd#xa] | "''" )* "'"
 BYTES_LIT
@@ -434,5 +484,4 @@ BYTES_LIT
 ID       ::= [a-zA-Z] [a-zA-Z0-9_]*
 WS       ::= [ #x9#xd#xa]+
 COMMENT  ::= '--' [^#xd#xa]*
-EOF      ::= $
 ```

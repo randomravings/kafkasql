@@ -18,7 +18,11 @@ CREATE STRUCT Customer (
   Tags LIST<STRING>,
   Attrs MAP<STRING, List<STRING>>,
   Classification CHAR(5),
-  Status com.example.Status
+  Status com.example.Status,
+  Address com.example.Address DEFAULT {
+    Street: 'N/A',
+    Zip: 'N/A'
+  }
 );
 
 CREATE UNION CustomerIdOrName (
