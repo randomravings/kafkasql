@@ -152,7 +152,7 @@ public final class AstPrinter extends Printer {
     writeIdentifier(w.alias(), indent + 1);
     writeKey("rows", indent, true);
     writeTypeListNode(ListV.class);
-    forEach(w.values(), (row, ind) -> writeStructV(row, ind), indent + 1);
+    forEach(w.values(), (row, ind) -> writeValue(row, ind), indent + 1);
   }
 
   private void writeField(Map.Entry<Identifier, AnyV> field, int indent) throws IOException {

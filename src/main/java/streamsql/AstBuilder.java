@@ -29,10 +29,10 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
   public Stmt visitStatement(SqlStreamParser.StatementContext ctx) {
-    if (ctx.useStmt() != null) return (Stmt) visit(ctx.useStmt());
+    if (ctx.useStmt() != null) return visitUseStmt(ctx.useStmt());
     if (ctx.createStmt() != null) return visitCreateStmt(ctx.createStmt());
-    if (ctx.readStmt() != null) return (Stmt) visitReadStmt(ctx.readStmt());
-    if (ctx.writeStmt() != null) return (Stmt) visitWriteStmt(ctx.writeStmt());
+    if (ctx.readStmt() != null) return visitReadStmt(ctx.readStmt());
+    if (ctx.writeStmt() != null) return visitWriteStmt(ctx.writeStmt());
     throw new IllegalStateException("unknown statement");
   }
 
@@ -474,6 +474,20 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     Range range = range(c);
     Expr condition = visitExpr(c.expr());
     return AstOptionalNode.of(new WhereClause(range, condition));
+  }
+
+  @Override
+  public WriteStmt visitWriteStmt(SqlStreamParser.WriteStmtContext c) {
+    Range range = range(c);
+    QName streamName = visitStreamName(c.streamName());
+    Identifier typeAlias = visitIdentifier(c.identifier());
+    ListV values = visitWriteValues(c.writeValues());
+    return new WriteStmt(range, streamName, typeAlias, values);
+  }
+
+  @Override
+  public ListV visitWriteValues(SqlStreamParser.WriteValuesContext c) {
+    return listContext(c.structLiteral(), this::visitStructLiteral, ListV::new);
   }
 
   @Override

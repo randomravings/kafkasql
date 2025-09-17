@@ -27,7 +27,6 @@ public final class AstValidator {
       throw new IllegalStateException("Validator used after errors detected");
 
     for (Stmt stmt : ast.statements()) {
-      // TODO: Fix handling of null returns from validators
       if (null == stmt)
         continue;
       Stmt s = switch (stmt) {
