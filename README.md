@@ -158,6 +158,25 @@ CREATE STRUCT User (
 );
 ```
 
+Here is an example with complex type defaults.
+
+```SQL
+-- Showcasing Default litterals for complext types.
+CREATE STRUCT ComplexDefaults (
+  ScalarDefault com.example.IntScalar DEFAULT 10,               -- Same as primitives.
+  EnumDefault com.example.SomeEnum DEFAULT SomeEnum::Symbol,    -- Static access.
+  UnionDefault com.example.SomeUnion DEFAULT StringField$'ABC', -- Dollar separating an identifier and literal.
+  StructDefault com.example.SomeStruct DEFAULT {                -- JSON style but with Identifier for fields and literal values.
+    Id: 1001,
+    Name: 'John',
+    Address: {
+      Street: 'Far away street',
+      Zip: 'pick one'
+    }
+  }
+);
+```
+
 Next thing is to consider adding check constraints and complete the default to full JSON to allow for complex types instantiation.
 
 ### Unions
@@ -241,23 +260,6 @@ TYPE (
 DISTRIBUTE BY (Id)
 TYPE com.example.User AS UserB
 DISTRIBUTE BY (Id);
-```
-
-```SQL
--- Showcasing Default litterals for complext types.
-CREATE STRUCT ComplexDefaults (
-  ScalarDefault com.example.IntScalar DEFAULT 10,               -- Same as primitives.
-  EnumDefault com.example.SomeEnum DEFAULT SomeEnum::Symbol,    -- Static access.
-  UnionDefault com.example.SomeUnion DEFAULT StringField$'ABC', -- Dollar separating an identifier and literal.
-  StructDefault com.example.SomeStruct DEFAULT {                -- JSON style but with Identifier for fields and literal values.
-    Id: 1001,
-    Name: 'John',
-    Address: {
-      Street: 'Far away street',
-      Zip: 'pick one'
-    }
-  }
-);
 ```
 
 ## Current Parser (EBNF)
