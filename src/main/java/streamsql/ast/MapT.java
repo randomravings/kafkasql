@@ -1,3 +1,3 @@
 package streamsql.ast;
 
-public record MapT(AnyT key, AnyT value) implements CompositeT { }
+public record MapT(Range range, AnyT key, AnyT value) implements CompositeT { }

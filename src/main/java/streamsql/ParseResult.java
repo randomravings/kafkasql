@@ -1,10 +1,8 @@
 package streamsql;
 
-import java.util.List;
-
-import streamsql.ast.Stmt;
+import streamsql.ast.Ast;
 
 public record ParseResult(
-    List<Stmt> stmts,
+    Ast ast,
     Diagnostics diags
 ) {}

@@ -1,6 +1,3 @@
 package streamsql.ast;
 
-import java.util.List;
-import java.util.Optional;
-
-public record EnumT(QName qName, IntegerT type, BoolV isMask, List<EnumSymbol> symbols, Optional<Identifier> defaultSymbol) implements ComplexT {}
+public record EnumT(Range range, QName qName, AstOptionalNode<IntegerT> type, EnumSymbolList symbols, AstOptionalNode<Identifier> defaultSymbol) implements ComplexT {}

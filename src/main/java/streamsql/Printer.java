@@ -1,8 +1,8 @@
 package streamsql;
 
 import java.io.Writer;
-import java.util.List;
-import streamsql.ast.Stmt;
+
+import streamsql.ast.Ast;
 
 import java.io.IOException;
 
@@ -30,7 +30,7 @@ public abstract class Printer {
         this.out = out;
     }
 
-    public abstract void write(List<Stmt> stmts) throws IOException;
+    public abstract void write(Ast ast) throws IOException;
 
     protected void write(String s) throws IOException {
         out.write(s);
@@ -38,6 +38,10 @@ public abstract class Printer {
 
     protected void write(char c) throws IOException {
         out.write(c);
+    }
+
+    protected void write(int i) throws IOException {
+        out.write(Integer.toString(i));
     }
 
     protected void write(long i) throws IOException {

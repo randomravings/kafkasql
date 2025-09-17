@@ -11,25 +11,25 @@ public class ContextResolutionTest {
   public void relativeContextChaining(){
     var result = TestHelpers.parseAssert("USE CONTEXT com; CREATE CONTEXT example; USE CONTEXT example; CREATE STRUCT Foo ( Bar STRING );");
     // stmts: UseContext(com), ContextDecl(com.example), UseContext(com.example), StructDecl(com.example.Foo)
-    assertEquals(4, result.size());
-    var uc1 = (UseContext)result.get(0);
-    var cd  = (CreateContext)result.get(1);
-    var uc2 = (UseContext)result.get(2);
-    var sd  = (CreateType)result.get(3);
-    assertEquals("com", uc1.context().qName().fullName());
-    assertEquals("example", cd.qName().fullName());
-    assertEquals("example", uc2.context().qName().fullName());
+    assertEquals(4, result.statements().size());
+    var uc1 = (UseContext)result.statements().get(0);
+    var cd  = (CreateContext)result.statements().get(1);
+    var uc2 = (UseContext)result.statements().get(2);
+    var sd  = (CreateType)result.statements().get(3);
+    assertEquals("com", uc1.qname().fullName());
+    assertEquals("example", cd.context().qName().fullName());
+    assertEquals("example", uc2.qname().fullName());
     assertEquals("Foo", sd.qName().fullName());
   }
 
   @Test
   public void absoluteCreateContext(){
     var result = TestHelpers.parseAssert("USE CONTEXT com; CREATE CONTEXT example; CREATE STRUCT Foo ( Bar STRING );");
-    assertEquals(3, result.size());
-    var uc = (UseContext)result.get(0);
-    var cd = (CreateContext)result.get(1);
-    var sd = (CreateType)result.get(2);
-    assertEquals("com", uc.context().qName().fullName());
+    assertEquals(3, result.statements().size());
+    var uc = (UseContext)result.statements().get(0);
+    var cd = (CreateContext)result.statements().get(1);
+    var sd = (CreateType)result.statements().get(2);
+    assertEquals("com", uc.qname().fullName());
     assertEquals("example", cd.qName().fullName());
     assertEquals("Foo", sd.qName().fullName());
   }

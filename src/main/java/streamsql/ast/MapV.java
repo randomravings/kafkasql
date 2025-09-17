@@ -2,6 +2,11 @@ package streamsql.ast;
 
 import java.util.Map;
 
-public final record MapV (Map<PrimitiveV, AnyV> values) implements CompositeV {
-    public AnyT type() { return new MapT(VoidT.get(), VoidT.get()); }
+public final class MapV extends AstMapNode<PrimitiveV, AnyV> implements CompositeV {
+    public MapV(Range range) {
+        super(range);
+    }
+    public MapV(Range range, Map<PrimitiveV, AnyV> other) {
+        super(range, other);
+    }
 }

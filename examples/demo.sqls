@@ -10,16 +10,16 @@ CREATE SCALAR Money AS DECIMAL(18,2) CHECK (value > 'thing') DEFAULT 0;
 
 CREATE ENUM Status ( ACTIVE: 0, PENDING: 1, DISABLED: 4096 ) DEFAULT DISABLED;
 
-CREATE STRUCT Address ( Street STRING, Zip STRING OPTIONAL );
+CREATE STRUCT Address ( Street STRING, Zip STRING NULL );
 CREATE STRUCT Customer (
   Id Int64,
   Name STRING,
-  Email STRING OPTIONAL,
+  Email STRING NULL,
   Tags LIST<STRING>,
   Attrs MAP<STRING, List<STRING>>,
   Classification CHAR(5),
-  Status com.example.Status,
-  Address com.example.Address DEFAULT {
+  Status .com.example.Status,
+  Address .om.example.Address DEFAULT {
     Street: 'N/A',
     Zip: 'N/A'
   }
@@ -30,10 +30,10 @@ CREATE UNION CustomerIdOrName (
   Name String
 );
 
-CREATE LOG STREAM customers
-  TYPE ( Id CustomerIdOrName, Email STRING OPTIONAL ) AS CustomerV1
-    DISTRIBUTE BY (Id, Name)
-  TYPE com.example.Customer AS CustomerV2;
+CREATE STREAM customers
+  TYPE ( Id CustomerIdOrName, Email STRING NULL ) AS CustomerV1
+    DISTRIBUTE BY (Id)
+  TYPE .com.example.Customer AS CustomerV2;
 
 READ FROM customers
 TYPE CustomerV1 * WHERE Name = 'Alice' AND Id < 1 AND Id >> 1 >= 0.5

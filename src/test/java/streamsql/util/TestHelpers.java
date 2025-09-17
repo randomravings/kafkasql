@@ -10,6 +10,7 @@ import java.util.List;
 import streamsql.ParseArgs;
 import streamsql.ParseHelpers;
 import streamsql.ParseResult;
+import streamsql.ast.Ast;
 import streamsql.ast.Stmt;
 
 public class TestHelpers {
@@ -20,10 +21,10 @@ public class TestHelpers {
         return ParseHelpers.parse(new ParseArgs(false, false), script);
     }
 
-    public static List<Stmt> parseAssert(String script) {
+    public static Ast parseAssert(String script) {
         var result = ParseHelpers.parse(new ParseArgs(false, false), script);
         assertNoErrors(result);
-        return result.stmts();
+        return result.ast();
     }
 
     public static void assertNoErrors(ParseResult result) {

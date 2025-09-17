@@ -10,21 +10,31 @@ public final class Catalog {
   private final Map<String, Object> table = new HashMap<>();
   
   public Catalog() {
-    put(QName.root(), new Context(QName.root()));
+    table.put(Context.ROOT.qName().fullName(), Context.ROOT.qName());
   }
 
-  public Boolean containsKey(QName fqn) { return table.containsKey(fqn.fullName()); }
+  private static String resolveName(QName ctx, QName fqn) {
+    if (fqn.dotPrefix().isPresent()) return fqn.fullName();
+    return ctx.isRoot() ? fqn.fullName() : ctx.fullName() + "." + fqn.fullName();
+  }
 
-  public Boolean put(Context ctx) { return put(ctx.qName(), ctx); }
-  public Boolean put(StructT type) { return put(type.qName(), type); }
-  public Boolean put(EnumT type) { return put(type.qName(), type); }
-  public Boolean put(UnionT type) { return put(type.qName(), type); }
-  public Boolean put(ScalarT type) { return put(type.qName(), type); }
-  public Boolean put(DataStream stream) { return put(stream.qName(), stream); }
+  public Boolean containsKey(QName ctx, QName fqn) {
+    var name = resolveName(ctx, fqn);
+    return table.containsKey(name);
+  }
 
-  private Boolean put(QName key, Object value) {
-    if (table.containsKey(key.fullName())) return false;
-    table.put(key.fullName(), value);
+  public Boolean put(QName curContext, Context ctx) { return put(curContext, ctx.qName(), ctx); }
+  public Boolean put(QName curContext, StructT type) { return put(curContext, type.qName(), type); }
+  public Boolean put(QName curContext, EnumT type) { return put(curContext, type.qName(), type); }
+  public Boolean put(QName curContext, UnionT type) { return put(curContext, type.qName(), type); }
+  public Boolean put(QName curContext, ScalarT type) { return put(curContext, type.qName(), type); }
+  public Boolean put(QName curContext, StreamT stream) { return put(curContext, stream.qName(), stream); }
+  public Boolean put(QName curContext, ComplexT type) { return put(curContext, type.qName(), type); }
+
+  private Boolean put(QName ctx, QName key, Object value) {
+    var name = resolveName(ctx, key);
+    if (table.containsKey(name)) return false;
+    table.put(name, value);
     return true;
   }
 
@@ -35,24 +45,23 @@ public final class Catalog {
   public List<EnumT> allEnums() { return allT(EnumT.class); }
   public List<UnionT> allUnions() { return allT(UnionT.class); }
   public List<ScalarT> allScalars() { return allT(ScalarT.class); }
-  public List<DataStream> allStreams() { return allT(DataStream.class); }
-  
-  public Optional<Object> get(String fqn) { return Optional.ofNullable(table.get(fqn)); }
-  public Optional<ComplexT> getType (QName fqn){ return getT(fqn, ComplexT.class); }
-  public Optional<Context> getContext (QName fqn){ return getT(fqn, Context.class); }
-  public Optional<StructT> getStruct (QName fqn){ return getT(fqn, StructT.class); }
-  public Optional<EnumT> getEnum (QName fqn){ return getT(fqn, EnumT.class); }
-  public Optional<UnionT> getUnion (QName fqn){ return getT(fqn, UnionT.class); }
-  public Optional<ScalarT> getScalar (QName fqn){ return getT(fqn, ScalarT.class); }
-  public Optional<DataStream> getStream (QName fqn){ return getT(fqn, DataStream.class); }
+  public List<StreamT> allStreams() { return allT(StreamT.class); }
 
-  private <T> Optional<T> getT(QName fqn, Class<T> clazz) {
-    return get(fqn.fullName()).flatMap(val -> {
-      if (clazz.isInstance(val)) {
-        return Optional.of(clazz.cast(val));
-      }
-      return Optional.empty();
-    });
+  public Optional<Object> get(QName curContext, QName fqn) { return getT(curContext, fqn, Object.class); }
+  public Optional<ComplexT> getType (QName curContext, QName fqn){ return getT(curContext, fqn, ComplexT.class); }
+  public Optional<Context> getContext (QName curContext, QName fqn){ return getT(curContext, fqn, Context.class); }
+  public Optional<StructT> getStruct (QName curContext, QName fqn){ return getT(curContext, fqn, StructT.class); }
+  public Optional<EnumT> getEnum (QName curContext, QName fqn){ return getT(curContext, fqn, EnumT.class); }
+  public Optional<UnionT> getUnion (QName curContext, QName fqn){ return getT(curContext, fqn, UnionT.class); }
+  public Optional<ScalarT> getScalar (QName curContext, QName fqn){ return getT(curContext, fqn, ScalarT.class); }
+  public Optional<StreamT> getStream (QName curContext, QName fqn){ return getT(curContext, fqn, StreamT.class); }
+
+  private <T> Optional<T> getT(QName curContext, QName fqn, Class<T> clazz) {
+    var name = resolveName(curContext, fqn);
+    var value = table.get(name);
+    if(value == null) return Optional.empty();
+    if(!clazz.isInstance(value)) return Optional.empty();
+    return Optional.of(clazz.cast(value));
   }
 
   public <T> List<T> allT(Class<T> clazz) {

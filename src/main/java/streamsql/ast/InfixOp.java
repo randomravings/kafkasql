@@ -11,8 +11,6 @@ public enum InfixOp {
     OR,
     XOR,
     IN,
-    IS_NULL,
-    IS_NOT_NULL,
     MUL,
     DIV,
     MOD,

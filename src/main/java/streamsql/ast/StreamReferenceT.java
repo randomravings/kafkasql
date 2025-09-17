@@ -1,5 +1,3 @@
 package streamsql.ast;
 
-import java.util.List;
-
-public final record StreamReferenceT(TypeRef ref, Identifier alias, List<Identifier> distributionKeys) implements StreamType {}
+public final record StreamReferenceT(Range range, Identifier alias, TypeReference ref, AstOptionalNode<DistributeClause> distributeClause) implements StreamType {}

@@ -1,5 +1,3 @@
 package streamsql.ast;
 
-import java.util.Optional;
-
-public final record Field(Identifier name, AnyT typ, BoolV optional, Optional<AnyV> defaultValue) {}
+public final record Field(Range range, Identifier name, AnyT type, AstOptionalNode<NullV> nullable, AstOptionalNode<AnyV> defaultValue) implements AstNode {}

@@ -8,26 +8,26 @@ import java.util.List;
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
 
-import streamsql.ast.Stmt;
+import streamsql.ast.Ast;
 import streamsql.lex.SqlStreamLexer;
 import streamsql.parse.SqlStreamParser;
 
 public class ParseHelpers {
 
-  public static ParseResult validate(Catalog catalog, List<Stmt> tree) {
-    var validator = new Validator(catalog);
-    return validator.validate(tree);
+  public static ParseResult validate(Catalog catalog, Ast ast) {
+    var validator = new AstValidator(catalog);
+    return validator.validate(ast);
   }
 
   public static ParseResult parse(ParseArgs args, String... texts) {
     var diags = new Diagnostics();
-    var all = new ArrayList<Stmt>();
+    var all = Ast.EMPTY;
     for (int i = 0; i < texts.length; i++) {
       ParseSource src = new ParseSource("input_" + i, texts[i]);
       ParseResult result = parseText(src, diags, args);
       if (result.diags().hasErrors())
         break;
-      all.addAll(result.stmts());
+      all = all.merge(result.ast());
     }
     return new ParseResult(all, diags);
   }
@@ -39,26 +39,26 @@ public class ParseHelpers {
     if (args.resolveIncludes) {
       var incResult = IncludeResolver.resolve(diags, workingDir, files);
       if (diags.hasErrors())
-        return new ParseResult(List.of(), diags);
+        return new ParseResult(Ast.EMPTY, diags);
       ordered = incResult.orderedFiles;
     } else {
       ordered = new ArrayList<>();
       for (Path r : files) ordered.add(r.toAbsolutePath().normalize());
     }
 
-    var all = new ArrayList<Stmt>();
+    var all = Ast.EMPTY;
     for (Path file : ordered) {
       String text;
       try {
         text = Files.readString(file);
       } catch (Exception e) {
         diags.error("File: " + file.toString() + " [0:0] Failed to read file: " + e.getMessage());
-        return new ParseResult(List.of(), diags);
+        return new ParseResult(Ast.EMPTY, diags);
       }
       var result = parseText(new ParseSource(file.toString(), text), diags, args);
       if (result.diags().hasErrors())
         break;
-      all.addAll(result.stmts());
+      all = all.merge(result.ast());
     }
     return new ParseResult(all, diags);
   }
@@ -79,9 +79,9 @@ public class ParseHelpers {
 
     var tree = parser.script();
     if (diags.hasErrors()) {
-      return new ParseResult(List.of(), diags);
+      return new ParseResult(Ast.EMPTY, diags);
     }
-    var stmts = new AstBuilder().visitScript(tree);
-    return new ParseResult(stmts, diags);
+    Ast ast = new AstBuilder().visitScript(tree);
+    return new ParseResult(ast, diags);
   }
 }

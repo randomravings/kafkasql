@@ -1,4 +1,4 @@
 package streamsql.ast;
 
-public sealed interface AnyT
-    permits VoidT, PrimitiveT, CompositeT, ComplexT, TypeRef { }
+public sealed interface AnyT extends AstNode
+    permits VoidT, PrimitiveT, CompositeT, ComplexT, TypeReference { }

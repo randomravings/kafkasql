@@ -6,6 +6,7 @@ import java.io.Writer;
 import java.nio.file.*;
 import java.util.*;
 
+import streamsql.ast.Ast;
 import streamsql.ast.Stmt;
 
 public class Main {
@@ -120,7 +121,7 @@ public class Main {
         System.out.println("Errors:");
         pr.diags().errors().forEach(e -> System.out.println(" - " + e));
       } else if (printAst) {
-        printAst(pr.stmts());
+        printAst(pr.ast());
       }
     } else {
       // Normalize file args relative to workingDir (avoid double prefix)
@@ -138,23 +139,23 @@ public class Main {
         pr.diags().errors().forEach(e -> System.out.println(" - " + e));
       }
 
-      var vr = ParseHelpers.validate(catalog, pr.stmts());
+      var vr = ParseHelpers.validate(catalog, pr.ast());
       if (vr.diags().hasErrors()) {
         anyErrors = true;
         System.out.println("Validation errors:");
         vr.diags().errors().forEach(e -> System.out.println(" - " + e));
       } else if (printAst) {
-        printAst(vr.stmts());
+        printAst(vr.ast());
       }
     }
 
     if (anyErrors) System.exit(1);
   }
 
-  private static void printAst(List<Stmt> stmts) throws IOException {
+  private static void printAst(Ast ast) throws IOException {
     Writer out = new OutputStreamWriter(System.out);
     Printer printer = new AstPrinter(out);
-    printer.write(stmts);
+    printer.write(ast);
     out.flush();
   }
 

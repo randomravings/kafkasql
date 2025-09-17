@@ -23,12 +23,7 @@ statement
   : useStmt
   | readStmt
   | writeStmt
-  | createContext
-  | createScalar
-  | createEnum
-  | createStruct
-  | createUnion
-  | createStream
+  | createStmt
   ;
 
 /* ─────────────────────── Use Statement ─────────────────── */
@@ -37,20 +32,20 @@ useStmt
   ;
 
 useContext
-  : USE CONTEXT (DOT)? qname
+  : USE CONTEXT qname
   ;
 
 /* ─────────────────────── Read Statements ─────────────────── */
 readStmt
-  : READ FROM streamName typeBlock+
+  : READ FROM streamName readTypeBlock+
   ;
 
 streamName
   : qname
   ;
 
-typeBlock
-  : TYPE typeName readProjection whereClause?
+readTypeBlock
+  : TYPE identifier readProjection whereClause?
   ;
 
 readProjection
@@ -68,7 +63,7 @@ whereClause
 
 /* ─────────────────────── Write Statements ─────────────────── */
 writeStmt
-  : WRITE TO streamName TYPE typeName
+  : WRITE TO streamName TYPE identifier
     VALUES LPAREN writeValues RPAREN
   ;
 
@@ -77,24 +72,150 @@ writeValues
   ;
 
 /* ─────────────────────── Create Statements ─────────────────── */
-createContext
-  : CREATE CONTEXT identifier
+createStmt
+  : CREATE objDef
+  ;
+  
+objDef
+  : context
+  | complexType
+  | stream
   ;
 
-createScalar
-  : CREATE SCALAR typeName AS primitiveType
+context
+  : CONTEXT qname
+  ;
+
+/* ─────────────────────── Type System ─────────────────── */
+type
+  : primitiveType
+  | compositeType
+  | complexType
+  | typeReference
+  ;
+
+primitiveType
+  : booleanType
+  | int8Type
+  | int16Type
+  | int32Type
+  | int64Type
+  | float32Type
+  | float64Type
+  | stringType
+  | charType
+  | bytesType
+  | fixedType
+  | uuidType
+  | dateType
+  | timeType
+  | timestampType
+  | timestampTzType
+  | decimalType
+  ;
+
+booleanType
+  : BOOL
+  ;
+
+int8Type
+  : INT8
+  ;
+
+int16Type
+  : INT16
+  ;
+
+int32Type
+  : INT32
+  ;
+
+int64Type
+  : INT64
+  ;
+
+float32Type
+  : FLOAT32
+  ;
+
+float64Type
+  : FLOAT64
+  ;
+
+stringType
+  : STRING
+  ;
+
+charType
+  : CHAR LPAREN NUMBER_LIT RPAREN
+  ;
+
+bytesType
+  : BYTES
+  ;
+
+fixedType
+  : FIXED LPAREN NUMBER_LIT RPAREN
+  ;
+
+uuidType
+  : UUID
+  ;
+
+dateType
+  : DATE
+  ;
+
+timeType
+  : TIME LPAREN NUMBER_LIT RPAREN
+  ;
+
+timestampType
+  : TIMESTAMP LPAREN NUMBER_LIT RPAREN
+  ;
+
+timestampTzType
+  : TIMESTAMP_TZ LPAREN NUMBER_LIT RPAREN
+  ;
+
+decimalType
+  : DECIMAL LPAREN NUMBER_LIT COMMA NUMBER_LIT RPAREN
+  ;
+
+compositeType
+  : listType
+  | mapType
+  ;
+
+listType
+  : LIST LT type GT
+  ;
+
+mapType
+  : MAP  LT primitiveType COMMA type GT
+  ;
+
+complexType
+  : scalarType
+  | enumType
+  | structType
+  | unionType
+  ;
+
+scalarType
+  : SCALAR qname AS primitiveType
     (CHECK LPAREN expr RPAREN)?
     (DEFAULT literalValue)?
   ;
 
-createEnum
-  : CREATE (ENUM | MASK) typeName
-    (AS enumType)?
+enumType
+  : ENUM qname
+    (AS enumBaseType)?
     LPAREN enumSymbol (COMMA enumSymbol)* RPAREN
-    (DEFAULT identifier)?
+    (DEFAULT enumSymbolName)?
   ;
 
-enumType
+enumBaseType
   : INT8
   | INT16
   | INT32
@@ -102,85 +223,92 @@ enumType
   ;
 
 enumSymbol
-  : identifier COLON NUMBER_LIT
+  : enumSymbolName COLON enumSymbolValue
   ;
 
-createStruct
-  : CREATE STRUCT typeName
-    LPAREN fieldDef (COMMA fieldDef)* RPAREN
-  ;
-
-createUnion
-  : CREATE UNION typeName
-    LPAREN unionAlt (COMMA unionAlt)* RPAREN
-  ;
-
-unionAlt
-  : identifier dataType
-  ;
-
-fieldDef
-  : identifier dataType (OPTIONAL)? (DEFAULT literal)?
-  ;
-
-typeName
+enumSymbolName
   : identifier
   ;
 
-createStream
-  : CREATE (LOG | COMPACT) STREAM identifier streamTypeDef+
+enumSymbolValue
+  : NUMBER_LIT
   ;
 
-streamTypeDef
-  : TYPE (inlineStruct | qname) AS typeAlias distributionClause?
+structType
+  : STRUCT qname fieldList
   ;
 
-distributionClause
-  : DISTRIBUTE BY LPAREN identifier (COMMA identifier)* RPAREN
+fieldList
+  : LPAREN field (COMMA field)* RPAREN
   ;
 
-inlineStruct
-  : LPAREN fieldDef (COMMA fieldDef)* RPAREN
+field
+  : fieldName fieldType fieldNullable? fieldDefaultValue?
   ;
 
-typeAlias
+fieldName
   : identifier
   ;
 
-/* ─────────────────────── Type System ─────────────────── */
-dataType
-  : primitiveType
-  | compositeType
-  | complexType
+fieldType
+  : type
   ;
 
-primitiveType
-  : BOOL
-  | INT8
-  | INT16
-  | INT32
-  | INT64
-  | FLOAT32
-  | FLOAT64
-  | STRING
-  | CHAR          LPAREN NUMBER_LIT RPAREN
-  | BYTES
-  | FIXED         LPAREN NUMBER_LIT RPAREN
-  | UUID
-  | DATE
-  | TIME          LPAREN NUMBER_LIT RPAREN
-  | TIMESTAMP     LPAREN NUMBER_LIT RPAREN
-  | TIMESTAMP_TZ  LPAREN NUMBER_LIT RPAREN
-  | DECIMAL       LPAREN NUMBER_LIT COMMA NUMBER_LIT RPAREN
+fieldNullable
+  : NULL
   ;
 
-compositeType
-  : LIST LT dataType GT
-  | MAP  LT primitiveType COMMA dataType GT
+fieldDefaultValue
+  : DEFAULT literal
   ;
 
-complexType
+unionType
+  : UNION qname
+    LPAREN unionMember (COMMA unionMember)* RPAREN
+  ;
+
+unionMember
+  : unionMemberName unionMemberType
+  ;
+
+unionMemberName
+  : identifier
+  ;
+
+unionMemberType
+  : type
+  ;
+
+typeReference
   : qname
+  ;
+
+stream
+  : STREAM qname streamTypeList
+  ;
+
+streamType
+  : TYPE (streamTypeInline | streamTypeReference) AS streamTypeName distributeClause?
+  ;
+
+streamTypeList
+  : streamType+
+  ;
+
+streamTypeName
+  : identifier
+  ;
+
+distributeClause
+  : DISTRIBUTE BY LPAREN fieldName (COMMA fieldName)* RPAREN
+  ;
+
+streamTypeReference
+  : typeReference
+  ;
+
+streamTypeInline
+  : fieldList
   ;
 
 /* ──────────────── Expressions ──────────────── */
@@ -308,7 +436,11 @@ enumLiteral
 /* ──────────────── Identifiers ──────────────── */
 
 qname
-  : identifier (DOT identifier)*
+  : dotPrefix? identifier (DOT identifier)*
+  ;
+
+dotPrefix
+  : DOT
   ;
 
 identifier

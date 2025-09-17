@@ -125,16 +125,14 @@ CREATE ENUM Ccy (
 But we are adding some flexibility to how we define them.
 
 ```SQL
--- Create a bit mask backed by a 16 bit integer with a default flag of B
-CREATE MASK Flags AS INT16 (
+-- Create an Enum by a 16 bit integer with default symbol B
+CREATE Enum MoreStuff AS INT16 (
   A: 0,
   B: 1,
   C: 2
 )
 DEFAULT B;
 ```
-
-The key thing to bear in mind is that the MASK is essentually an enum, but the values correspond to bit index rather than values. Defaults and backing integers are valid for either `ENUM` or `MASK`.
 
 ### Structs
 
@@ -265,7 +263,7 @@ CREATE STRUCT ComplexDefaults (
 ## Current Parser (EBNF)
 
 ```EBNF
-/* converted on Tue Sep 16, 2025, 01:50 (UTC+02) by antlr_3-to-w3c v0.73-SNAPSHOT which is Copyright (c) 2011-2025 by Gunther Rademacher <grd@gmx.net> */
+/* converted on Wed Sep 17, 2025, 16:36 (UTC+02) by antlr_3-to-w3c v0.73-SNAPSHOT which is Copyright (c) 2011-2025 by Gunther Rademacher <grd@gmx.net> */
 
 script   ::= includeSection? ( statement SEMI )+ EOF
 includeSection
@@ -276,20 +274,15 @@ statement
          ::= useStmt
            | readStmt
            | writeStmt
-           | createContext
-           | createScalar
-           | createEnum
-           | createStruct
-           | createUnion
-           | createStream
+           | createStmt
 useStmt  ::= useContext
 useContext
-         ::= USE CONTEXT DOT? qname
-readStmt ::= READ FROM streamName typeBlock+
+         ::= USE CONTEXT qname
+readStmt ::= READ FROM streamName readTypeBlock+
 streamName
          ::= qname
-typeBlock
-         ::= TYPE typeName readProjection whereClause?
+readTypeBlock
+         ::= TYPE identifier readProjection whereClause?
 readProjection
          ::= ( STAR | readProjectionExpr ( COMMA readProjectionExpr )* )?
 readProjectionExpr
@@ -297,58 +290,126 @@ readProjectionExpr
 whereClause
          ::= WHERE expr
 writeStmt
-         ::= WRITE TO streamName TYPE typeName VALUES LPAREN writeValues RPAREN
+         ::= WRITE TO streamName TYPE identifier VALUES LPAREN writeValues RPAREN
 writeValues
          ::= structLiteral ( COMMA structLiteral )*
-createContext
-         ::= CREATE CONTEXT identifier
-createScalar
-         ::= CREATE SCALAR typeName AS primitiveType ( CHECK LPAREN expr RPAREN )? ( DEFAULT literalValue )?
-createEnum
-         ::= CREATE ( ENUM | MASK ) typeName ( AS enumType )? LPAREN enumSymbol ( COMMA enumSymbol )* RPAREN ( DEFAULT identifier )?
-enumType ::= INT8
+createStmt
+         ::= CREATE objDef
+objDef   ::= context
+           | complexType
+           | stream
+context  ::= CONTEXT qname
+type     ::= primitiveType
+           | compositeType
+           | complexType
+           | typeReference
+primitiveType
+         ::= booleanType
+           | int8Type
+           | int16Type
+           | int32Type
+           | int64Type
+           | float32Type
+           | float64Type
+           | stringType
+           | charType
+           | bytesType
+           | fixedType
+           | uuidType
+           | dateType
+           | timeType
+           | timestampType
+           | timestampTzType
+           | decimalType
+booleanType
+         ::= BOOL
+int8Type ::= INT8
+int16Type
+         ::= INT16
+int32Type
+         ::= INT32
+int64Type
+         ::= INT64
+float32Type
+         ::= FLOAT32
+float64Type
+         ::= FLOAT64
+stringType
+         ::= STRING
+charType ::= CHAR LPAREN NUMBER_LIT RPAREN
+bytesType
+         ::= BYTES
+fixedType
+         ::= FIXED LPAREN NUMBER_LIT RPAREN
+uuidType ::= UUID
+dateType ::= DATE
+timeType ::= TIME LPAREN NUMBER_LIT RPAREN
+timestampType
+         ::= TIMESTAMP LPAREN NUMBER_LIT RPAREN
+timestampTzType
+         ::= TIMESTAMP_TZ LPAREN NUMBER_LIT RPAREN
+decimalType
+         ::= DECIMAL LPAREN NUMBER_LIT COMMA NUMBER_LIT RPAREN
+compositeType
+         ::= listType
+           | mapType
+listType ::= LIST LT type GT
+mapType  ::= MAP LT primitiveType COMMA type GT
+complexType
+         ::= scalarType
+           | enumType
+           | structType
+           | unionType
+scalarType
+         ::= SCALAR qname AS primitiveType ( CHECK LPAREN expr RPAREN )? ( DEFAULT literalValue )?
+enumType ::= ENUM qname ( AS enumBaseType )? LPAREN enumSymbol ( COMMA enumSymbol )* RPAREN ( DEFAULT enumSymbolName )?
+enumBaseType
+         ::= INT8
            | INT16
            | INT32
            | INT64
 enumSymbol
-         ::= identifier COLON NUMBER_LIT
-createStruct
-         ::= CREATE STRUCT typeName LPAREN fieldDef ( COMMA fieldDef )* RPAREN
-createUnion
-         ::= CREATE UNION typeName LPAREN unionAlt ( COMMA unionAlt )* RPAREN
-unionAlt ::= identifier dataType
-fieldDef ::= identifier dataType OPTIONAL? ( DEFAULT literal )?
-typeName ::= identifier
-createStream
-         ::= CREATE ( LOG | COMPACT ) STREAM identifier streamTypeDef+
-streamTypeDef
-         ::= TYPE ( inlineStruct | qname ) AS typeAlias distributionClause?
-distributionClause
-         ::= DISTRIBUTE BY LPAREN identifier ( COMMA identifier )* RPAREN
-inlineStruct
-         ::= LPAREN fieldDef ( COMMA fieldDef )* RPAREN
-typeAlias
+         ::= enumSymbolName COLON enumSymbolValue
+enumSymbolName
          ::= identifier
-dataType ::= primitiveType
-           | compositeType
-           | complexType
-primitiveType
-         ::= BOOL
-           | INT8
-           | INT16
-           | INT32
-           | INT64
-           | FLOAT32
-           | FLOAT64
-           | STRING
-           | ( ( CHAR | FIXED | TIME | TIMESTAMP | TIMESTAMP_TZ ) LPAREN | DECIMAL LPAREN NUMBER_LIT COMMA ) NUMBER_LIT RPAREN
-           | BYTES
-           | UUID
-           | DATE
-compositeType
-         ::= ( LIST LT | MAP LT primitiveType COMMA ) dataType GT
-complexType
+enumSymbolValue
+         ::= NUMBER_LIT
+structType
+         ::= STRUCT qname fieldList
+fieldList
+         ::= LPAREN field ( COMMA field )* RPAREN
+field    ::= fieldName fieldType fieldNullable? fieldDefaultValue?
+fieldName
+         ::= identifier
+fieldType
+         ::= type
+fieldNullable
+         ::= NULL
+fieldDefaultValue
+         ::= DEFAULT literal
+unionType
+         ::= UNION qname LPAREN unionMember ( COMMA unionMember )* RPAREN
+unionMember
+         ::= unionMemberName unionMemberType
+unionMemberName
+         ::= identifier
+unionMemberType
+         ::= type
+typeReference
          ::= qname
+stream   ::= STREAM qname streamTypeList
+streamType
+         ::= TYPE ( streamTypeInline | streamTypeReference ) AS streamTypeName distributeClause?
+streamTypeList
+         ::= streamType+
+streamTypeName
+         ::= identifier
+distributeClause
+         ::= DISTRIBUTE BY LPAREN fieldName ( COMMA fieldName )* RPAREN
+streamTypeReference
+         ::= typeReference
+streamTypeInline
+         ::= fieldList
 expr     ::= orExpr
 orExpr   ::= andExpr ( OR andExpr )*
 andExpr  ::= notExpr ( AND notExpr )*
@@ -397,7 +458,9 @@ unionLiteral
          ::= identifier DOLLAR literal
 enumLiteral
          ::= identifier DOUBLE_COLON identifier
-qname    ::= identifier ( DOT identifier )*
+qname    ::= dotPrefix? identifier ( DOT identifier )*
+dotPrefix
+         ::= DOT
 identifier
          ::= ID
 
@@ -409,7 +472,7 @@ EOF      ::= $
 ## Current Lexer (EBNF)
 
 ```EBNF
-/* converted on Tue Sep 16, 2025, 01:52 (UTC+02) by antlr_4-to-w3c v0.73-SNAPSHOT which is Copyright (c) 2011-2025 by Gunther Rademacher <grd@gmx.net> */
+/* converted on Wed Sep 17, 2025, 16:35 (UTC+02) by antlr_4-to-w3c v0.73-SNAPSHOT which is Copyright (c) 2011-2025 by Gunther Rademacher <grd@gmx.net> */
 
 _        ::= WS
            | COMMENT
@@ -430,12 +493,9 @@ READ     ::= [Rr] [Ee] [Aa] [Dd]
 WRITE    ::= [Ww] [Rr] [Ii] [Tt] [Ee]
 FROM     ::= [Ff] [Rr] [Oo] [Mm]
 TO       ::= [Tt] [Oo]
-LOG      ::= [Ll] [Oo] [Gg]
-COMPACT  ::= [Cc] [Oo] [Mm] [Pp] [Aa] [Cc] [Tt]
 TYPE     ::= [Tt] [Yy] [Pp] [Ee]
 WHERE    ::= [Ww] [Hh] [Ee] [Rr] [Ee]
 AS       ::= [Aa] [Ss]
-OPTIONAL ::= [Oo] [Pp] [Tt] [Ii] [Oo] [Nn] [Aa] [Ll]
 VALUES   ::= [Vv] [Aa] [Ll] [Uu] [Ee] [Ss]
 OR       ::= [Oo] [Rr]
 AND      ::= [Aa] [Nn] [Dd]
@@ -473,7 +533,6 @@ BY       ::= [Bb] [Yy]
 BETWEEN  ::= [Bb] [Ee] [Tt] [Ww] [Ee] [Ee] [Nn]
 IN       ::= [Ii] [Nn]
 OF       ::= [Oo] [Ff]
-MASK     ::= [Mm] [Aa] [Ss] [Kk]
 CHECK    ::= [Cc] [Hh] [Ee] [Cc] [Kk]
 NUMBER_LIT
          ::= '-'? [0-9]+ ( ( '.' | [eE] [+#x2D]? ) [0-9]+ )?

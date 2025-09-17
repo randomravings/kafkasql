@@ -1,6 +1,3 @@
 package streamsql.ast;
 
-@SuppressWarnings("unchecked")
-public final record StringV(String value) implements AlphaV {
-    public AnyT type() { return StringT.get(); }
-}
+public final record StringV(Range range, String value) implements AlphaV { }

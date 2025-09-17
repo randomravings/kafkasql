@@ -1,3 +1,3 @@
 package streamsql.ast;
 
-public record EnumSymbol(Identifier name, IntegerV value) {}
+public record EnumSymbol(Range range, Identifier name, IntegerV value) implements AstNode {}

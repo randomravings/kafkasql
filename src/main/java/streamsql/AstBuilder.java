@@ -1,268 +1,484 @@
 package streamsql;
 
 import streamsql.ast.*;
-import streamsql.ast.EnumT;
 import streamsql.parse.SqlStreamParser;
 import streamsql.parse.SqlStreamParserBaseVisitor;
+import streamsql.parse.SqlStreamParser.ReadProjectionExprContext;
+import streamsql.parse.SqlStreamParser.ReadStmtContext;
+
+import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.tree.TerminalNode;
 
+import com.ibm.icu.impl.locale.LocaleValidityChecker.Where;
+
 import java.util.*;
+import java.util.function.Function;
 
 import static java.util.stream.Collectors.toList;
 
-public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
+public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
-  public List<Stmt> visitScript(SqlStreamParser.ScriptContext ctx) {
-    return ctx.statement().stream()
+  public Ast visitScript(SqlStreamParser.ScriptContext ctx) {
+    var range = range(ctx);
+    var statements = ctx.statement().stream()
         .map(s -> (Stmt) visit(s))
         .collect(toList());
+    return new Ast(range, statements);
   }
 
   @Override
   public Stmt visitStatement(SqlStreamParser.StatementContext ctx) {
     if (ctx.useStmt() != null) return (Stmt) visit(ctx.useStmt());
-    if (ctx.readStmt() != null) return (Stmt) visit(ctx.readStmt());
-    if (ctx.writeStmt() != null) return (Stmt) visit(ctx.writeStmt());
-    if (ctx.createContext() != null) return (Stmt) visit(ctx.createContext());
-    if (ctx.createScalar() != null) return (Stmt) visit(ctx.createScalar());
-    if (ctx.createEnum() != null) return (Stmt) visit(ctx.createEnum());
-    if (ctx.createStruct() != null) return (Stmt) visit(ctx.createStruct());
-    if (ctx.createUnion() != null) return (Stmt) visit(ctx.createUnion());
-    if (ctx.createStream() != null) return (Stmt) visit(ctx.createStream());
+    if (ctx.createStmt() != null) return visitCreateStmt(ctx.createStmt());
+    if (ctx.readStmt() != null) return (Stmt) visitReadStmt(ctx.readStmt());
+    if (ctx.writeStmt() != null) return (Stmt) visitWriteStmt(ctx.writeStmt());
     throw new IllegalStateException("unknown statement");
   }
 
-  // -- Contexts --------------------------------------------------------------
   @Override
-  public Stmt visitUseContext(SqlStreamParser.UseContextContext c) {
-    boolean absolute = c.DOT() != null;
+  public UseStmt visitUseStmt(SqlStreamParser.UseStmtContext c) {
+    if (c.useContext() != null) return visitUseContext(c.useContext());
+    throw new IllegalStateException("unknown use statement");
+  }
+
+  @Override
+  public UseContext visitUseContext(SqlStreamParser.UseContextContext c) {
+    Range range = range(c);
     QName qn = visitQname(c.qname());
-    return new UseContext(new Context(qn), absolute);
-  }
-
-  @Override public QName visitQname(SqlStreamParser.QnameContext q) {
-    List<Identifier> parts = q.identifier().stream().map(this::visitIdentifier).collect(toList());
-    return QName.of(parts);
+    return new UseContext(range, qn);
   }
 
   @Override
-  public Stmt visitCreateContext(SqlStreamParser.CreateContextContext c) {
-    Identifier name = visitIdentifier(c.identifier());
-    return new CreateContext(new Context(QName.of(name)));
-  }
+  public CreateStmt visitCreateStmt(SqlStreamParser.CreateStmtContext c) {
+    Range range = range(c);
+    if (c.objDef().context() != null) {
+      Context context = visitContext(c.objDef().context());
+      return new CreateContext(range, context);
 
-  // -- Type declarations -----------------------------------------------------
-  @Override
-  public Stmt visitCreateScalar(SqlStreamParser.CreateScalarContext c) {
-    Identifier name = visitIdentifier(c.typeName().identifier());
-    QName qn = QName.of(name);
-    PrimitiveT pt = visitPrimitiveType(c.primitiveType());
-    Optional<Expr> validation = c.expr() != null ? Optional.of((Expr)visitExpr(c.expr())) : Optional.empty();
-    Optional<PrimitiveV> def;
-    if (c.literalValue() != null) {
-      PrimitiveV l = visitLiteralValue(c.literalValue());
-      def = Optional.of(l);
-    } else {
-      def = Optional.empty();
     }
-    return new CreateScalar(new ScalarT(qn, pt, validation, def));
-  }
-
-  @Override
-  public CreateEnum visitCreateEnum(SqlStreamParser.CreateEnumContext c) {
-    Identifier name = visitIdentifier(c.typeName().identifier());
-    QName qn = QName.of(name);
-    BoolV isMasked = c.MASK() != null ? new BoolV(true) : new BoolV(false);
-    IntegerT enumType = (c.enumType() != null) ? visitEnumType(c.enumType()) : Int32T.get();
-    List<EnumSymbol> symbols = c.enumSymbol().stream().map(this::visitEnumSymbol).collect(toList());
-    Optional<Identifier> def = c.DEFAULT() != null ? Optional.of(visitIdentifier(c.identifier())) : Optional.empty();
-    return new CreateEnum(new EnumT(qn, enumType, isMasked, symbols, def));
-  }
-
-  @Override
-  public EnumSymbol visitEnumSymbol(SqlStreamParser.EnumSymbolContext c) {
-    Int64V value = int64(c.NUMBER_LIT());
-    return new EnumSymbol(visitIdentifier(c.identifier()), value);
-  }
-
-  @Override
-  public IntegerT visitEnumType(SqlStreamParser.EnumTypeContext c) {
-    if (c.INT8() != null) return Int8T.get();
-    if (c.INT16() != null) return Int16T.get();
-    if (c.INT32() != null) return Int32T.get();
-    if (c.INT64() != null) return Int64T.get();
-    return Int32T.get(); // default
-  }
-
-  @Override
-  public Stmt visitCreateStruct(SqlStreamParser.CreateStructContext c) {
-    Identifier name = visitIdentifier(c.typeName().identifier());
-    QName qn = QName.of(name);
-    List<Field> fs = c.fieldDef().stream().map(this::visitStructField).collect(toList());
-    return new CreateStruct(new StructT(qn, fs));
-  }
-
-  @Override
-  public Stmt visitCreateUnion(SqlStreamParser.CreateUnionContext c) {
-    Identifier name = visitIdentifier(c.typeName().identifier());
-    QName qn = QName.of(name);
-    List<UnionAlt> alts = c.unionAlt().stream()
-        .map(a -> new UnionAlt(visitIdentifier(a.identifier()), visitDataType(a.dataType())))
-        .collect(toList());
-    return new CreateUnion(new UnionT(qn, alts));
-  }
-
-  private Field visitStructField(SqlStreamParser.FieldDefContext f) {
-    // DEFAULT on a field may be any literal (including jsonLiteral). visitLiteral returns AnyV.
-    Optional<AnyV> def = Optional.empty();
-    if (f.DEFAULT() != null) {
-      if (f.literal() == null) {
-        throw new IllegalStateException("DEFAULT must be followed by a literal");
-      }
-      def = Optional.of((AnyV) visit(f.literal()));
+    if (c.objDef().complexType() != null) {
+      ComplexT complexT = visitComplexType(c.objDef().complexType());
+      return new CreateType(range, complexT);
     }
-    BoolV isOptional = f.OPTIONAL() != null ? new BoolV(true) : new BoolV(false);
-    return new Field(visitIdentifier(f.identifier()), visitDataType(f.dataType()), isOptional, def);
+    if (c.objDef().stream() != null) {
+      StreamT streamT = visitStream(c.objDef().stream());
+      return new CreateStream(range, streamT);
+    }
+    throw new IllegalStateException("unknown create statement");
   }
 
   @Override
-  public AnyT visitDataType(SqlStreamParser.DataTypeContext d) {
-    if (d.primitiveType() != null) return visitPrimitiveType(d.primitiveType());
-    if (d.compositeType() != null) return visitCompositeType(d.compositeType());
-    if (d.complexType() != null) return visitComplexType(d.complexType());
-    throw new IllegalStateException("unknown dataType");
+  public Context visitContext(SqlStreamParser.ContextContext c) {
+    Range range = range(c);
+    QName qn = visitQname(c.qname());
+    return new Context(range, qn);
+  }
+
+  @Override
+  public AnyT visitType(SqlStreamParser.TypeContext c) {
+    if (c.primitiveType() != null) return visitPrimitiveType(c.primitiveType());
+    if (c.compositeType() != null) return visitCompositeType(c.compositeType());
+    if (c.complexType() != null) return visitComplexType(c.complexType());
+    if (c.typeReference() != null) return visitTypeReference(c.typeReference());
+    throw new IllegalStateException("unknown type");
   }
 
   @Override
   public PrimitiveT visitPrimitiveType(SqlStreamParser.PrimitiveTypeContext p) {
-    if (p.BOOL() != null) return BoolT.get();
-    if (p.INT8() != null) return Int8T.get();
-    if (p.INT16() != null) return Int16T.get();
-    if (p.INT32() != null) return Int32T.get();
-    if (p.INT64() != null) return Int64T.get();
-    if (p.FLOAT32() != null) return Float32T.get();
-    if (p.FLOAT64() != null) return Float64T.get();
-    if (p.DECIMAL() != null) return DecimalT.get(int8(p.NUMBER_LIT(0)), int8(p.NUMBER_LIT(1)));
-    if (p.STRING() != null) return StringT.get();
-    if (p.CHAR() != null) return CharT.get(int32(p.NUMBER_LIT(0)));
-    if (p.BYTES() != null) return BytesT.get();
-    if (p.FIXED() != null) return FixedT.get(int32(p.NUMBER_LIT(0)));
-    if (p.UUID() != null) return UuidT.get();
-    if (p.DATE() != null) return DateT.get();
-    if (p.TIME() != null) return TimeT.get(int8(p.NUMBER_LIT(0)));
-    if (p.TIMESTAMP() != null) return TimestampT.get(int8(p.NUMBER_LIT(0)));
-    if (p.TIMESTAMP_TZ() != null) return TimestampTzT.get(int8(p.NUMBER_LIT(0)));
+    if (p.booleanType() != null) return visitBooleanType(p.booleanType());
+    if (p.int8Type() != null) return visitInt8Type(p.int8Type());
+    if (p.int16Type() != null) return visitInt16Type(p.int16Type());
+    if (p.int32Type() != null) return visitInt32Type(p.int32Type());
+    if (p.int64Type() != null) return visitInt64Type(p.int64Type());
+    if (p.float32Type() != null) return visitFloat32Type(p.float32Type());
+    if (p.float64Type() != null) return visitFloat64Type(p.float64Type());
+    if (p.decimalType() != null) return visitDecimalType(p.decimalType());
+    if (p.stringType() != null) return visitStringType(p.stringType());
+    if (p.charType() != null) return visitCharType(p.charType());
+    if (p.bytesType() != null) return visitBytesType(p.bytesType());
+    if (p.fixedType() != null) return visitFixedType(p.fixedType());
+    if (p.uuidType() != null) return visitUuidType(p.uuidType());
+    if (p.dateType() != null) return visitDateType(p.dateType());
+    if (p.timeType() != null) return visitTimeType(p.timeType());
+    if (p.timestampType() != null) return visitTimestampType(p.timestampType());
+    if (p.timestampTzType() != null) return visitTimestampTzType(p.timestampTzType());
     throw new IllegalStateException("unknown primitive type");
   }
 
   @Override
+  public BoolT visitBooleanType(SqlStreamParser.BooleanTypeContext c) {
+    return new BoolT(range(c));
+  }
+
+  @Override
+  public Int8T visitInt8Type(SqlStreamParser.Int8TypeContext c) {
+    return new Int8T(range(c));
+  }
+
+  @Override
+  public Int16T visitInt16Type(SqlStreamParser.Int16TypeContext c) {
+    return new Int16T(range(c));
+  }
+
+  @Override
+  public Int32T visitInt32Type(SqlStreamParser.Int32TypeContext c) {
+    return new Int32T(range(c));
+  }
+
+  @Override
+  public Int64T visitInt64Type(SqlStreamParser.Int64TypeContext c) {
+    return new Int64T(range(c));
+  }
+
+  @Override
+  public Float32T visitFloat32Type(SqlStreamParser.Float32TypeContext c) {
+    return new Float32T(range(c));
+  }
+
+  @Override
+  public Float64T visitFloat64Type(SqlStreamParser.Float64TypeContext c) {
+    return new Float64T(range(c));
+  }
+
+  @Override
+  public StringT visitStringType(SqlStreamParser.StringTypeContext c) {
+    return new StringT(range(c));
+  }
+
+  @Override
+  public CharT visitCharType(SqlStreamParser.CharTypeContext c) {
+    Range range = range(c);
+    int size = int32(c.NUMBER_LIT());
+    return new CharT(range, size);
+  }
+
+  @Override
+  public BytesT visitBytesType(SqlStreamParser.BytesTypeContext c) {
+    return new BytesT(range(c));
+  }
+
+  @Override
+  public FixedT visitFixedType(SqlStreamParser.FixedTypeContext c) {
+    Range range = range(c);
+    int size = int32(c.NUMBER_LIT());
+    return new FixedT(range, size);
+  }
+
+  @Override
+  public UuidT visitUuidType(SqlStreamParser.UuidTypeContext c) {
+    return new UuidT(range(c));
+  }
+
+  @Override
+  public DateT visitDateType(SqlStreamParser.DateTypeContext c) {
+    return new DateT(range(c));
+  }
+
+  @Override
+  public TimeT visitTimeType(SqlStreamParser.TimeTypeContext c) {
+    Range range = range(c);
+    byte precision = int8(c.NUMBER_LIT());
+    return new TimeT(range, precision);
+  }
+
+  @Override
+  public TimestampT visitTimestampType(SqlStreamParser.TimestampTypeContext c) {
+    Range range = range(c);
+    byte precision = int8(c.NUMBER_LIT());
+    return new TimestampT(range, precision);
+  }
+
+  @Override
+  public TimestampTzT visitTimestampTzType(SqlStreamParser.TimestampTzTypeContext c) {
+    Range range = range(c);
+    byte precision = int8(c.NUMBER_LIT());
+    return new TimestampTzT(range, precision);
+  }
+
+  @Override
+  public DecimalT visitDecimalType(SqlStreamParser.DecimalTypeContext c) {
+    Range range = range(c);
+    byte precision = int8(c.NUMBER_LIT(0));
+    byte scale = int8(c.NUMBER_LIT(1));
+    return new DecimalT(range, precision, scale);
+  }
+
+  @Override
   public AnyT visitCompositeType(SqlStreamParser.CompositeTypeContext c) {
-    if (c.LIST() != null) {
-      AnyT item = visitDataType(c.dataType());
-      return new ListT(item);
+    if (c.listType() != null) return visitListType(c.listType());
+    if (c.mapType() != null) return visitMapType(c.mapType());
+    throw new IllegalStateException("unknown composite type");
+  }
+
+  @Override
+  public ListT visitListType(SqlStreamParser.ListTypeContext c) {
+    Range range = range(c);
+    AnyT item = visitType(c.type());
+    return new ListT(range, item);
+  }
+
+  @Override
+  public MapT visitMapType(SqlStreamParser.MapTypeContext c) {
+    Range range = range(c);
+    PrimitiveT key = visitPrimitiveType(c.primitiveType());
+    AnyT val = visitType(c.type());
+    return new MapT(range, key, val);
+  }
+
+  @Override
+  public ComplexT visitComplexType(SqlStreamParser.ComplexTypeContext c) {
+    if (c.scalarType() != null) return visitScalarType(c.scalarType());
+    if (c.structType() != null) return visitStructType(c.structType());
+    if (c.enumType() != null) return visitEnumType(c.enumType());
+    if (c.unionType() != null) return visitUnionType(c.unionType());
+    throw new IllegalStateException("unknown complex type");
+  }
+
+  @Override
+  public ScalarT visitScalarType(SqlStreamParser.ScalarTypeContext c) {
+    Range range = range(c);
+    QName qn = visitQname(c.qname());
+    PrimitiveT pt = visitPrimitiveType(c.primitiveType());
+    AstOptionalNode<Expr> validation = c.expr() != null ? AstOptionalNode.of((Expr)visitExpr(c.expr())) : AstOptionalNode.empty();
+    AstOptionalNode<PrimitiveV> def;
+    if (c.literalValue() != null) {
+      PrimitiveV l = visitLiteralValue(c.literalValue());
+      def = AstOptionalNode.of(l);
     } else {
-      PrimitiveT key = visitPrimitiveType(c.primitiveType());
-      AnyT val = visitDataType(c.dataType());
-      return new MapT(key, val);
+      def = AstOptionalNode.empty();
     }
+    return new ScalarT(range, qn, pt, validation, def);
   }
 
   @Override
-  public AnyT visitComplexType(SqlStreamParser.ComplexTypeContext c) {
-    QName qn = typeRefQName(c.qname());
-    return new TypeRef(qn);
-  }
-
-  // -- CREATE STREAM --------------------------------------------------------
-  @Override
-  public Stmt visitCreateStream(SqlStreamParser.CreateStreamContext c) {
-    List<StreamType> alts = c.streamTypeDef().stream().map(std -> {
-      List<Identifier> dist = std.distributionClause() == null
-          ? List.of()
-          : std.distributionClause().identifier().stream().map(this::visitIdentifier).collect(toList());
-      if (std.inlineStruct() != null) {
-        List<Field> fs = std.inlineStruct().fieldDef().stream().map(this::visitStructField).collect(toList());
-        return new StreamInlineT(fs, visitIdentifier(std.typeAlias().identifier()), dist);
-      } else {
-        return new StreamReferenceT(new TypeRef(typeRefQName(std.qname())), visitIdentifier(std.typeAlias().identifier()), dist);
-      }
-    }).collect(toList());
-    QName qn = QName.of(visitIdentifier(c.identifier()));
-    DataStream s = c.LOG() != null ? new StreamLog(qn, alts) : new StreamCompact(qn, alts);
-    return new CreateStream(s);
-  }
-
-  // -- READ ---------------------------------------------------------------
-  @Override
-  public Stmt visitReadStmt(SqlStreamParser.ReadStmtContext c) {
-    QName stream = typeRefQName(c.streamName().qname());
-    List<ReadSelection> blocks = c.typeBlock().stream().map(tb -> {
-      Identifier tn = visitIdentifier(tb.typeName().identifier());
-      Projection proj = visitReadProjection(tb.readProjection());
-      Optional<WhereClause> where = tb.whereClause() != null ? Optional.of(new WhereClause((Expr) visit(tb.whereClause().expr()))) : Optional.empty();
-      return new ReadSelection(tn, proj, where);
-    }).collect(toList());
-    return new ReadStmt(stream, blocks);
+  public EnumT visitEnumType(SqlStreamParser.EnumTypeContext c) {
+    Range range = range(c);
+    QName name = visitQname(c.qname());
+    AstOptionalNode<IntegerT> type = c.enumBaseType() != null ? AstOptionalNode.of(visitEnumBaseType(c.enumBaseType())) : AstOptionalNode.empty();
+    EnumSymbolList symbols = listContext(c.enumSymbol(), this::visitEnumSymbol, EnumSymbolList::new);
+    AstOptionalNode<Identifier> defaultValue = c.DEFAULT() != null ? AstOptionalNode.of(visitEnumSymbolName(c.enumSymbolName())) : AstOptionalNode.empty();
+    return new EnumT(range, name, type, symbols, defaultValue);
   }
 
   @Override
-  public Projection visitReadProjection(SqlStreamParser.ReadProjectionContext ctx) {
-    if (ctx.getStart().getType() == SqlStreamParser.STAR) {
-      return ProjectionAll.getInstance();
-    } else {
-      List<ProjectionExpr> items = new ArrayList<>();
-      ctx.readProjectionExpr().stream().map(this::visitReadProjectionExpr).forEach(items::add);
-      return new ProjectionList(items);
+  public IntegerT visitEnumBaseType(SqlStreamParser.EnumBaseTypeContext c) {
+    Range range = range(c);
+    if (c.INT8() != null) return new Int8T(range);
+    if (c.INT16() != null) return new Int16T(range);
+    if (c.INT32() != null) return new Int32T(range);
+    if (c.INT64() != null) return new Int64T(range);
+    throw new IllegalStateException("unknown enum type");
+  }
+
+  @Override
+  public EnumSymbol visitEnumSymbol(SqlStreamParser.EnumSymbolContext c) {
+    Range range = range(c);
+    Identifier name = visitEnumSymbolName(c.enumSymbolName());
+    IntegerV value = visitEnumSymbolValue(c.enumSymbolValue());
+    return new EnumSymbol(range, name, value);
+  }
+
+  @Override
+  public Identifier visitEnumSymbolName(SqlStreamParser.EnumSymbolNameContext c) {
+    return visitIdentifier(c.identifier());
+  }
+
+  @Override
+  public IntegerV visitEnumSymbolValue(SqlStreamParser.EnumSymbolValueContext c) {
+    Range range = range(c);
+    long value = int64(c.NUMBER_LIT());
+    return new Int64V(range, value);
+  }
+
+  @Override
+  public StructT visitStructType(SqlStreamParser.StructTypeContext c) {
+    Range range = range(c);
+    QName name = visitQname(c.qname());
+    AstListNode<Field> fs = visitFieldList(c.fieldList());
+    return new StructT(range, name, fs);
+  }
+
+  @Override
+  public FieldList visitFieldList(SqlStreamParser.FieldListContext c) {
+    return listContext(c.field(), this::visitField, FieldList::new);
+  }
+
+  @Override
+  public Field visitField(SqlStreamParser.FieldContext c) {
+    Range range = range(c);
+    Identifier name = visitFieldName(c.fieldName());
+    AnyT type = visitFieldType(c.fieldType());
+    AstOptionalNode<NullV> nullable = AstOptionalNode.empty();
+    AstOptionalNode<AnyV> defaultValue = AstOptionalNode.empty();
+    if (c.fieldNullable() != null) {
+      NullV n = visitFieldNullable(c.fieldNullable());
+      nullable = AstOptionalNode.of(n);
     }
-  }
-
-  @Override
-  public ProjectionExpr visitReadProjectionExpr(SqlStreamParser.ReadProjectionExprContext ctx) {
-    Expr expr = visitExpr(ctx.expr());
-    Optional<Identifier> alias = ctx.identifier() != null ? Optional.of(visitIdentifier(ctx.identifier())) : Optional.empty();
-    return new ProjectionExpr(expr, alias);
-  }
-
-
-  // -- WRITE --------------------------------------------------------------
-  @Override
-  public WriteStmt visitWriteStmt(SqlStreamParser.WriteStmtContext c) {
-    QName stream = typeRefQName(c.streamName().qname());
-    Identifier typeName = visitIdentifier(c.typeName().identifier());
-    List<StructV> rows = visitWriteValues(c.writeValues());
-    if(rows.isEmpty()) throw new IllegalArgumentException("No VALUES provided");
-    return new WriteStmt(stream, typeName, rows);
-  }
-
-  @Override
-  public List<StructV> visitWriteValues(SqlStreamParser.WriteValuesContext ctx) {
-    return ctx.structLiteral().stream().map(this::visitStructLiteral).collect(toList());
-  }
-
-  @Override
-  public StructV visitStructLiteral(SqlStreamParser.StructLiteralContext ctx) {
-    Map<Identifier, AnyV> entries = new LinkedHashMap<>();
-    ctx.structEntry().stream().map(this::visitStructEntry).forEach(e -> entries.put(e.getKey(), e.getValue()));
-    return new StructV(entries);
-  }
-
-  @Override
-  public Map.Entry<Identifier, AnyV> visitStructEntry(SqlStreamParser.StructEntryContext ctx) {
-    Identifier key = visitIdentifier(ctx.identifier());
-    AnyV val = visitLiteral(ctx.literal());
-    return Map.entry(key, val);
-  }
-
-  @Override
-  public MapV visitMapLiteral(SqlStreamParser.MapLiteralContext ctx) {
-    Map<PrimitiveV, AnyV> m = new LinkedHashMap<>();
-    for (var e : ctx.mapEntry()) {
-      PrimitiveV key = visitLiteralValue(e.literalValue());
-      AnyV val = visitLiteral(e.literal());
-      m.put(key, val);
+    if (c.fieldDefaultValue() != null) {
+      AnyV l = visitFieldDefaultValue(c.fieldDefaultValue());
+      defaultValue = AstOptionalNode.of(l);
     }
-    return new MapV(m);
+    return new Field(range, name, type, nullable, defaultValue);
+  }
+
+  @Override
+  public Identifier visitFieldName(SqlStreamParser.FieldNameContext c) {
+    return visitIdentifier(c.identifier());
+  }
+
+  @Override
+  public AnyT visitFieldType(SqlStreamParser.FieldTypeContext c) {
+    return visitType(c.type());
+  }
+
+  @Override
+  public NullV visitFieldNullable(SqlStreamParser.FieldNullableContext c) {
+    Range range = range(c);
+    if (c.NULL() != null) return new NullV(range);
+    throw new IllegalStateException("unknown field nullable");
+  }
+
+  @Override
+  public AnyV visitFieldDefaultValue(SqlStreamParser.FieldDefaultValueContext c) {
+    return visitLiteral(c.literal());
+  }
+
+  @Override
+  public UnionT visitUnionType(SqlStreamParser.UnionTypeContext c) {
+    Range range = range(c);
+    QName name = visitQname(c.qname());
+    UnionMemberList alts = listContext(c.unionMember(), this::visitUnionMember, UnionMemberList::new);
+    return new UnionT(range, name, alts);
+  }
+
+  @Override
+  public UnionMember visitUnionMember(SqlStreamParser.UnionMemberContext c) {
+    Range range = range(c);
+    Identifier name = visitUnionMemberName(c.unionMemberName());
+    AnyT type = visitUnionMemberType(c.unionMemberType());
+    return new UnionMember(range, name, type);
+  }
+
+  @Override
+  public Identifier visitUnionMemberName(SqlStreamParser.UnionMemberNameContext c) {
+    return visitIdentifier(c.identifier());
+  }
+
+  @Override
+  public AnyT visitUnionMemberType(SqlStreamParser.UnionMemberTypeContext c) {
+    return visitType(c.type());
+  }
+
+  @Override
+  public StreamT visitStream(SqlStreamParser.StreamContext c) {
+    Range range = range(c);
+    QName name = visitQname(c.qname());
+    AstListNode<StreamType> types = visitStreamTypeList(c.streamTypeList());
+    return new StreamT(range, name, types);
+  }
+
+  @Override
+  public StreamTypeList visitStreamTypeList(SqlStreamParser.StreamTypeListContext c) {
+    return listContext(c.streamType(), this::visitStreamType, StreamTypeList::new);
+  }
+
+  @Override
+  public StreamType visitStreamType(SqlStreamParser.StreamTypeContext c) {
+    Range range = range(c);
+    Identifier streamTypeName = visitStreamTypeName(c.streamTypeName());
+    AstOptionalNode<DistributeClause> distributeClause = AstOptionalNode.empty();
+    if (c.distributeClause() != null) {
+      var dc = visitDistributeClause(c.distributeClause());
+      distributeClause = AstOptionalNode.of(dc);
+    }
+    if( c.streamTypeReference() != null) {
+      TypeReference typeReference = visitStreamTypeReference(c.streamTypeReference());
+      return new StreamReferenceT(range, streamTypeName, typeReference, distributeClause);
+    }
+    if( c.streamTypeInline() != null) {
+      AstListNode<Field> fieldList = visitStreamTypeInline(c.streamTypeInline());
+      return new StreamInlineT(range, streamTypeName, fieldList, distributeClause);
+    }
+    throw new IllegalStateException("unknown stream type");
+  }
+
+  public Identifier visitStreamTypeName(SqlStreamParser.StreamTypeNameContext c) {
+    return visitIdentifier(c.identifier());
+  }
+
+  public DistributeClause visitDistributeClause(SqlStreamParser.DistributeClauseContext c) {
+    Range range = range(c);
+    IdentifierList keys = listContext(c.fieldName(), this::visitFieldName, IdentifierList::new);
+    return new DistributeClause(range, keys);
+  }
+
+  @Override
+  public TypeReference visitStreamTypeReference(SqlStreamParser.StreamTypeReferenceContext c) {
+    return visitTypeReference(c.typeReference());
+  }
+
+  @Override
+  public TypeReference visitTypeReference(SqlStreamParser.TypeReferenceContext c) {
+    Range range = range(c);
+    QName qn = visitQname(c.qname());
+    return new TypeReference(range, qn);
+  }
+
+  @Override
+  public AstListNode<Field> visitStreamTypeInline(SqlStreamParser.StreamTypeInlineContext c) {
+    return visitFieldList(c.fieldList());
+  }
+
+  @Override
+  public ReadStmt visitReadStmt(ReadStmtContext ctx) {
+    Range range = range(ctx);
+    QName streamName = visitStreamName(ctx.streamName());
+    ReadTypeBlockList selections = listContext(ctx.readTypeBlock(), this::visitReadTypeBlock, ReadTypeBlockList::new);
+    return new ReadStmt(range, streamName, selections);
+  }
+
+  @Override
+  public ReadTypeBlock visitReadTypeBlock(SqlStreamParser.ReadTypeBlockContext c) {
+    Range range = range(c);
+    Identifier alias = visitIdentifier(c.identifier());
+    Projection projection = visitReadProjection(c.readProjection());
+    AstOptionalNode<WhereClause> where = AstOptionalNode.empty();
+    if (c.whereClause() != null)
+      where = visitWhereClause(c.whereClause());
+    return new ReadTypeBlock(range, alias, projection, where);
+  }
+
+  @Override
+  public Projection visitReadProjection(SqlStreamParser.ReadProjectionContext c) {
+    Range range = range(c);
+    if (c.STAR() != null)
+      return new ProjectionAll(range);
+    return listContext(c.readProjectionExpr(), this::visitReadProjectionExpr, ProjectionList::new);
+  }
+
+  @Override
+  public ProjectionExpr visitReadProjectionExpr(SqlStreamParser.ReadProjectionExprContext c) {
+    Range range = range(c);
+    Expr e = visitExpr(c.expr());
+    AstOptionalNode<Identifier> alias = AstOptionalNode.empty();
+    if (c.identifier() != null) {
+      Identifier a = visitIdentifier(c.identifier());
+      alias = AstOptionalNode.of(a);
+    }
+    return new ProjectionExpr(range, e, alias);
+  }
+
+  @Override
+  public AstOptionalNode<WhereClause> visitWhereClause(SqlStreamParser.WhereClauseContext c) {
+    Range range = range(c);
+    Expr condition = visitExpr(c.expr());
+    return AstOptionalNode.of(new WhereClause(range, condition));
+  }
+
+  @Override
+  public QName visitStreamName(SqlStreamParser.StreamNameContext c) {
+    return visitQname(c.qname());
   }
 
   @Override
@@ -272,28 +488,29 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
 
   @Override
   public Expr visitOrExpr(SqlStreamParser.OrExprContext ctx) {
-    List<Expr> exprs = ctx.andExpr().stream().map(e -> (Expr) visit(e)).collect(toList());
+    ExprList exprs = listContext(ctx.andExpr(), this::visitAndExpr, ExprList::new);
     return exprs.size() == 1 ? exprs.get(0) : fold(exprs, InfixOp.OR);
   }
 
   @Override
   public Expr visitAndExpr(SqlStreamParser.AndExprContext ctx) {
-    List<Expr> exprs = ctx.notExpr().stream().map(e -> (Expr) visit(e)).collect(toList());
+    ExprList exprs = listContext(ctx.notExpr(), this::visitNotExpr, ExprList::new);
     return exprs.size() == 1 ? exprs.get(0) : fold(exprs, InfixOp.AND);
   }
 
   @Override
   public Expr visitNotExpr(SqlStreamParser.NotExprContext ctx) {
     if (ctx.NOT() != null) {
-      Expr inner = (Expr) visit(ctx.notExpr());
-      return new PrefixExpr(PrefixOp.NOT, inner, VoidT.get());
+      Range range = range(ctx);
+      Expr inner = (Expr) visitNotExpr(ctx.notExpr());
+      return new PrefixExpr(range, PrefixOp.NOT, inner, new VoidT(range));
+    } else {
+      return (Expr) visit(ctx.cmpExpr());
     }
-    return (Expr) visit(ctx.cmpExpr());
   }
 
   @Override
   public Expr visitCmpExpr(SqlStreamParser.CmpExprContext ctx) {
-    // leftmost shiftExpr (grammar changed from mulExpr -> shiftExpr)
     Expr left = (Expr) visit(ctx.shiftExpr().get(0));
     if (ctx.shiftExpr().size() == 1 && ctx.getChildCount() == 1) return left;
 
@@ -303,51 +520,65 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
       var child = ctx.getChild(i);
       String tokenText = child.getText();
       switch (tokenText) {
-        case "=":
-          result = new InfixExpr(InfixOp.EQ, result, (Expr) visit(ctx.shiftExpr().get(shiftIndex++)), VoidT.get());
+        case "=": {
+          Expr right = visitShiftExpr(ctx.shiftExpr().get(shiftIndex++));
+          result = mkInfix(InfixOp.EQ, result, right);
           break;
-        case "<>":
-        case "!=":
-          result = new InfixExpr(InfixOp.NEQ, result, (Expr) visit(ctx.shiftExpr().get(shiftIndex++)), VoidT.get());
+        }
+        case "<>": {
+          Expr right = visitShiftExpr(ctx.shiftExpr().get(shiftIndex++));
+          result = mkInfix(InfixOp.NEQ, result, right);
           break;
-        case "<":
-          result = new InfixExpr(InfixOp.LT, result, (Expr) visit(ctx.shiftExpr().get(shiftIndex++)), VoidT.get());
+        }
+        case "<": {
+          Expr right = visitShiftExpr(ctx.shiftExpr().get(shiftIndex++));
+          result = mkInfix(InfixOp.LT, result, right);
           break;
-        case "<=":
-          result = new InfixExpr(InfixOp.LTE, result, (Expr) visit(ctx.shiftExpr().get(shiftIndex++)), VoidT.get());
+        }
+        case "<=": {
+          Expr right = visitShiftExpr(ctx.shiftExpr().get(shiftIndex++));
+          result = mkInfix(InfixOp.LTE, result, right);
           break;
-        case ">":
-          result = new InfixExpr(InfixOp.GT, result, (Expr) visit(ctx.shiftExpr().get(shiftIndex++)), VoidT.get());
+        }
+        case ">": {
+          Expr right = visitShiftExpr(ctx.shiftExpr().get(shiftIndex++));
+          result = mkInfix(InfixOp.GT, result, right);
           break;
-        case ">=":
-          result = new InfixExpr(InfixOp.GTE, result, (Expr) visit(ctx.shiftExpr().get(shiftIndex++)), VoidT.get());
+        }
+        case ">=": {
+          Expr right = visitShiftExpr(ctx.shiftExpr().get(shiftIndex++));
+          result = mkInfix(InfixOp.GTE, result, right);
           break;
+        }
         default:
           if (child instanceof TerminalNode) {
             String up = tokenText.toUpperCase(Locale.ROOT);
             if (up.equals("IS")) {
               String nxt = ctx.getChild(i + 1).getText().toUpperCase(Locale.ROOT);
               if (nxt.equals("NULL")) {
-                result = new InfixExpr(InfixOp.IS_NULL, result, NullV.INSTANCE, VoidT.get());
+                // IS NULL -> postfix operator
+                result = mkPostfix(PostfixOp.IS_NULL, result);
                 i++;
               } else if (nxt.equals("NOT")) {
                 String nxt2 = ctx.getChild(i + 2).getText().toUpperCase(Locale.ROOT);
                 if (nxt2.equals("NULL")) {
-                  result = new InfixExpr(InfixOp.IS_NOT_NULL, result, NullV.INSTANCE, VoidT.get());
+                  // IS NOT NULL -> postfix operator
+                  result = mkPostfix(PostfixOp.IS_NOT_NULL, result);
                   i += 2;
                 } else {
                   throw new IllegalStateException("Unsupported IS expression");
                 }
-              } else {
-                throw new IllegalStateException("Unsupported IS expression");
               }
+
             } else if (up.equals("BETWEEN")) {
               Expr lower = (Expr) visit(ctx.shiftExpr().get(shiftIndex++));
               Expr upper = (Expr) visit(ctx.shiftExpr().get(shiftIndex++));
-              result = new Ternary(TernaryOp.BETWEEN, result, lower, upper, VoidT.get());
+              Range r = new Range(result.range().start(), upper.range().end());
+              result = new Ternary(r, TernaryOp.BETWEEN, result, lower, upper, new VoidT(r));
             } else if (up.equals("IN")) {
-              List<AnyV> lits = ctx.literal().stream().map(l -> (AnyV) visit(l)).collect(toList());
-              result = new InfixExpr(InfixOp.IN, result, new ListV(lits), VoidT.get());
+              ListV lits = listContext(ctx.literal(), this::visitLiteral, ListV::new);
+              Range r = range(ctx);
+              result = new InfixExpr(r, InfixOp.IN, result, lits, new VoidT(r));
             }
           }
           break;
@@ -358,35 +589,35 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
 
   @Override
   public Expr visitAddExpr(SqlStreamParser.AddExprContext ctx) {
-    List<Expr> exprs = ctx.mulExpr().stream().map(e -> (Expr) visit(e)).collect(toList());
+    ExprList exprs = listContext(ctx.mulExpr(), this::visitMulExpr, ExprList::new);
     if (exprs.size() == 1) return exprs.get(0);
     Expr res = exprs.get(0);
     for (int i = 1; i < exprs.size(); i++) {
       String op = ctx.getChild(2 * i - 1).getText();
       InfixOp bop = op.equals("+") ? InfixOp.ADD : InfixOp.SUB;
-      res = new InfixExpr(bop, res, exprs.get(i), VoidT.get());
+      Expr right = exprs.get(i);
+      res = mkInfix(bop, res, right);
     }
     return res;
   }
 
   @Override
   public Expr visitMulExpr(SqlStreamParser.MulExprContext ctx) {
-    List<SqlStreamParser.UnaryExprContext> parts = ctx.unaryExpr();
-    Expr result = (Expr) visit(parts.get(0));
-    if (parts.size() == 1) return result;
-
+    ExprList parts = listContext(ctx.unaryExpr(), this::visitUnaryExpr, ExprList::new);
+    if (parts.size() == 1) return parts.get(0);
+    Expr result = parts.get(0);
     for (int i = 1; i < parts.size(); i++) {
       String op = ctx.getChild(2 * i - 1).getText();
-      Expr right = (Expr) visit(parts.get(i));
+      Expr right = parts.get(i);
       switch (op) {
         case "*":
-          result = new InfixExpr(InfixOp.MUL, result, right, VoidT.get());
+          result = mkInfix(InfixOp.MUL, result, right);
           break;
         case "/":
-          result = new InfixExpr(InfixOp.DIV, result, right, VoidT.get());
+          result = mkInfix(InfixOp.DIV, result, right);
           break;
         case "%":
-          result = new InfixExpr(InfixOp.MOD, result, right, VoidT.get());
+          result = mkInfix(InfixOp.MOD, result, right);
           break;
         default:
           throw new IllegalStateException("Unknown multiplicative operator: " + op);
@@ -397,16 +628,16 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
 
   @Override
   public Expr visitShiftExpr(SqlStreamParser.ShiftExprContext ctx) {
-    List<Expr> parts = ctx.addExpr().stream().map(e -> (Expr) visit(e)).collect(toList());
+    ExprList parts = listContext(ctx.addExpr(), this::visitAddExpr, ExprList::new);
     if (parts.size() == 1) return parts.get(0);
     Expr res = parts.get(0);
     for (int i = 1; i < parts.size(); i++) {
       String op = ctx.getChild(2 * i - 1).getText();
       Expr right = parts.get(i);
       if (op.equals("<<")) {
-        res = new InfixExpr(InfixOp.SHL, res, right, VoidT.get());
+        res = mkInfix(InfixOp.SHL, res, right);
       } else if (op.equals(">>")) {
-        res = new InfixExpr(InfixOp.SHR, res, right, VoidT.get());
+        res = mkInfix(InfixOp.SHR, res, right);
       } else {
         throw new IllegalStateException("Unknown shift operator: " + op);
       }
@@ -418,7 +649,8 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
   public Expr visitUnaryExpr(SqlStreamParser.UnaryExprContext ctx) {
     if (ctx.MINUS() != null) {
       Expr inner = (Expr) visit(ctx.unaryExpr());
-      return new PrefixExpr(PrefixOp.NEG, inner, VoidT.get());
+      Range r = new Range(inner.range().start(), inner.range().end());
+      return new PrefixExpr(r, PrefixOp.NEG, inner, new VoidT(r));
     }
     // otherwise it's a postfixExpr
     return (Expr) visit(ctx.postfixExpr());
@@ -431,34 +663,47 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
     if (ctx.getChildCount() == 1)
       return node;
 
-    // We will conservatively map postfix chains to the old Accessor/Segment/IndexAccessor
-    // structures when possible (identifier-based chains or literal indexers).
-    // If an index expr is non-literal we reject (unsupported here).
+    // iterate parse-tree children so we preserve member/index order
     int childCount = ctx.getChildCount();
-    // primary is child 0, subsequent children are member/index nodes/terminals
     for (int i = 1; i < childCount; i++) {
       var ch = ctx.getChild(i);
-      switch (ch) {
-        case SqlStreamParser.MemberAccessContext ma:
-          Identifier member = visitIdentifier(ma.identifier());
-          node = new MemberExpr(node, member, VoidT.get());
-          break;
-        case SqlStreamParser.IndexAccessContext ix:
-          Expr index = visitExpr(ix.expr());
-          node = new IndexExpr(node, index, VoidT.get());
-          break;
-        default:
-          String t = ch.getText();
-          if (t.equals("." ) || t.equals("[" ) || t.equals("]"))
-            continue;
-          throw new IllegalStateException("Unexpected token in postfix expression: " + t);
+      if (ch instanceof SqlStreamParser.MemberAccessContext) {
+        SqlStreamParser.MemberAccessContext ma = (SqlStreamParser.MemberAccessContext) ch;
+        MemberExpr memberAccess = visitMemberAccess(ma);
+        node = memberAccess.withTarget(node);
+        continue;
+      } else if (ch instanceof SqlStreamParser.IndexAccessContext) {
+        SqlStreamParser.IndexAccessContext ix = (SqlStreamParser.IndexAccessContext) ch;
+        IndexExpr indexAccess = visitIndexAccess(ix);
+        node = indexAccess.withTarget(node);
+        continue;
+      } else {
+        String t = ch.getText();
+        if (t.equals(".") || t.equals("[") || t.equals("]"))
+          continue;
+        throw new IllegalStateException("Unexpected token in postfix expression: " + t);
       }
     }
     return node;
   }
 
   @Override
+  public IndexExpr visitIndexAccess(SqlStreamParser.IndexAccessContext ctx) {
+    Range range = range(ctx);
+    Expr index = visitExpr(ctx.expr());
+    return new IndexExpr(range, null, index, new VoidT(range));
+  }
+
+  @Override
+  public MemberExpr visitMemberAccess(SqlStreamParser.MemberAccessContext ctx) {
+    Range range = range(ctx);
+    Identifier member = visitIdentifier(ctx.identifier());
+    return new MemberExpr(range, null, member, new VoidT(range));
+  }
+
+  @Override
   public Expr visitPrimary(SqlStreamParser.PrimaryContext ctx) {
+    Range range = range(ctx);
     if (ctx.LPAREN() != null) {
       return (Expr) visit(ctx.expr());
     }
@@ -466,97 +711,226 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<Object> {
       return (Expr) visit(ctx.literal());
     }
     if (ctx.identifier() != null) {
-      return new Symbol(visitIdentifier(ctx.identifier()), VoidT.get());
+      return new IdentifierExpr(range,visitIdentifier(ctx.identifier()), new VoidT(range));
     }
     throw new IllegalStateException("unknown primary");
   }
 
-  // dispatch between literalValue and literalSeq (new grammar)
   @Override
   public AnyV visitLiteral(SqlStreamParser.LiteralContext c) {
-    if (c.NULL() != null) return NullV.INSTANCE;
-    if (c.literalValue() != null) return (AnyV) visitLiteralValue(c.literalValue());
-    if (c.literalSeq() != null) return (AnyV) visitLiteralSeq(c.literalSeq());
-    if (c.structLiteral() != null) return (AnyV) visitStructLiteral(c.structLiteral());
-    if (c.enumLiteral() != null) return (AnyV) visitEnumLiteral(c.enumLiteral());
-    if (c.unionLiteral() != null) return (AnyV) visitUnionLiteral(c.unionLiteral());
+    if (c.NULL() != null) return new NullV(range(c));
+    if (c.literalValue() != null) return visitLiteralValue(c.literalValue());
+    if (c.literalSeq() != null) return visitLiteralSeq(c.literalSeq());
+    if (c.structLiteral() != null) return visitStructLiteral(c.structLiteral());
+    if (c.enumLiteral() != null) return visitEnumLiteral(c.enumLiteral());
+    if (c.unionLiteral() != null) return visitUnionLiteral(c.unionLiteral());
     throw new IllegalStateException("unknown literal");
   }
 
   @Override
   public PrimitiveV visitLiteralValue(SqlStreamParser.LiteralValueContext c) {
-    if (c.STRING_LIT() != null) return string(c.STRING_LIT());
-    if (c.NUMBER_LIT() != null) return fractional(c.NUMBER_LIT());
-    if (c.TRUE() != null) return new BoolV(true);
-    if (c.FALSE() != null) return new BoolV(false);
-    throw new IllegalStateException("unknown literalValue");
+    Range range = range(c);
+    if (c.TRUE() != null) return new BoolV(range, true);
+    if (c.FALSE() != null) return new BoolV(range, false);
+    if (c.STRING_LIT() != null) return new StringV(range(c), unquote(c.STRING_LIT().getText()));
+    if (c.NUMBER_LIT() != null) return new Float64V(range(c), float64(c.NUMBER_LIT()));
+    if (c.BYTES_LIT() != null) return new BytesV(range(c), bytes(c.BYTES_LIT()));
+    throw new IllegalStateException("unknown literal value");
+  }
+
+  @Override
+  public CompositeV visitLiteralSeq(SqlStreamParser.LiteralSeqContext c) {
+    if (c.listLiteral() != null) {
+      return visitListLiteral(c.listLiteral());
+    } else if (c.mapLiteral() != null) {
+      return visitMapLiteral(c.mapLiteral());
+    }
+    throw new IllegalStateException("unknown literal sequence");
+  }
+
+  @Override
+  public ListV visitListLiteral(SqlStreamParser.ListLiteralContext c) {
+    return listContext(c.literal(), this::visitLiteral, ListV::new);
+  }
+
+  @Override
+  public MapV visitMapLiteral(SqlStreamParser.MapLiteralContext c) {
+    return mapContext(c.mapEntry(), this::visitMapEntry, MapV::new);
+  }
+
+  @Override
+  public AstMapEntryNode<PrimitiveV, AnyV> visitMapEntry(SqlStreamParser.MapEntryContext c) {
+    Range range = range(c);
+    PrimitiveV key = visitLiteralValue(c.literalValue());
+    AnyV value = visitLiteral(c.literal());
+    return new AstMapEntryNode<>(range, key, value);
+  }
+
+  @Override
+  public StructV visitStructLiteral(SqlStreamParser.StructLiteralContext c) {
+    return mapContext(c.structEntry(), this::visitStructEntry, StructV::new);
+  }
+
+  @Override
+  public AstMapEntryNode<Identifier, AnyV> visitStructEntry(SqlStreamParser.StructEntryContext c) {
+    Range range = range(c);
+    Identifier fieldName = visitIdentifier(c.identifier());
+    AnyV fieldValue = visitLiteral(c.literal());
+    return new AstMapEntryNode<>(range, fieldName, fieldValue);
   }
 
   @Override
   public EnumV visitEnumLiteral(SqlStreamParser.EnumLiteralContext c) {
-    Identifier name = visitIdentifier(c.identifier(0));
-    Identifier value = visitIdentifier(c.identifier(1));
-    return new EnumV(name, value);
+    Range range = range(c);
+    Identifier enumName = visitIdentifier(c.identifier(0));
+    Identifier symbol = visitIdentifier(c.identifier(1));
+    return new EnumV(range, enumName, symbol);
   }
 
   @Override
   public UnionV visitUnionLiteral(SqlStreamParser.UnionLiteralContext c) {
-    Identifier alt = visitIdentifier(c.identifier());
+    Range range = range(c);
+    Identifier memberName = visitIdentifier(c.identifier());
     AnyV value = visitLiteral(c.literal());
-    return new UnionV(alt, value);
+    return new UnionV(range, memberName, value);
   }
 
-  // -- Helpers --------------------------------------------------------------
-  private static Expr fold(List<Expr> xs, InfixOp op) {
-    return xs.stream().skip(1).reduce(xs.get(0), (a, b) -> new InfixExpr(op, a, b, VoidT.get()));
+  @Override
+  public QName visitQname(SqlStreamParser.QnameContext q) {
+    Range range = range(q);
+    AstOptionalNode<DotPrefix> dotPrefix = AstOptionalNode.empty();
+    IdentifierList parts = listContext(q.identifier(), this::visitIdentifier, IdentifierList::new);
+    if (q.dotPrefix() != null) {
+      var dp = visitDotPrefix(q.dotPrefix());
+      dotPrefix = AstOptionalNode.of(dp);
+    }
+    return new QName(range, dotPrefix, parts);
   }
 
-  private QName typeRefQName(SqlStreamParser.QnameContext q) {
-    List<Identifier> parts = q.identifier().stream().map(this::visitIdentifier).collect(toList());
-    return QName.of(parts);
-  }
-
-  private static StringV string(TerminalNode v) {
-    String raw = v.getText();
-    return new StringV(unquote(raw));
-  }
-
-  private static Float64V fractional(TerminalNode v) {
-    if (v == null || v.getText().isEmpty())
-      throw new IllegalArgumentException("Expected non-empty NUMBER_LIT");
-    return new Float64V(Double.parseDouble(v.getText()));
-  }
-
-  private static Int64V int64(TerminalNode v) {
-    Float64V f = fractional(v);
-    if (f.value() % 1 != 0)
-      throw new IllegalArgumentException("Expected integer value, got: " + v.getText());
-    if(f.value() < Long.MIN_VALUE || f.value() > Long.MAX_VALUE)
-      throw new IllegalArgumentException("Expected 64-bit integer value, got: " + v.getText());
-    return new Int64V((f.value().longValue()));
-  }
-
-  private static Int32V int32(TerminalNode v) {
-    Int64V i = int64(v);
-    if(i.value() < Integer.MIN_VALUE || i.value() > Integer.MAX_VALUE)
-      throw new IllegalArgumentException("Expected 32-bit integer value, got: " + v.getText());
-    return new Int32V(i.value().intValue());
-  }
-
-  private static Int8V int8(TerminalNode v) {
-    Int64V i = int64(v);
-    if(i.value() < Byte.MIN_VALUE || i.value() > Byte.MAX_VALUE)
-      throw new IllegalArgumentException("Expected 8-bit integer value, got: " + v.getText());
-    return new Int8V(i.value().byteValue());
+  @Override
+  public DotPrefix visitDotPrefix(SqlStreamParser.DotPrefixContext ctx) {
+    Range range = range(ctx);
+    return new DotPrefix(range);
   }
 
   @Override
   public Identifier visitIdentifier(SqlStreamParser.IdentifierContext id) {
-    return new Identifier(id.ID().getText());
+    Range range = range(id);
+    return new Identifier(range, id.ID().getText());
+  }
+
+  private static Range range(ParserRuleContext ctx) {
+    var start = ctx.getStart();
+    var stop = ctx.getStop();
+    return new Range(
+      new Pos(start.getLine(), start.getCharPositionInLine()),
+      new Pos(stop.getLine(), stop.getCharPositionInLine() + stop.getText().length())
+    );
+  }
+
+  private static Pos start(ParserRuleContext ctx) {
+    var start = ctx.getStart();
+    return new Pos(start.getLine(), start.getCharPositionInLine());
+  }
+
+  private static Pos end(ParserRuleContext ctx) {
+    var stop = ctx.getStop();
+    return new Pos(stop.getLine(), stop.getCharPositionInLine() + stop.getText().length());
+  }
+
+  private static Expr fold(List<Expr> xs, InfixOp op) {
+    if (xs == null || xs.isEmpty()) {
+      throw new IllegalArgumentException("fold requires a non-empty list");
+    }
+    Expr acc = xs.get(0);
+    for (int i = 1; i < xs.size(); i++) {
+      Expr b = xs.get(i);
+      Range r = new Range(acc.range().start(), b.range().end());
+      acc = new InfixExpr(r, op, acc, b, new VoidT(r));
+    }
+    return acc;
+  }
+
+  public static double float64(TerminalNode n) {
+    return Double.parseDouble(n.getText());
+  }
+
+  private static long int64(TerminalNode n) {
+    return Long.parseLong(n.getText());
+  }
+
+  private static int int32(TerminalNode n) {
+    return Integer.parseInt(n.getText());
+  }
+
+  private static byte int8(TerminalNode n) {
+    return Byte.parseByte(n.getText());
+  }
+
+  private static byte[] bytes(TerminalNode n) {
+    String str = n.getText();
+    int index = 2; // skip "0x"
+    int hexLen = str.length() - index;
+    if ((hexLen & 1) != 0) throw new IllegalArgumentException("Hex literal must have even length");
+    byte[] out = new byte[hexLen / 2];
+    int outi = 0;
+    while (index < str.length()) {
+      int hi = Character.digit(str.charAt(index), 16);
+      int lo = Character.digit(str.charAt(index + 1), 16);
+      if (hi == -1 || lo == -1) {
+        throw new IllegalArgumentException("Invalid hex character in bytes literal: " +
+            str.substring(index, index + 2));
+      }
+      out[outi++] = (byte) ((hi << 4) | lo);
+      index += 2;
+    }
+    return out;
+  }
+
+  // helper to create infix with a proper range/type
+  private static InfixExpr mkInfix(InfixOp op, Expr left, Expr right) {
+    Range r = new Range(left.range().start(), right.range().end());
+    return new InfixExpr(r, op, left, right, new VoidT(r));
+  }
+
+  // helper to create postfix with a proper range/type
+  private static PostfixExpr mkPostfix(PostfixOp op, Expr operand) {
+    Range r = new Range(operand.range().start(), operand.range().end());
+    return new PostfixExpr(r, op, operand, new VoidT(r));
   }
 
   private static String unquote(String s) {
-    // 'foo''bar' -> foo'bar  (single-quoted in grammar)
-    return s.substring(1, s.length() - 1).replace("''", "'");
+    if (s.length() >= 2 && s.charAt(0) == '\'' && s.charAt(s.length() - 1) == '\'')
+      return s.substring(1, s.length() - 1).replace("''", "'");
+    return s;
+  }
+
+  public static <C extends ParserRuleContext, T extends AstNode, L extends AstListNode<T>> L listContext(
+      List<C> input,
+      Function<? super C, ? extends T> transform,
+      Function<? super Range, ? extends L> listFactory
+  ) {
+    Pos upperLeft = start(input.get(0));
+    Pos bottomRight = end(input.get(input.size() - 1));
+    Range rn = new Range(upperLeft, bottomRight);
+    L result = listFactory.apply(rn);
+    input.forEach(c -> result.add(transform.apply(c)));
+    return result;
+  }
+
+  public static <C extends ParserRuleContext, KT extends AstNode, VT extends AstNode, M extends AstMapNode<KT, VT>> M mapContext(
+      List<C> input,
+      Function<? super C, ? extends AstMapEntryNode<KT, VT>> transform,
+      Function<? super Range, ? extends M> mapFactory
+  ) {
+    Pos upperLeft = start(input.get(0));
+    Pos bottomRight = end(input.get(input.size() - 1));
+    Range rn = new Range(upperLeft, bottomRight);
+    M result = mapFactory.apply(rn);
+    for (C c : input) {
+      AstMapEntryNode<KT, VT> e = transform.apply(c);
+      result.put(e.key(), e.value());
+    }
+    return result;
   }
 }

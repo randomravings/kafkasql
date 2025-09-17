@@ -1,9 +1,7 @@
 package streamsql.ast;
 
-import java.util.List;
-
-public sealed interface StreamType
+public sealed interface StreamType extends AstNode
     permits StreamInlineT, StreamReferenceT {
     Identifier alias();
-    List<Identifier> distributionKeys();
+    AstOptionalNode<DistributeClause> distributeClause();
 }

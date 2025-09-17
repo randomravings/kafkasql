@@ -2,4 +2,11 @@ package streamsql.ast;
 
 import java.util.List;
 
-public final record ProjectionList(List<ProjectionExpr> items) implements Projection {}
+public final class ProjectionList extends AstListNode<ProjectionExpr> implements Projection {
+    public ProjectionList(Range range) {
+        super(range);
+    }
+    public ProjectionList(Range range, List<ProjectionExpr> items) {
+        super(range, items);
+    }
+}

@@ -1,3 +1,3 @@
 package streamsql.ast;
 
-public record ListT(AnyT item) implements CompositeT { }
+public record ListT(Range range, AnyT item) implements CompositeT { }

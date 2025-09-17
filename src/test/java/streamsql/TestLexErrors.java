@@ -11,7 +11,7 @@ public class TestLexErrors {
   @Test
   public void testLexErrors() {
     var result = TestHelpers.parse("X");
-    assertEquals(0, result.stmts().size());
+    assertEquals(0, result.ast().statements().size());
     assertTrue(result.diags().hasErrors());
   }
 }

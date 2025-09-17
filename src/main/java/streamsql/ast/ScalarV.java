@@ -1,3 +1,3 @@
 package streamsql.ast;
 
-public final record ScalarV(PrimitiveV value) implements ComplexV { }
+public final record ScalarV(Range range, PrimitiveV value) implements ComplexV { }

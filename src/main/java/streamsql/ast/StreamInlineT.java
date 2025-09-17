@@ -1,5 +1,3 @@
 package streamsql.ast;
 
-import java.util.List;
-
-public final record StreamInlineT(List<Field> fields, Identifier alias, List<Identifier> distributionKeys) implements StreamType {}
+public final record StreamInlineT(Range range, Identifier alias, AstListNode<Field> fields, AstOptionalNode<DistributeClause> distributeClause) implements StreamType { }

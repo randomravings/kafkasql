@@ -21,12 +21,9 @@ READ          : [Rr][Ee][Aa][Dd] ;
 WRITE         : [Ww][Rr][Ii][Tt][Ee] ;
 FROM          : [Ff][Rr][Oo][Mm] ;
 TO            : [Tt][Oo] ;
-LOG           : [Ll][Oo][Gg] ;
-COMPACT       : [Cc][Oo][Mm][Pp][Aa][Cc][Tt] ;
 TYPE          : [Tt][Yy][Pp][Ee] ;
 WHERE         : [Ww][Hh][Ee][Rr][Ee] ;
 AS            : [Aa][Ss] ;
-OPTIONAL      : [Oo][Pp][Tt][Ii][Oo][Nn][Aa][Ll] ;
 VALUES        : [Vv][Aa][Ll][Uu][Ee][Ss] ;
 OR            : [Oo][Rr] ;
 AND           : [Aa][Nn][Dd] ;
@@ -61,7 +58,6 @@ BY            : [Bb][Yy] ;
 BETWEEN       : [Bb][Ee][Tt][Ww][Ee][Ee][Nn] ;
 IN            : [Ii][Nn] ;
 OF            : [Oo][Ff] ;
-MASK          : [Mm][Aa][Ss][Kk] ;
 CHECK         : [Cc][Hh][Ee][Cc][Kk] ;
 
 // Punctuation / operators

@@ -1,3 +1,3 @@
 package streamsql.ast;
 
-public final record WhereClause(Expr expr) {}
+public final record WhereClause(Range range, Expr expr) implements AstNode {}

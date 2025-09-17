@@ -1,4 +1,4 @@
 package streamsql.ast;
 
-public sealed interface Expr
-    permits PrefixExpr, InfixExpr, PostfixExpr,Ternary, AnyV, Symbol, MemberExpr, IndexExpr { }
+public sealed interface Expr extends AstNode
+    permits PrefixExpr, InfixExpr, PostfixExpr,Ternary, AnyV, IdentifierExpr, MemberExpr, IndexExpr { }

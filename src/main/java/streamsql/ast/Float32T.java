@@ -1,7 +1,3 @@
 package streamsql.ast;
 
-public final class Float32T implements FractionalT {
-    private static final Float32T INSTANCE = new Float32T();
-    private Float32T() {}
-    public static Float32T get() { return INSTANCE; }
-}
+public final record Float32T(Range range) implements FractionalT { }

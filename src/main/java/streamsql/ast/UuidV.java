@@ -2,7 +2,4 @@ package streamsql.ast;
 
 import java.util.UUID;
 
-@SuppressWarnings("unchecked")
-public final record UuidV(UUID value) implements AlphaV {
-    public AnyT type() { return UuidT.get(); }
-}
+public final record UuidV(Range range, UUID value) implements AlphaV { }

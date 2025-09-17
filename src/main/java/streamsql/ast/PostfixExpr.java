@@ -1,3 +1,3 @@
 package streamsql.ast;
 
-public final record PostfixExpr(PostfixOp op, Expr expr, AnyT type) implements Expr { }
+public final record PostfixExpr(Range range, PostfixOp op, Expr expr, AnyT type) implements Expr { }

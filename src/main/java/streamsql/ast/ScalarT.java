@@ -1,5 +1,3 @@
 package streamsql.ast;
 
-import java.util.Optional;
-
-public record ScalarT(QName qName, PrimitiveT primitive, Optional<Expr> validation, Optional<PrimitiveV> defaultValue) implements ComplexT {}
+public record ScalarT(Range range, QName qName, PrimitiveT primitive, AstOptionalNode<Expr> validation, AstOptionalNode<PrimitiveV> defaultValue) implements ComplexT {}

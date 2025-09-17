@@ -2,8 +2,4 @@ package streamsql.ast;
 
 import java.time.LocalTime;
 
-@SuppressWarnings("unchecked")
-public final record TimeV(LocalTime value) implements TemporalV {
-    public AnyT type() { return TimeT.get(precision()); }
-    public Int8V precision() { return new Int8V((byte) Math.ceil(Math.log10(value.getNano()))); }
-}
+public final record TimeV(Range range, LocalTime value) implements TemporalV { }

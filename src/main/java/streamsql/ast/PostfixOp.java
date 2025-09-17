@@ -1,6 +1,8 @@
 package streamsql.ast;
 
 public enum PostfixOp {
-    Member,
-    Index
+    MEMBER,
+    INDEX,
+    IS_NULL,
+    IS_NOT_NULL
 }
