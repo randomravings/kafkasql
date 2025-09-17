@@ -1,103 +1,23 @@
-plugins {
-  id 'java'
-  id 'application'
-  id 'antlr'
-  id 'groovy'
-  id 'com.gradleup.shadow' version '9.0.0'
+allprojects {
+  group = 'kafka-sql'
+  version = '0.1.0'
+
+  repositories {
+    mavenCentral()
+  }
+
+  // configure Java toolchain for all subprojects that apply the java plugin
+  plugins.withType(org.gradle.api.plugins.JavaPlugin) {
+    java {
+      toolchain {
+        languageVersion = org.gradle.jvm.toolchain.JavaLanguageVersion.of(21)
+      }
+    }
+  }
 }
 
-group = 'streamsql'
-version = '0.1.0'
-
-repositories { mavenCentral() }
-
-configurations {
-  ebnfConvert
+tasks.register('build') {
+  group = 'build'
+  description = 'Builds core, cli, and lsp subprojects'
+  dependsOn ':core:build', ':cli:build', ':lsp:build'
 }
-
-dependencies {
-  antlr 'org.antlr:antlr4:4.13.2'
-  implementation 'org.codehaus.groovy:groovy:3.0.21'
-  testImplementation 'org.junit.jupiter:junit-jupiter:5.10.3'
-  testImplementation 'com.google.jimfs:jimfs:1.3.0'
-  ebnfConvert 'de.bottlecaps.ebnf-convert:ebnf-convert-webapp:0.72'
-  testRuntimeOnly "org.junit.platform:junit-platform-launcher"
-}
-
-// Remove old combined grammar task configs
-// tasks.named('generateGrammarSource', AntlrTask).configure { ... }
-// tasks.named('generateTestGrammarSource', AntlrTask).configure { ... }
-
-// Disable default combined generation
-tasks.named('generateGrammarSource').configure { enabled = false }
-
-// Export EBNF from parser grammar
-tasks.register('exportEbnf', Exec) {
-  group = "documentation"
-  description = "Convert ANTLR (split) to W3C EBNF"
-  dependsOn 'generateParserSource'
-  doFirst { file("$buildDir/generated-docs").mkdirs() }
-  def warFile = { configurations.ebnfConvert.singleFile }
-  def input  = file("src/main/antlr/SqlStreamParser.g4")
-  def output = file("$buildDir/generated-docs/SqlStream.ebnf")
-  commandLine 'bash', '-c', """
-    java -jar "${warFile().absolutePath}" -f none -r full "${input.absolutePath}" > "${output.absolutePath}"
-  """
-}
-
-def antlrLexerOut  = file("$buildDir/generated-src/antlr/streamsql/lex")
-def antlrParserOut = file("$buildDir/generated-src/antlr/streamsql/parse")
-
-tasks.register('generateLexerSource', org.gradle.api.plugins.antlr.AntlrTask) {
-  description = "Generate lexer sources"
-  group = "antlr"
-  source = files('src/main/antlr/SqlStreamLexer.g4')
-  outputDirectory = antlrLexerOut
-  arguments += ['-visitor','-long-messages','-package','streamsql.lex']
-  maxHeapSize = '256m'
-}
-
-tasks.register('generateParserSource', org.gradle.api.plugins.antlr.AntlrTask) {
-  description = "Generate parser sources"
-  group = "antlr"
-  dependsOn 'generateLexerSource'
-  source = files('src/main/antlr/SqlStreamParser.g4')
-  // Ensure lexer output (tokens) considered input
-  inputs.files(fileTree(antlrLexerOut))
-  outputDirectory = antlrParserOut
-  arguments += [
-    '-visitor','-long-messages','-package','streamsql.parse',
-    '-lib', antlrLexerOut.absolutePath
-  ]
-  maxHeapSize = '256m'
-}
-
-tasks.named('compileJava').configure { dependsOn 'generateParserSource' }
-tasks.named('compileTestJava').configure { dependsOn 'generateParserSource' }
-
-sourceSets {
-  main { java.srcDirs += "$buildDir/generated-src/antlr" }
-  test { java.srcDirs += "$buildDir/generated-src/antlr" }
-}
-
-application {
-  mainClass = 'streamsql.Main'
-}
-
-tasks.withType(JavaCompile).configureEach {
-  options.encoding = 'UTF-8'
-  sourceCompatibility = '21'
-  targetCompatibility = '21' 
-}
-
-test {
-  useJUnitPlatform()
-}
-
-shadowJar {
-  archiveClassifier = 'all'
-  manifest { attributes 'Main-Class': 'streamsql.Main' }
-}
-
-// (optional) build the fat jar as part of assemble:
-// assemble.dependsOn tasks.named('uberJar')

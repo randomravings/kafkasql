@@ -9,3 +9,4 @@ out/
 *.iml
 .DS_Store
 .antlr/
+node_modules/

@@ -1,0 +1,40 @@
+{
+  "name": "kafkasql-vscode",
+  "displayName": "KafkaSQL",
+  "publisher": "your-publisher",
+  "version": "0.0.1",
+  "engines": { "vscode": "^1.60.0" },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onLanguage:kafkasql",
+    "onCommand:kafkasql.startServer"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "kafkasql",
+        "aliases": ["KafkaSQL", "kafkasql"],
+        "extensions": [".kafka"]
+      }
+    ],
+    "commands": [
+      {
+        "command": "kafkasql.startServer",
+        "title": "Start KafkaSQL Language Server"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -p . -w",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vscode": "^1.1.37",
+    "@types/node": "^20.0.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

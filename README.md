@@ -75,7 +75,6 @@ Options:
   -h, --help          Show this help
 ```
 
-
 ## Example Statements
 
 Here are some currently statements to showcase the current state, note these are only parsed texts, and no execution is currently possible.
