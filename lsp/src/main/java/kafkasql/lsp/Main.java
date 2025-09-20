@@ -72,13 +72,13 @@ public class Main {
     // accept the client's $/setTrace notification (lsp4j's default throws UnsupportedOperationException)
     @Override
     public void setTrace(SetTraceParams params) {
-      // no-op: acknowledge trace setting changes from client
+      // no-op for now
     }
 
     // accept window/workDoneProgress/cancel notifications too
     @Override
     public void cancelProgress(WorkDoneProgressCancelParams params) {
-      // no-op
+      // no-op for now
     }
 
     @Override public CompletableFuture<Object> shutdown() { return CompletableFuture.completedFuture(null); }

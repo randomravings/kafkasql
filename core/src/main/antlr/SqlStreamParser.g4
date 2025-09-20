@@ -41,10 +41,14 @@ useContext
 
 /* ─────────────────────── Read Statements ─────────────────── */
 readStmt
-  : READ FROM streamName readTypeBlock+
+  : READ FROM streamName readBlockList
   ;
 
-readTypeBlock
+readBlockList
+  : readBlock+
+  ;
+
+readBlock
   : TYPE streamTypeName readProjection whereClause?
   ;
 
@@ -208,15 +212,27 @@ complexType
 
 scalarType
   : SCALAR qname AS primitiveType
-    (CHECK LPAREN expr RPAREN)?
-    (DEFAULT literalValue)?
+    scalarDefaultValue?
+    scalarCheckExpr?
+  ;
+
+scalarDefaultValue
+  : DEFAULT LPAREN literalValue RPAREN
+  ;
+
+scalarCheckExpr
+  : checkExpr
   ;
 
 enumType
-  : ENUM qname
+  : ENUM enumName
     (AS enumBaseType)?
-    LPAREN enumSymbol (COMMA enumSymbol)* RPAREN
-    (DEFAULT enumSymbolName)?
+    enumSymbolList
+    enumDefaultValue?
+  ;
+
+enumName 
+  : qname
   ;
 
 enumBaseType
@@ -224,6 +240,10 @@ enumBaseType
   | INT16
   | INT32
   | INT64
+  ;
+
+enumSymbolList
+  : LPAREN enumSymbol (COMMA enumSymbol)* RPAREN
   ;
 
 enumSymbol
@@ -238,8 +258,16 @@ enumSymbolValue
   : NUMBER_LIT
   ;
 
+enumDefaultValue
+  : DEFAULT LPAREN enumLiteral RPAREN
+  ;
+
 structType
-  : STRUCT qname fieldList
+  : STRUCT structName fieldList
+  ;
+
+structName
+  : qname
   ;
 
 fieldList
@@ -263,12 +291,19 @@ fieldNullable
   ;
 
 fieldDefaultValue
-  : DEFAULT literal
+  : DEFAULT LPAREN literal RPAREN
   ;
 
 unionType
-  : UNION qname
-    LPAREN unionMember (COMMA unionMember)* RPAREN
+  : UNION unionName unionMemberList unionDefaultValue?
+  ;
+
+unionName
+  : qname
+  ;
+
+unionMemberList
+  : LPAREN unionMember (COMMA unionMember)* RPAREN
   ;
 
 unionMember
@@ -283,12 +318,16 @@ unionMemberType
   : type
   ;
 
+unionDefaultValue
+  : DEFAULT LPAREN unionLiteral RPAREN
+  ;
+
 typeReference
   : qname
   ;
 
 stream
-  : STREAM streamName streamTypeList
+  : STREAM streamName AS streamTypeList
   ;
 
 streamName
@@ -317,6 +356,10 @@ streamTypeReference
 
 streamTypeInline
   : fieldList
+  ;
+
+checkExpr
+  : CHECK LPAREN expr RPAREN
   ;
 
 /* ──────────────── Expressions ──────────────── */
@@ -434,11 +477,11 @@ structEntry
   ;
 
 unionLiteral
-  : identifier DOLLAR literal
+  : unionName DOLLAR unionMemberName LPAREN literal RPAREN
   ;
 
 enumLiteral
-  : identifier DOUBLE_COLON identifier
+  : enumName DOUBLE_COLON enumSymbolName
   ;
 
 /* ──────────────── Identifiers ──────────────── */

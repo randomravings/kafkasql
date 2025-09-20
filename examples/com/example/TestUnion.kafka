@@ -1,10 +1,10 @@
 INCLUDE 'com/example/example.sqls';
-INCLUDE 'com/example/TestScalar.sqls'
-INCLUDE 'com/example/TestEnum.sqls'
+INCLUDE 'com/example/TestScalar.sqls';
+INCLUDE 'com/example/TestEnum.sqls';
 
-USE .com.example;
+USE CONTEXT com.example;
 
-CREATE SCALAR TestUnion (
+CREATE UNION TestUnion (
     ScalarValue com.example.TestScalar,
     EnumValue com.example.TestEnum
 );

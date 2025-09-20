@@ -1,51 +1,70 @@
 CREATE CONTEXT com;
 USE CONTEXT com;
+
 CREATE CONTEXT example;
 USE CONTEXT example;
 
-USE CONTEXT .com;
-USE CONTEXT .com.example;
+CREATE SCALAR Money AS
+DECIMAL(18, 2)
+DEFAULT(0)
+CHECK (value > 'thing');
 
-CREATE SCALAR Money AS DECIMAL(18,2) CHECK (value > 'thing') DEFAULT 0;
+CREATE ENUM Status (
+  ACTIVE: 0,
+  PENDING: 1,
+  DISABLED: 4096  
+)
+DEFAULT(Status::DISABLED);
 
-CREATE ENUM Status ( ACTIVE: 0, PENDING: 1, DISABLED: 4096 ) DEFAULT DISABLED;
-
-CREATE STRUCT Address ( Street STRING, Zip STRING NULL );
-CREATE STRUCT Customer (
-  Id Int64,
-  Name STRING,
-  Email STRING NULL,
-  Tags LIST<STRING>,
-  Attrs MAP<STRING, List<STRING>>,
-  Classification CHAR(5),
-  Status .com.example.Status,
-  Address .om.example.Address DEFAULT {
-    Street: 'N/A',
-    Zip: 'N/A'
-  }
+CREATE STRUCT Address (
+  Street STRING,
+  Zip STRING NULL
 );
 
 CREATE UNION CustomerIdOrName (
-  Id Int32,
-  Name String
+  Id INT32,
+  Name STRING
+)
+DEFAULT(CustomerIdOrName$Id(1001));
+
+CREATE STRUCT Customer (
+  Id INT64,
+  Name STRING NULL DEFAULT('Unknown'),
+  Email STRING NULL,
+  Tags LIST<STRING>,
+  Attrs MAP<STRING, MAP<TIMESTAMP(3), LIST<.com.example.Money>>>,
+  Classification CHAR(5),
+  Status .com.example.Status,
+  Address .com.example.Address DEFAULT([{
+    Street: 'N/A',
+    Zip: 'N/A'
+  },{
+    10: 'N/A',
+    11: 'N/A'
+  },{
+    'x': 20,
+    'y': 10
+  }])
 );
 
-CREATE STREAM customers
-  TYPE ( Id CustomerIdOrName, Email STRING NULL ) AS CustomerV1
-    DISTRIBUTE BY (Id)
-  TYPE .com.example.Customer AS CustomerV2;
+CREATE STREAM customers AS
+TYPE .com.example.Customer AS CustomerV2
+TYPE (
+  Id CustomerIdOrName,
+  Email STRING NULL
+) AS CustomerV1
+DISTRIBUTE BY (Id)
+;
 
-READ FROM customers
-TYPE CustomerV1 * WHERE Name = 'Alice' AND Id < 1 AND Id >> 1 >= 0.5
-TYPE CustomerV2 Id, Tags;
-
-WRITE TO customers TYPE CustomerV1
+WRITE TO customers
+TYPE CustomerV1
 VALUES({
-  Id: Id$5007,
+  Id: CustomerIdOrName$Id(5000),
   Email: 'joe@example.com'
 });
 
-WRITE TO customers TYPE CustomerV2
+WRITE TO customers
+TYPE CustomerV2
 VALUES ({
   Id: 1001,
   Name: 'Alice',
@@ -54,6 +73,25 @@ VALUES ({
 }, {
   Id: 1002,
   Name: 'Bob',
-  Email: Null,
+  Email: NULL,
   Status: Status::PENDING
 });
+
+READ FROM customers
+TYPE CustomerV1
+  *
+WHERE
+  Name = 'Alice' AND
+  Id < 1 AND
+  Id >> 1 >= 0.5
+TYPE CustomerV2
+  Id,
+  Tags,
+  Id * 10 AS
+   TenTimesId,
+  Attrs['key1'][98][0]
+   AS
+    FirstMoney
+WHERE
+  Status <> Status::DISABLED
+;

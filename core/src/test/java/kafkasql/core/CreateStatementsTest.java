@@ -94,7 +94,7 @@ public class CreateStatementsTest {
   @Test
   void createStreamLogWithInlineAndRef() {
     Ast p = TestHelpers.parseAssert("""
-      CREATE STREAM Events
+      CREATE STREAM Events AS
         TYPE ( Id INT32, Kind STRING ) AS Base
         TYPE com.example.Payload AS Payload;
       """);
@@ -109,7 +109,7 @@ public class CreateStatementsTest {
   @Test
   void createStreamCompactMultipleInline() {
     Ast p = TestHelpers.parseAssert("""
-      CREATE STREAM Session
+      CREATE STREAM Session AS
         TYPE ( UserId INT64, Start TIMESTAMP(3) ) AS StartRec
         TYPE ( UserId INT64, End TIMESTAMP(3) ) AS EndRec
         TYPE com.example.Extra AS Extra;

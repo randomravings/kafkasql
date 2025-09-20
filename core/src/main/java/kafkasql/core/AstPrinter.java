@@ -339,7 +339,7 @@ public final class AstPrinter extends Printer {
     writeTypeListNode(EnumSymbol.class);
     forEach(e.symbols(), (s, i) -> writeEnumSymbol(s, i), indent + 1);
     writeKey("default", indent, true);
-    writeOptional(e.defaultSymbol(), (v, i) -> writeIdentifier(v, i), indent);
+    writeOptional(e.defaultValue(), (v, i) -> writeEnumV(v, i), indent);
   }
 
   private void writeEnumSymbol(EnumSymbol s, int indent) throws IOException {
@@ -557,7 +557,7 @@ public final class AstPrinter extends Printer {
   private void writeEnumV(EnumV e, int indent) throws IOException {
     writeTypeNode(EnumV.class);
     writeKey("enum", indent, false);
-    writeIdentifier(e.enumName(), indent + 1);
+    writeQName(e.enumName(), indent + 1);
     writeKey("symbol", indent, true);
     writeIdentifier(e.symbol(), indent + 1);
   }
@@ -565,7 +565,9 @@ public final class AstPrinter extends Printer {
   private void writeUnionV(UnionV u, int indent) throws IOException {
     writeTypeNode(UnionV.class);
     writeKey("name", indent, false);
-    writeIdentifier(u.name(), indent + 1);
+    writeQName(u.unionName(), indent + 1);
+    writeKey("member", indent, true);
+    writeIdentifier(u.unionMemberName(), indent + 1);
     writeKey("value", indent, true);
     writeValue(u.value(), indent + 1);
   }

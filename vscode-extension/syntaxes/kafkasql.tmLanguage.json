@@ -1,0 +1,553 @@
+{
+  "name": "KafkaSQL",
+  "scopeName": "source.kafkasql",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#include"},
+    { "include": "#use" },
+    { "include": "#create" },
+    { "include": "#read" },
+    { "include": "#write" }
+  ],
+  "repository": {
+    "whitespace": { "match": "\\s+", "name": "meta.whitespace.kafkasql" },
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.double-dash.kafkasql", "match": "--.*$" },
+        { "name": "comment.block.kafkasql", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.kafkasql",
+          "begin": "'",
+          "end": "'",
+          "patterns": [{ "name": "constant.character.escape.kafkasql", "match": "\\\\." }]
+        },
+        {
+          "name": "string.quoted.double.kafkasql",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [{ "name": "constant.character.escape.kafkasql", "match": "\\\\." }]
+        }
+      ]
+    },
+    "expr": {
+      "name": "meta.expr.kafkasql",
+      "patterns": [
+        { "include": "#numbers" },
+        { "include": "#strings" },
+        { "include": "#enum-literal" },
+        { "include": "#union-literal" },
+        { "include": "#list-literal" },
+        { "include": "#map-literal" },
+        { "include": "#identifier" },
+        {
+          "name": "keyword.operator.logical.kafkasql",
+          "match": "(?i)\\b(AND|OR|NOT|IS|BETWEEN|IN)\\b"
+        },
+        {
+          "name": "keyword.operator.comparison.kafkasql",
+          "match": "(=|!=|<>|<=|>=|<|>)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.kafkasql",
+          "match": "(\\+|\\-|\\*|\\/|%)"
+        },
+        {
+          "name": "punctuation.section.parens.begin.kafkasql",
+          "match": "\\("
+        },
+        {
+          "name": "punctuation.section.parens.end.kafkasql",
+          "match": "\\)"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [{ "name": "constant.numeric.kafkasql", "match": "\\b\\d+(?:\\.\\d+)?\\b" }]
+    },
+    "operators": {
+      "patterns": [
+        { "name": "keyword.operator.kafkasql", "match": "[\\+\\-\\*/%=<>!]+" },
+        { "name": "punctuation.separator.kafkasql", "match": "[,;()\\[\\]]" }
+      ]
+    },
+    "include": {
+      "name": "meta.include.statement.kafkasql",
+      "begin": "(?i)\\bINCLUDE\\b",
+      "beginCaptures": { "0": { "name": "keyword.control.kafkasql" } },
+      "end": ";",
+      "patterns": [
+        { "include": "#strings" }
+      ]
+    },
+    "use": {
+      "name": "meta.use.statement.kafkasql",
+      "begin": "(?i)\\bUSE\\b",
+      "beginCaptures": { "0": { "name": "keyword.control.kafkasql" } },
+      "end": "(?=;)",
+      "patterns": [{ "include": "#context" }]
+    },
+    "create": {
+      "name": "meta.create.statement.kafkasql",
+      "begin": "(?i)\\bCREATE\\b",
+      "beginCaptures": { "0": { "name": "keyword.control.kafkasql" } },
+      "end": "(?=;)",
+      "patterns": [
+        { "include": "#default" },
+        { "include": "#check" },
+        { "include": "#scalar" },
+        { "include": "#enum" },
+        { "include": "#struct" },
+        { "include": "#union" },
+        { "include": "#stream" },
+        { "include": "#context" }
+      ]
+    },
+    "context": {
+      "name": "meta.context.kafkasql",
+      "begin": "(?i)\\bCONTEXT\\b",
+      "beginCaptures": { "0": { "name": "keyword.control.kafkasql" } },
+      "end": "(?=;|\\)|$)",
+      "patterns": [
+        { "include": "#qname" }
+      ]
+    },
+    "scalar": {
+      "name": "meta.scalar.definition.kafkasql",
+      "begin": "(?i)\\bSCALAR\\b",
+      "beginCaptures": { "0": { "name": "keyword.control.kafkasql" } },
+      "end": "(?=\\bDEFAULT\\b|\\bCHECK\\b|;)",
+      "contentName": "meta.scalar.body.kafkasql",
+      "patterns": [
+        { "name": "keyword.control.as.kafkasql", "match": "(?i)\\bAS\\b" },
+        { "include": "#type-primitive" },
+        { "include": "#operators" },
+        { "include": "#qname" }
+      ]
+    },
+    "enum": {
+      "name": "meta.enum.definition.kafkasql",
+      "begin": "(?i)\\bENUM\\b",
+      "beginCaptures": { "0": { "name": "keyword.control.kafkasql" } },
+      "end": "(?=DEFAULT\\b|;)",
+      "contentName": "meta.enum.body.kafkasql",
+      "patterns": [
+        { "include": "#enum-symbols" },
+        { "include": "#qname" }
+      ]
+    },
+    "enum-symbols": {
+      "name": "meta.enum.symbols.kafkasql",
+      "begin": "(\\()",
+      "beginCaptures": { "0": { "name": "punctuation.separator.kafkasql" } },
+      "end": "(\\))",
+      "endCaptures": { "0": { "name": "punctuation.separator.kafkasql" } },
+      "patterns": [
+        { "include": "#identifier" },
+        { "include": "#operators" },
+        { "include": "#numbers"}
+      ]
+    },
+    "enum-literal": {
+      "name": "meta.enum.symbol.kafkasql",
+      "match": "\\b([A-Za-z_][A-Za-z0-9_]*)\\b(::)\\b([A-Za-z_][A-Za-z0-9_]*)\\b",
+      "captures": {
+        "1": { "name": "entity.name.type.enum.kafkasql" },
+        "2": { "name": "punctuation.separator.double-colon.kafkasql" },
+        "3": { "name": "variable.other.symbol.kafkasql" }
+      }
+    },
+    "struct": {
+      "name": "meta.struct.definition.kafkasql",
+      "begin": "(?i)\\bSTRUCT\\b",
+      "beginCaptures": { "0": { "name": "keyword.control.kafkasql" } },
+      "end": "(?=DEFAULT\\b|CHECK\\b|;)",
+      "contentName": "meta.struct.body.kafkasql",
+      "patterns": [
+        { "include": "#struct-fields" },
+        { "include": "#qname" }
+      ]
+    },
+    "struct-fields": {
+      "name": "meta.struct.fields.kafkasql",
+      "begin": "\\(",
+      "beginCaptures": { "0": { "name": "punctuation.section.paren.begin.kafkasql" } },
+      "end": "\\)",
+      "endCaptures": { "0": { "name": "punctuation.section.paren.end.kafkasql" } },
+      "patterns": [{ "include": "#field" }]
+    },
+    "field": {
+      "name": "meta.struct.field.kafkasql",
+      "begin": "([A-Za-z_][A-Za-z0-9_]*)",
+      "beginCaptures": { "0": { "name": "variable.other.field.kafkasql" } },
+      "end": "(?=(,|\\)))",
+      "patterns": [
+        { "include": "#expr" },
+        { "include": "#type-collection" },
+        { "include": "#type-parametric@G" },
+        { "include": "#type-primitive@G" },
+        { "include": "#type-reference-qualified@G" },
+        { "include": "#type-reference-simple@G" },
+        { "include": "#default" }
+      ]
+    },
+    "union": {
+      "name": "meta.union.definition.kafkasql",
+      "begin": "(?i)\\bUNION\\b",
+      "beginCaptures": { "0": { "name": "keyword.control.kafkasql" } },
+      "end": "(?=DEFAULT\\b|CHECK\\b|;)",
+      "contentName": "meta.union.body.kafkasql",
+      "patterns": [
+        { "include": "#union-members" },
+        { "include": "#qname" }
+      ]
+    },
+    "union-members": {
+      "name": "meta.union.members.kafkasql",
+      "begin": "\\(",
+      "beginCaptures": { "0": { "name": "punctuation.section.paren.begin.kafkasql" } },
+      "end": "\\)",
+      "endCaptures": { "0": { "name": "punctuation.section.paren.end.kafkasql" } },
+      "patterns": [
+        { "include": "#union-member" }
+      ]
+    },
+    "union-member": {
+      "name": "meta.struct.field.kafkasql",
+      "begin": "([A-Za-z_][A-Za-z0-9_]*)",
+      "beginCaptures": { "0": { "name": "variable.other.field.kafkasql" } },
+      "end": "(?=\\s*(?:,|\\)))",
+      "patterns": [
+        { "include": "#type-collection" },
+        { "include": "#type-parametric@G" },
+        { "include": "#type-primitive@G" },
+        { "include": "#type-reference-qualified@G" },
+        { "include": "#type-reference-simple@G" }
+      ]
+    },
+    "union-literal": {
+      "name": "meta.union.literal.kafkasql",
+      "begin": "(\\.?[A-Za-z_][A-Za-z0-9_]*(?:\\.[A-Za-z_][A-Za-z0-9_]*)*)(\\$)([A-Za-z_][A-Za-z0-9_]*)\\s*",
+      "beginCaptures": {
+        "1": { "name": "entity.name.namespace.kafkasql" },
+        "2": { "name": "punctuation.section.dollar.kafkasql" },
+        "3": { "name": "variable.other.symbol.kafkasql" }
+      },
+      "end": "(?=\\()",
+      "patterns": [
+        { "include": "#value-body" }
+      ]
+    },
+    "stream": {
+      "name": "meta.stream.definition.kafkasql",
+      "begin": "(?i)\\bSTREAM\\b(?:\\s+([A-Za-z_][A-Za-z0-9_]*))?\\s+\\bAS\\b",
+      "beginCaptures": {
+        "0": { "name": "keyword.control.kafkasql" },
+        "1": { "name": "entity.name.type.stream.kafkasql" },
+        "2": { "name": "keyword.control.kafkasql" }
+      },
+      "end": "(?=;)",
+      "endCaptures": { "0": { "name": "punctuation.section.paren.end.kafkasql" } },
+      "contentName": "meta.stream.body.kafkasql",
+      "patterns": [
+        { "include": "#stream-type-inline" },
+        { "include": "#stream-type-reference" },
+        { "include": "#distribute-by" }
+      ]
+    },
+    "stream-type-reference": {
+      "name": "meta.stream.type.kafkasql",
+      "begin": "(?i)\\bTYPE\\b",
+      "beginCaptures": {
+        "0": { "name": "keyword.control.kafkasql" },
+        "1": { "name": "entity.name.type.kafkasql" }
+      },
+      "end": "(?i)\\bAS\\b\\s+\\b([A-Za-z_][A-Za-z0-9_]*)\\b",
+      "endCaptures": {
+        "0": { "name": "keyword.control.kafkasql" },
+        "1": { "name": "variable.other.identifier.kafkasql" }
+      },
+      "patterns": [
+        { "include": "#type-reference-qualified@G" },
+        { "include": "#type-reference-simple@G" }
+      ]
+    },
+    "stream-type-inline": {
+      "name": "meta.stream.type.kafkasql",
+      "begin": "(?i)\\bTYPE\\b\\s*(\\()",
+      "beginCaptures": {
+        "0": { "name": "keyword.control.kafkasql" },
+        "1": { "name": "entity.name.type.kafkasql" }
+      },
+    "end": "(?i)\\s*(\\))\\s*\\bAS\\b\\s+\\b([A-Za-z_][A-Za-z0-9_]*)\\b",
+    "endCaptures": {
+      "0": { "name": "keyword.control.kafkasql" },
+      "1": { "name": "punctuation.section.parens.end.kafkasql" },
+      "2": { "name": "variable.other.identifier.kafkasql" }
+    },
+      "patterns": [
+        { "include": "#field" }
+      ]
+    },
+    "distribute-by": {
+      "name": "meta.distribute.by.kafkasql",
+      "begin": "(?i)\\bDISTRIBUTE\\b\\s+\\bBY\\b\\s*\\(",
+      "beginCaptures": {
+        "0": { "name": "keyword.control.kafkasql" }
+      },
+      "end": "\\)",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.parens.end.kafkasql" }
+      },
+      "patterns": [
+        {
+          "match": "[A-Za-z_][A-Za-z0-9_]*",
+          "name": "variable.other.field.kafkasql"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.comma.kafkasql"
+        }
+      ]
+    },
+    "default": {
+      "name": "meta.default.kafkasql",
+      "begin": "(?i)\\bDEFAULT\\b",
+      "beginCaptures": { "0": { "name": "keyword.control.default.kafkasql" } },
+      "end": "(?=\\bCHECK\\b|,|\\)|;)",
+      "patterns": [
+        { "include": "#value-body" }
+      ]
+    },
+    "value-body": {
+      "name": "meta.default.body.kafkasql",
+      "begin": "(\\()",
+      "beginCaptures": { "0": { "name": "punctuation.section.parens.begin.kafkasql" } },
+      "end": "(\\))",
+      "endCaptures": { "0": { "name": "punctuation.section.parens.end.kafkasql" } },
+      "applyEndPatternLast": true,
+      "patterns": [
+        { "include": "#map-literal" },
+        { "include": "#list-literal" },
+        { "include": "#union-literal" },
+        { "include": "#enum-literal" },
+        { "include": "#numbers" },
+        { "include": "#strings" }
+      ]
+    },
+    "check": {
+      "name": "meta.check.kafkasql",
+      "begin": "(?i)\\bCHECK\\b\\s*\\(",
+      "beginCaptures": { "0": { "name": "keyword.control.check.kafkasql" } },
+      "end": "\\)",
+      "endCaptures": { "0": { "name": "punctuation.section.parens.end.kafkasql" } },
+      "patterns": [
+        { "include": "#expr" },
+        { "include": "#numbers" },
+        { "include": "#strings" }
+      ]
+    },
+    "list-literal": {
+      "name": "meta.list.literal.kafkasql",
+      "begin": "\\[",
+      "beginCaptures": { "0": { "name": "punctuation.section.brackets.begin.kafkasql" } },
+      "end": "\\]",
+      "endCaptures": { "0": { "name": "punctuation.section.brackets.end.kafkasql" } },
+      "patterns": [
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#enum-literal" },
+        { "include": "#union-literal" },
+        { "include": "#list-literal" },
+        { "include": "#map-literal" },
+        { "include": "#expr" },
+        { "include": "#operators" },
+        { "match": ",", "name": "punctuation.separator.comma.kafkasql" }
+      ]
+    },
+    "map-literal": {
+      "name": "meta.map.literal.kafkasql",
+      "begin": "\\{",
+      "beginCaptures": { "0": { "name": "punctuation.section.braces.begin.kafkasql" } },
+      "end": "\\}",
+      "endCaptures": { "0": { "name": "punctuation.section.braces.end.kafkasql" } },
+      "applyEndPatternLast": true,
+      "patterns": [
+        { "include": "#map-entry-literal" }
+      ]
+    },
+    "map-entry-literal": {
+      "name": "meta.map.entry.literal.kafkasql",
+      "begin": "\\s*(?:([A-Za-z_][A-Za-z0-9_]*)|(\\d+(?:\\.\\d+)?)|(?:'((?:[^'\\\\]|\\\\.)*)')|(?:\"((?:[^\"\\\\]|\\\\.)*)\"))\\s*(:)",
+      "beginCaptures": {
+        "1": { "name": "variable.other.field.kafkasql" },
+        "2": { "name": "constant.numeric.key.kafkasql" },
+        "3": { "name": "string.quoted.single.key.kafkasql" },
+        "4": { "name": "string.quoted.double.key.kafkasql" },
+        "5": { "name": "punctuation.separator.colon.kafkasql" }
+      },
+      "end": "(?=,|\\})",
+      "patterns": [
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#enum-literal" },
+        { "include": "#union-literal" },
+        { "include": "#list-literal" },
+        { "include": "#map-literal" },
+        { "include": "#identifier" },
+        { "include": "#operators" }
+      ]
+    },
+    "read": {
+      "begin": "(?i)\\bREAD\\b",
+      "beginCaptures": { "0": { "name": "keyword.control.read.kafkasql" } },
+      "end": "(?=;)",
+      "applyEndPatternLast": true,
+      "name": "meta.read.from.kafkasql",
+      "patterns": [
+        { "include": "#read-type" },
+        { "match": "(?i)\\bFROM\\b", "name": "keyword.control.from.kafkasql" },
+        { "include": "#qname" }
+      ]
+    },
+    "read-type": {
+      "name": "meta.read.type.kafkasql",
+      "begin": "(?i)\\bTYPE\\b",
+      "beginCaptures": { "0": { "name": "keyword.control.type.kafkasql" } },
+      "end": "(?=\\bTYPE\\b|;)",
+      "patterns": [
+        { "include": "#where" },
+        { "include": "#projection" },
+        { "include": "#identifier" }
+      ]
+    },
+    "projection": {
+      "patterns": [
+        { "include": "#where" },
+        { "include": "#projection-all" },
+        { "include": "#projection-alias" },
+        { "include": "#expr" },
+        { "match": ",", "name": "punctuation.separator.comma.kafkasql" }
+      ]
+    },
+    "projection-all": {
+      "name": "meta.projection.all.kafkasql",
+      "match": "\\*",
+      "captures": { "0": { "name": "keyword.operator.wildcard.kafkasql" } }
+    },
+    "projection-alias": {
+      "name": "meta.projection.alias.kafkasql",
+      "begin": "(?i:\\bAS\\b)",
+      "beginCaptures": { "0": { "name": "keyword.control.as.kafkasql" } },
+      "end": "(?=\\bWHERE\\b|,|;)",
+      "patterns": [
+        { "include": "#identifier" }
+      ]
+    },
+    "where": {
+      "name": "meta.where.kafkasql",
+      "begin": "(?i)\\bWHERE\\b",
+      "beginCaptures": {
+        "0": { "name": "keyword.control.where.kafkasql" }
+      },
+      "end": "(?=\\bTYPE\\b|;)",
+      "patterns": [
+        { "include": "#expr" }
+      ]
+    },
+    "write": {
+      "begin": "(?i)\\bWRITE\\b",
+      "beginCaptures": { "0": { "name": "keyword.control.write.kafkasql" } },
+      "end": ";",
+      "applyEndPatternLast": true,
+      "name": "meta.write.to.kafkasql",
+      "patterns": [
+        { "include": "#values" },
+        { "include": "#write-type" },
+        { "match": "(?i)\\bTO\\b", "name": "keyword.control.to.kafkasql" },
+        { "include": "#qname" }
+      ]
+    },
+    "write-type": {
+      "name": "meta.write.type.kafkasql",
+      "begin": "(?i)\\bTYPE\\b",
+      "beginCaptures": { "0": { "name": "keyword.control.type.kafkasql" } },
+      "end": "(?=\\bVALUES\\b|;)",
+      "patterns": [
+        { "include": "#identifier" }
+      ]
+    },
+    "values": {
+      "name": "meta.values.kafkasql",
+      "begin": "(?i)\\bVALUES\\b",
+      "beginCaptures": { "0": { "name": "keyword.control.values.kafkasql" } },
+      "end": "(?=\\)|;)",
+      "applyEndPatternLast": true,
+      "patterns": [
+        { "include": "#value-body" }
+      ]
+    },
+    "identifier": {
+      "name": "variable.other.identifier.kafkasql",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+    },
+    "type-collection": {
+      "begin": "\\s*(?i:(MAP|LIST))\\s*(<)",
+      "beginCaptures": {
+        "1": { "name": "support.type.collection.kafkasql" },
+        "2": { "name": "punctuation.definition.generic.begin.kafkasql" }
+      },
+      "end": "(>)",
+      "endCaptures": { "1": { "name": "punctuation.definition.generic.end.kafkasql" } },
+      "applyEndPatternLast": true,
+      "contentName": "meta.type.arguments.kafkasql",
+      "patterns": [
+        { "match": "\\s+", "name": "meta.whitespace.kafkasql" },
+        { "match": ",", "name": "punctuation.separator.comma.kafkasql" },
+        { "include": "#type-collection" },
+        { "include": "#type-parametric@G" },
+        { "include": "#type-primitive@G" },
+        { "include": "#type-reference-qualified@G" },
+        { "include": "#type-reference-simple@G" }
+      ]
+    },
+    "type-parametric@G": {
+      "begin": "\\G\\s*(?i)(CHAR|DECIMAL)\\s*(\\()",
+      "beginCaptures": {
+        "1": { "name": "keyword.type.primitive.kafkasql" },
+        "2": { "name": "punctuation.section.parens.begin.kafkasql" }
+      },
+      "end": "(\\))",
+      "endCaptures": { "1": { "name": "punctuation.section.parens.end.kafkasql" } },
+      "patterns": [
+        { "match": "\\G\\s*,", "name": "punctuation.separator.comma.kafkasql" },
+        { "match": "\\G\\s*\\d+", "name": "constant.numeric.kafkasql" },
+        { "match": "\\G\\s+", "name": "meta.whitespace.kafkasql" }
+      ]
+    },
+    "type-primitive@G": {
+      "name": "keyword.type.primitive.kafkasql",
+      "match": "\\G\\s*(?i)\\b(?:BOOL|INT8|INT16|INT32|INT64|FLOAT32|FLOAT64|STRING|CHAR|BYTES|FIXED|UUID|DECIMAL|DATE|TIME|TIMESTAMP|TIMESTAMP_TZ)\\b"
+    },
+    "type-reference-qualified@G": {
+      "name": "support.type.user.kafkasql",
+      "match": "\\G\\s*(?!MAP\\b|LIST\\b)(?:\\.)?(?:[A-Za-z_][A-Za-z0-9_]*\\.)+[A-Za-z_][A-Za-z0-9_]*"
+    },
+    "type-reference-simple@G": {
+      "name": "support.type.user.kafkasql",
+      "match": "\\G\\s*(?!MAP\\b|LIST\\b)[A-Za-z_][A-Za-z0-9_]*"
+    },
+    "qname": {
+      "name": "entity.name.namespace.kafkasql",
+      "match": "(?:\\.?[A-Za-z_][A-Za-z0-9_]*)(?:\\.(?:[A-Za-z_][A-Za-z0-9_]*))*"
+    },
+
+    "type-primitive": {
+      "name": "keyword.type.primitive.kafkasql",
+      "match": "(?i)\\b(?:BOOL|INT8|INT16|INT32|INT64|FLOAT32|FLOAT64|STRING|CHAR|BYTES|FIXED|UUID|DECIMAL|DATE|TIME|TIMESTAMP|TIMESTAMP_TZ)\\b"
+    }
+  }
+}

@@ -1,5 +1,5 @@
 package kafkasql.core.ast;
 
-public final record UnionV(Range range, Identifier name, AnyV value) implements ComplexV {
+public final record UnionV(Range range, QName unionName, Identifier unionMemberName, AnyV value) implements ComplexV {
 
 }

@@ -5,22 +5,20 @@
   "version": "0.0.1",
   "engines": { "vscode": "^1.60.0" },
   "main": "./dist/extension.js",
-  "activationEvents": [
-    "onLanguage:kafkasql",
-    "onCommand:kafkasql.startServer"
-  ],
   "contributes": {
     "languages": [
       {
         "id": "kafkasql",
-        "aliases": ["KafkaSQL", "kafkasql"],
-        "extensions": [".kafka"]
+        "aliases": ["KafkaSQL"],
+        "extensions": [".kafka", ".kafkasql"],
+        "configuration": "./syntaxes/language-configuration.json"
       }
     ],
-    "commands": [
+    "grammars": [
       {
-        "command": "kafkasql.startServer",
-        "title": "Start KafkaSQL Language Server"
+        "language": "kafkasql",
+        "scopeName": "source.kafkasql",
+        "path": "./syntaxes/kafkasql.tmLanguage.json"
       }
     ]
   },

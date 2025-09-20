@@ -116,8 +116,8 @@ public final class AstValidator {
       return tp;
 
     // validate default symbol (if present) refers to one of the defined symbols
-    if (tp.defaultSymbol().isPresent()) {
-      var defaultSymbol = tp.defaultSymbol().get().name();
+    if (tp.defaultValue().isPresent()) {
+      var defaultSymbol = tp.defaultValue().get().enumName().name();
       boolean found = converted.stream().anyMatch(s -> s.name().name().equals(defaultSymbol));
       if (!found) {
         diags.error(
@@ -127,7 +127,7 @@ public final class AstValidator {
       if (diags.hasErrors())
         return tp;
     }
-    return new EnumT(tp.range(), tp.qName(), enumBase, converted, tp.defaultSymbol());
+    return new EnumT(tp.range(), tp.qName(), enumBase, converted, tp.defaultValue());
   }
 
   private EnumSymbolList alignEnumSymbols(EnumSymbolList e, AstOptionalNode<IntegerT> type) {

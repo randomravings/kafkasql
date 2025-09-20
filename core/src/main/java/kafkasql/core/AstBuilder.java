@@ -11,26 +11,27 @@ import kafkasql.core.ast.*;
 
 import java.util.*;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 import static java.util.stream.Collectors.toList;
 
 public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
-  public Ast visitScript(SqlStreamParser.ScriptContext ctx) {
-    var range = range(ctx);
-    var statements = ctx.statement().stream()
+  public Ast visitScript(SqlStreamParser.ScriptContext c) {
+    var range = range(c);
+    var statements = c.statement().stream()
         .map(s -> (Stmt) visit(s))
         .collect(toList());
     return new Ast(range, statements);
   }
 
   @Override
-  public Stmt visitStatement(SqlStreamParser.StatementContext ctx) {
-    if (ctx.useStmt() != null) return visitUseStmt(ctx.useStmt());
-    if (ctx.createStmt() != null) return visitCreateStmt(ctx.createStmt());
-    if (ctx.readStmt() != null) return visitReadStmt(ctx.readStmt());
-    if (ctx.writeStmt() != null) return visitWriteStmt(ctx.writeStmt());
+  public Stmt visitStatement(SqlStreamParser.StatementContext c) {
+    if (c.useStmt() != null) return visitUseStmt(c.useStmt());
+    if (c.createStmt() != null) return visitCreateStmt(c.createStmt());
+    if (c.readStmt() != null) return visitReadStmt(c.readStmt());
+    if (c.writeStmt() != null) return visitWriteStmt(c.writeStmt());
     throw new IllegalStateException("unknown statement");
   }
 
@@ -238,35 +239,57 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     Range range = range(c);
     QName qn = visitQname(c.qname());
     PrimitiveT pt = visitPrimitiveType(c.primitiveType());
-    AstOptionalNode<Expr> validation = c.expr() != null ? AstOptionalNode.of((Expr)visitExpr(c.expr())) : AstOptionalNode.empty();
-    AstOptionalNode<PrimitiveV> def;
-    if (c.literalValue() != null) {
-      PrimitiveV l = visitLiteralValue(c.literalValue());
-      def = AstOptionalNode.of(l);
-    } else {
-      def = AstOptionalNode.empty();
-    }
-    return new ScalarT(range, qn, pt, validation, def);
+    AstOptionalNode<PrimitiveV> defaultValue = visitScalarDefaultValue(c.scalarDefaultValue());
+    AstOptionalNode<Expr> validation = visitScalarCheckExpr(c.scalarCheckExpr());
+    return new ScalarT(range, qn, pt, validation, defaultValue);
+  }
+
+  
+
+  @Override
+  public AstOptionalNode<PrimitiveV> visitScalarDefaultValue(SqlStreamParser.ScalarDefaultValueContext c) {
+    AstOptionalNode<PrimitiveV> defaultValue = AstOptionalNode.empty();
+    if (c.literalValue() != null) defaultValue = AstOptionalNode.of(visitLiteralValue(c.literalValue()));
+    return defaultValue;
+  }
+
+  @Override
+  public AstOptionalNode<Expr> visitScalarCheckExpr(SqlStreamParser.ScalarCheckExprContext c) {
+    AstOptionalNode<Expr> check = AstOptionalNode.empty();
+    if (c.checkExpr() != null) check = AstOptionalNode.of(visitCheckExpr(c.checkExpr()));
+    return check;
   }
 
   @Override
   public EnumT visitEnumType(SqlStreamParser.EnumTypeContext c) {
     Range range = range(c);
-    QName name = visitQname(c.qname());
-    AstOptionalNode<IntegerT> type = c.enumBaseType() != null ? AstOptionalNode.of(visitEnumBaseType(c.enumBaseType())) : AstOptionalNode.empty();
-    EnumSymbolList symbols = listContext(c.enumSymbol(), this::visitEnumSymbol, EnumSymbolList::new);
-    AstOptionalNode<Identifier> defaultValue = c.DEFAULT() != null ? AstOptionalNode.of(visitEnumSymbolName(c.enumSymbolName())) : AstOptionalNode.empty();
+    QName name = visitEnumName(c.enumName());
+    AstOptionalNode<IntegerT> type = visitEnumBaseType(c.enumBaseType());
+    EnumSymbolList symbols = visitEnumSymbolList(c.enumSymbolList());
+    AstOptionalNode<EnumV> defaultValue = visitEnumDefaultValue(c.enumDefaultValue());
     return new EnumT(range, name, type, symbols, defaultValue);
   }
 
   @Override
-  public IntegerT visitEnumBaseType(SqlStreamParser.EnumBaseTypeContext c) {
+  public QName visitEnumName(SqlStreamParser.EnumNameContext c) {
+    return visitQname(c.qname());
+  }
+
+  @Override
+  public AstOptionalNode<IntegerT> visitEnumBaseType(SqlStreamParser.EnumBaseTypeContext c) {
+    AstOptionalNode<IntegerT> type = AstOptionalNode.empty();
     Range range = range(c);
-    if (c.INT8() != null) return new Int8T(range);
-    if (c.INT16() != null) return new Int16T(range);
-    if (c.INT32() != null) return new Int32T(range);
-    if (c.INT64() != null) return new Int64T(range);
-    throw new IllegalStateException("unknown enum type");
+    if (c.INT8() != null) type = AstOptionalNode.of(new Int8T(range));
+    else if (c.INT16() != null) type = AstOptionalNode.of(new Int16T(range));
+    else if (c.INT32() != null) type = AstOptionalNode.of(new Int32T(range));
+    else if (c.INT64() != null) type = AstOptionalNode.of(new Int64T(range));
+    else throw new IllegalStateException("unknown enum base type");
+    return type;
+  }
+
+  @Override
+  public EnumSymbolList visitEnumSymbolList(SqlStreamParser.EnumSymbolListContext c) {
+    return listContext(c.enumSymbol(), this::visitEnumSymbol, EnumSymbolList::new);
   }
 
   @Override
@@ -290,11 +313,23 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   }
 
   @Override
+  public AstOptionalNode<EnumV> visitEnumDefaultValue(SqlStreamParser.EnumDefaultValueContext c) {
+    AstOptionalNode<EnumV> defaultValue = AstOptionalNode.empty();
+    if (c != null) defaultValue = AstOptionalNode.of(visitEnumLiteral(c.enumLiteral()));
+    return defaultValue;
+  }
+
+  @Override
   public StructT visitStructType(SqlStreamParser.StructTypeContext c) {
     Range range = range(c);
-    QName name = visitQname(c.qname());
+    QName name = visitStructName(c.structName());
     AstListNode<Field> fs = visitFieldList(c.fieldList());
     return new StructT(range, name, fs);
+  }
+
+  @Override
+  public QName visitStructName(SqlStreamParser.StructNameContext c) {
+    return visitQname(c.qname());
   }
 
   @Override
@@ -345,9 +380,27 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   @Override
   public UnionT visitUnionType(SqlStreamParser.UnionTypeContext c) {
     Range range = range(c);
-    QName name = visitQname(c.qname());
-    UnionMemberList alts = listContext(c.unionMember(), this::visitUnionMember, UnionMemberList::new);
-    return new UnionT(range, name, alts);
+    QName name = visitUnionName(c.unionName());
+    UnionMemberList alts = visitUnionMemberList(c.unionMemberList());
+    AstOptionalNode<UnionV> defaultValue = visitUnionDefaultValue(c.unionDefaultValue());
+    return new UnionT(range, name, alts, defaultValue);
+  }
+
+  @Override
+  public QName visitUnionName(SqlStreamParser.UnionNameContext c) {
+    return visitQname(c.qname());
+  }
+
+  @Override
+  public AstOptionalNode<UnionV> visitUnionDefaultValue(SqlStreamParser.UnionDefaultValueContext c) {
+    AstOptionalNode<UnionV> defaultValue = AstOptionalNode.empty();
+    if (c != null) defaultValue = AstOptionalNode.of(visitUnionLiteral(c.unionLiteral()));
+    return defaultValue;
+  }
+
+  @Override
+  public UnionMemberList visitUnionMemberList(SqlStreamParser.UnionMemberListContext c) {
+    return listContext(c.unionMember(), this::visitUnionMember, UnionMemberList::new);
   }
 
   @Override
@@ -385,17 +438,13 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   public StreamType visitStreamType(SqlStreamParser.StreamTypeContext c) {
     Range range = range(c);
     Identifier streamTypeName = visitStreamTypeName(c.streamTypeName());
-    AstOptionalNode<DistributeClause> distributeClause = AstOptionalNode.empty();
-    if (c.distributeClause() != null) {
-      var dc = visitDistributeClause(c.distributeClause());
-      distributeClause = AstOptionalNode.of(dc);
-    }
+    AstOptionalNode<DistributeClause> distributeClause = visitDistributeClause(c.distributeClause());
     if( c.streamTypeReference() != null) {
       TypeReference typeReference = visitStreamTypeReference(c.streamTypeReference());
       return new StreamReferenceT(range, streamTypeName, typeReference, distributeClause);
     }
     if( c.streamTypeInline() != null) {
-      AstListNode<Field> fieldList = visitStreamTypeInline(c.streamTypeInline());
+      FieldList fieldList = visitStreamTypeInline(c.streamTypeInline());
       return new StreamInlineT(range, streamTypeName, fieldList, distributeClause);
     }
     throw new IllegalStateException("unknown stream type");
@@ -405,10 +454,13 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     return visitIdentifier(c.identifier());
   }
 
-  public DistributeClause visitDistributeClause(SqlStreamParser.DistributeClauseContext c) {
+  public AstOptionalNode<DistributeClause> visitDistributeClause(SqlStreamParser.DistributeClauseContext c) {
+    AstOptionalNode<DistributeClause> dc = AstOptionalNode.empty();
+    if (c == null) return dc;
     Range range = range(c);
     IdentifierList keys = listContext(c.fieldName(), this::visitFieldName, IdentifierList::new);
-    return new DistributeClause(range, keys);
+    dc = AstOptionalNode.of(new DistributeClause(range, keys));
+    return dc;
   }
 
   @Override
@@ -424,20 +476,25 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   }
 
   @Override
-  public AstListNode<Field> visitStreamTypeInline(SqlStreamParser.StreamTypeInlineContext c) {
+  public FieldList visitStreamTypeInline(SqlStreamParser.StreamTypeInlineContext c) {
     return visitFieldList(c.fieldList());
   }
 
   @Override
-  public ReadStmt visitReadStmt(ReadStmtContext ctx) {
-    Range range = range(ctx);
-    QName streamName = visitStreamName(ctx.streamName());
-    ReadTypeBlockList selections = listContext(ctx.readTypeBlock(), this::visitReadTypeBlock, ReadTypeBlockList::new);
+  public ReadStmt visitReadStmt(ReadStmtContext c) {
+    Range range = range(c);
+    QName streamName = visitStreamName(c.streamName());
+    ReadTypeBlockList selections = visitReadBlockList(c.readBlockList());
     return new ReadStmt(range, streamName, selections);
   }
 
   @Override
-  public ReadTypeBlock visitReadTypeBlock(SqlStreamParser.ReadTypeBlockContext c) {
+  public ReadTypeBlockList visitReadBlockList(SqlStreamParser.ReadBlockListContext c) {
+    return listContext(c.readBlock(), this::visitReadBlock, ReadTypeBlockList::new);
+  }
+
+  @Override
+  public ReadTypeBlock visitReadBlock(SqlStreamParser.ReadBlockContext c) {
     Range range = range(c);
     Identifier alias = visitStreamTypeName(c.streamTypeName());
     Projection projection = visitReadProjection(c.readProjection());
@@ -499,71 +556,76 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   }
 
   @Override
-  public Expr visitExpr(SqlStreamParser.ExprContext ctx) {
-    return visitOrExpr(ctx.orExpr());
+  public Expr visitCheckExpr(SqlStreamParser.CheckExprContext c) {
+    return visitExpr(c.expr());
   }
 
   @Override
-  public Expr visitOrExpr(SqlStreamParser.OrExprContext ctx) {
-    ExprList exprs = listContext(ctx.andExpr(), this::visitAndExpr, ExprList::new);
+  public Expr visitExpr(SqlStreamParser.ExprContext c) {
+    return visitOrExpr(c.orExpr());
+  }
+
+  @Override
+  public Expr visitOrExpr(SqlStreamParser.OrExprContext c) {
+    ExprList exprs = listContext(c.andExpr(), this::visitAndExpr, ExprList::new);
     return exprs.size() == 1 ? exprs.get(0) : fold(exprs, InfixOp.OR);
   }
 
   @Override
-  public Expr visitAndExpr(SqlStreamParser.AndExprContext ctx) {
-    ExprList exprs = listContext(ctx.notExpr(), this::visitNotExpr, ExprList::new);
+  public Expr visitAndExpr(SqlStreamParser.AndExprContext c) {
+    ExprList exprs = listContext(c.notExpr(), this::visitNotExpr, ExprList::new);
     return exprs.size() == 1 ? exprs.get(0) : fold(exprs, InfixOp.AND);
   }
 
   @Override
-  public Expr visitNotExpr(SqlStreamParser.NotExprContext ctx) {
-    if (ctx.NOT() != null) {
-      Range range = range(ctx);
-      Expr inner = (Expr) visitNotExpr(ctx.notExpr());
+  public Expr visitNotExpr(SqlStreamParser.NotExprContext c) {
+    if (c.NOT() != null) {
+      Range range = range(c);
+      Expr inner = (Expr) visitNotExpr(c.notExpr());
       return new PrefixExpr(range, PrefixOp.NOT, inner, new VoidT(range));
     } else {
-      return (Expr) visit(ctx.cmpExpr());
+      return (Expr) visit(c.cmpExpr());
     }
   }
 
   @Override
-  public Expr visitCmpExpr(SqlStreamParser.CmpExprContext ctx) {
-    Expr left = (Expr) visit(ctx.shiftExpr().get(0));
-    if (ctx.shiftExpr().size() == 1 && ctx.getChildCount() == 1) return left;
+  public Expr visitCmpExpr(SqlStreamParser.CmpExprContext c) {
+    Expr left = (Expr) visit(c.shiftExpr().get(0));
+    if (c.shiftExpr().size() == 1 && c.getChildCount() == 1) return left;
 
     Expr result = left;
     int shiftIndex = 1;
-    for (int i = 1; i < ctx.getChildCount(); i++) {
-      var child = ctx.getChild(i);
+    for (int i = 1; i < c.getChildCount(); i++) {
+      var child = c.getChild(i);
       String tokenText = child.getText();
       switch (tokenText) {
         case "=": {
-          Expr right = visitShiftExpr(ctx.shiftExpr().get(shiftIndex++));
+          Expr right = visitShiftExpr(c.shiftExpr().get(shiftIndex++));
           result = mkInfix(InfixOp.EQ, result, right);
           break;
         }
         case "<>": {
-          Expr right = visitShiftExpr(ctx.shiftExpr().get(shiftIndex++));
+          Expr right = visitShiftExpr(c.shiftExpr().get(shiftIndex++));
           result = mkInfix(InfixOp.NEQ, result, right);
           break;
         }
         case "<": {
-          Expr right = visitShiftExpr(ctx.shiftExpr().get(shiftIndex++));
+          Expr right = visitShiftExpr(c.shiftExpr().get(shiftIndex++));
           result = mkInfix(InfixOp.LT, result, right);
           break;
         }
         case "<=": {
-          Expr right = visitShiftExpr(ctx.shiftExpr().get(shiftIndex++));
+          Expr right = visitShiftExpr(c.shiftExpr().get(shiftIndex++));
           result = mkInfix(InfixOp.LTE, result, right);
           break;
         }
         case ">": {
-          Expr right = visitShiftExpr(ctx.shiftExpr().get(shiftIndex++));
+          Expr right = visitShiftExpr(c.shiftExpr().get(shiftIndex++));
           result = mkInfix(InfixOp.GT, result, right);
           break;
         }
         case ">=": {
-          Expr right = visitShiftExpr(ctx.shiftExpr().get(shiftIndex++));
+          Expr right = visitShiftExpr(c.shiftExpr().get(shiftIndex++));
           result = mkInfix(InfixOp.GTE, result, right);
           break;
         }
@@ -571,13 +633,13 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
           if (child instanceof TerminalNode) {
             String up = tokenText.toUpperCase(Locale.ROOT);
             if (up.equals("IS")) {
-              String nxt = ctx.getChild(i + 1).getText().toUpperCase(Locale.ROOT);
+              String nxt = c.getChild(i + 1).getText().toUpperCase(Locale.ROOT);
               if (nxt.equals("NULL")) {
                 // IS NULL -> postfix operator
                 result = mkPostfix(PostfixOp.IS_NULL, result);
                 i++;
               } else if (nxt.equals("NOT")) {
-                String nxt2 = ctx.getChild(i + 2).getText().toUpperCase(Locale.ROOT);
+                String nxt2 = c.getChild(i + 2).getText().toUpperCase(Locale.ROOT);
                 if (nxt2.equals("NULL")) {
                   // IS NOT NULL -> postfix operator
                   result = mkPostfix(PostfixOp.IS_NOT_NULL, result);
@@ -588,13 +650,13 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
               }
 
             } else if (up.equals("BETWEEN")) {
-              Expr lower = (Expr) visit(ctx.shiftExpr().get(shiftIndex++));
-              Expr upper = (Expr) visit(ctx.shiftExpr().get(shiftIndex++));
+              Expr lower = (Expr) visit(c.shiftExpr().get(shiftIndex++));
+              Expr upper = (Expr) visit(c.shiftExpr().get(shiftIndex++));
               Range r = new Range(result.range().start(), upper.range().end());
               result = new Ternary(r, TernaryOp.BETWEEN, result, lower, upper, new VoidT(r));
             } else if (up.equals("IN")) {
-              ListV lits = listContext(ctx.literal(), this::visitLiteral, ListV::new);
-              Range r = range(ctx);
+              ListV lits = listContext(c.literal(), this::visitLiteral, ListV::new);
+              Range r = range(c);
               result = new InfixExpr(r, InfixOp.IN, result, lits, new VoidT(r));
             }
           }
@@ -605,12 +667,12 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   }
 
   @Override
-  public Expr visitAddExpr(SqlStreamParser.AddExprContext ctx) {
-    ExprList exprs = listContext(ctx.mulExpr(), this::visitMulExpr, ExprList::new);
+  public Expr visitAddExpr(SqlStreamParser.AddExprContext c) {
+    ExprList exprs = listContext(c.mulExpr(), this::visitMulExpr, ExprList::new);
     if (exprs.size() == 1) return exprs.get(0);
     Expr res = exprs.get(0);
     for (int i = 1; i < exprs.size(); i++) {
-      String op = ctx.getChild(2 * i - 1).getText();
+      String op = c.getChild(2 * i - 1).getText();
       InfixOp bop = op.equals("+") ? InfixOp.ADD : InfixOp.SUB;
       Expr right = exprs.get(i);
       res = mkInfix(bop, res, right);
@@ -619,12 +681,12 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   }
 
   @Override
-  public Expr visitMulExpr(SqlStreamParser.MulExprContext ctx) {
-    ExprList parts = listContext(ctx.unaryExpr(), this::visitUnaryExpr, ExprList::new);
+  public Expr visitMulExpr(SqlStreamParser.MulExprContext c) {
+    ExprList parts = listContext(c.unaryExpr(), this::visitUnaryExpr, ExprList::new);
     if (parts.size() == 1) return parts.get(0);
     Expr result = parts.get(0);
     for (int i = 1; i < parts.size(); i++) {
-      String op = ctx.getChild(2 * i - 1).getText();
+      String op = c.getChild(2 * i - 1).getText();
       Expr right = parts.get(i);
       switch (op) {
         case "*":
@@ -644,12 +706,12 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   }
 
   @Override
-  public Expr visitShiftExpr(SqlStreamParser.ShiftExprContext ctx) {
-    ExprList parts = listContext(ctx.addExpr(), this::visitAddExpr, ExprList::new);
+  public Expr visitShiftExpr(SqlStreamParser.ShiftExprContext c) {
+    ExprList parts = listContext(c.addExpr(), this::visitAddExpr, ExprList::new);
     if (parts.size() == 1) return parts.get(0);
     Expr res = parts.get(0);
     for (int i = 1; i < parts.size(); i++) {
-      String op = ctx.getChild(2 * i - 1).getText();
+      String op = c.getChild(2 * i - 1).getText();
       Expr right = parts.get(i);
       if (op.equals("<<")) {
         res = mkInfix(InfixOp.SHL, res, right);
@@ -663,27 +725,27 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   }
 
   @Override
-  public Expr visitUnaryExpr(SqlStreamParser.UnaryExprContext ctx) {
-    if (ctx.MINUS() != null) {
-      Expr inner = (Expr) visit(ctx.unaryExpr());
+  public Expr visitUnaryExpr(SqlStreamParser.UnaryExprContext c) {
+    if (c.MINUS() != null) {
+      Expr inner = (Expr) visit(c.unaryExpr());
       Range r = new Range(inner.range().start(), inner.range().end());
       return new PrefixExpr(r, PrefixOp.NEG, inner, new VoidT(r));
     }
     // otherwise it's a postfixExpr
-    return (Expr) visit(ctx.postfixExpr());
+    return (Expr) visit(c.postfixExpr());
   }
 
   // add visitPostfixExpr to build accessor/member/index chains (conservative mapping)
   @Override
-  public Expr visitPostfixExpr(SqlStreamParser.PostfixExprContext ctx) {
-    Expr node = visitPrimary(ctx.primary());
-    if (ctx.getChildCount() == 1)
+  public Expr visitPostfixExpr(SqlStreamParser.PostfixExprContext c) {
+    Expr node = visitPrimary(c.primary());
+    if (c.getChildCount() == 1)
       return node;
 
     // iterate parse-tree children so we preserve member/index order
-    int childCount = ctx.getChildCount();
+    int childCount = c.getChildCount();
     for (int i = 1; i < childCount; i++) {
-      var ch = ctx.getChild(i);
+      var ch = c.getChild(i);
       if (ch instanceof SqlStreamParser.MemberAccessContext) {
         SqlStreamParser.MemberAccessContext ma = (SqlStreamParser.MemberAccessContext) ch;
         MemberExpr memberAccess = visitMemberAccess(ma);
@@ -705,30 +767,30 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   }
 
   @Override
-  public IndexExpr visitIndexAccess(SqlStreamParser.IndexAccessContext ctx) {
-    Range range = range(ctx);
-    Expr index = visitExpr(ctx.expr());
+  public IndexExpr visitIndexAccess(SqlStreamParser.IndexAccessContext c) {
+    Range range = range(c);
+    Expr index = visitExpr(c.expr());
     return new IndexExpr(range, null, index, new VoidT(range));
   }
 
   @Override
-  public MemberExpr visitMemberAccess(SqlStreamParser.MemberAccessContext ctx) {
-    Range range = range(ctx);
-    Identifier member = visitIdentifier(ctx.identifier());
+  public MemberExpr visitMemberAccess(SqlStreamParser.MemberAccessContext c) {
+    Range range = range(c);
+    Identifier member = visitIdentifier(c.identifier());
     return new MemberExpr(range, null, member, new VoidT(range));
   }
 
   @Override
-  public Expr visitPrimary(SqlStreamParser.PrimaryContext ctx) {
-    Range range = range(ctx);
-    if (ctx.LPAREN() != null) {
-      return (Expr) visit(ctx.expr());
+  public Expr visitPrimary(SqlStreamParser.PrimaryContext c) {
+    Range range = range(c);
+    if (c.LPAREN() != null) {
+      return (Expr) visit(c.expr());
     }
-    if (ctx.literal() != null) {
-      return (Expr) visit(ctx.literal());
+    if (c.literal() != null) {
+      return (Expr) visit(c.literal());
     }
-    if (ctx.identifier() != null) {
-      return new IdentifierExpr(range,visitIdentifier(ctx.identifier()), new VoidT(range));
+    if (c.identifier() != null) {
+      return new IdentifierExpr(range, visitIdentifier(c.identifier()), new VoidT(range));
     }
     throw new IllegalStateException("unknown primary");
   }
@@ -799,17 +861,18 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   @Override
   public EnumV visitEnumLiteral(SqlStreamParser.EnumLiteralContext c) {
     Range range = range(c);
-    Identifier enumName = visitIdentifier(c.identifier(0));
-    Identifier symbol = visitIdentifier(c.identifier(1));
+    QName enumName = visitEnumName(c.enumName());
+    Identifier symbol = visitEnumSymbolName(c.enumSymbolName());
     return new EnumV(range, enumName, symbol);
   }
 
   @Override
   public UnionV visitUnionLiteral(SqlStreamParser.UnionLiteralContext c) {
     Range range = range(c);
-    Identifier memberName = visitIdentifier(c.identifier());
+    QName memberName = visitUnionName(c.unionName());
+    Identifier unionMemberName = visitUnionMemberName(c.unionMemberName());
     AnyV value = visitLiteral(c.literal());
-    return new UnionV(range, memberName, value);
+    return new UnionV(range, memberName, unionMemberName, value);
   }
 
   @Override
@@ -825,8 +888,8 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   }
 
   @Override
-  public DotPrefix visitDotPrefix(SqlStreamParser.DotPrefixContext ctx) {
-    Range range = range(ctx);
+  public DotPrefix visitDotPrefix(SqlStreamParser.DotPrefixContext c) {
+    Range range = range(c);
     return new DotPrefix(range);
   }
 
@@ -836,22 +899,22 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     return new Identifier(range, id.ID().getText());
   }
 
-  private static Range range(ParserRuleContext ctx) {
-    var start = ctx.getStart();
-    var stop = ctx.getStop();
+  private static Range range(ParserRuleContext c) {
+    var start = c.getStart();
+    var stop = c.getStop();
     return new Range(
       new Pos(start.getLine(), start.getCharPositionInLine()),
       new Pos(stop.getLine(), stop.getCharPositionInLine() + stop.getText().length())
     );
   }
 
-  private static Pos start(ParserRuleContext ctx) {
-    var start = ctx.getStart();
+  private static Pos start(ParserRuleContext c) {
+    var start = c.getStart();
     return new Pos(start.getLine(), start.getCharPositionInLine());
   }
 
-  private static Pos end(ParserRuleContext ctx) {
-    var stop = ctx.getStop();
+  private static Pos end(ParserRuleContext c) {
+    var stop = c.getStop();
     return new Pos(stop.getLine(), stop.getCharPositionInLine() + stop.getText().length());
   }
 

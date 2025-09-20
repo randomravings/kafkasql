@@ -1,6 +1,6 @@
 INCLUDE 'com/example/example.sqls';
 
-USE com.example
+USE CONTEXT com.example;
 
 CREATE SCALAR TestScalar
 AS INT32;
