@@ -1,11 +1,5 @@
 package kafkasql.core;
 
-public class ParseArgs {
-  public final boolean resolveIncludes;
-  public final boolean trace;
+import java.nio.file.Path;
 
-  public ParseArgs(boolean resolveIncludes, boolean trace) {
-    this.resolveIncludes = resolveIncludes;
-    this.trace = trace;
-  }
-}
+public final record ParseArgs(Path workspaceRoot, boolean resolveIncludes, boolean trace) { }

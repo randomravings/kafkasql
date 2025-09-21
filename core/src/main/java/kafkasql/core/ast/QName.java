@@ -1,5 +1,7 @@
 package kafkasql.core.ast;
 
+import kafkasql.core.Range;
+
 public final record QName(Range range, AstOptionalNode<DotPrefix> dotPrefix, IdentifierList parts) implements AstNode {
 
   public static final QName ROOT = new QName(Range.NONE, AstOptionalNode.empty(), IdentifierList.EMPTY);

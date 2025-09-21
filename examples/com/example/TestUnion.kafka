@@ -1,8 +1,8 @@
-INCLUDE 'com/example/example.sqls';
-INCLUDE 'com/example/TestScalar.sqls';
-INCLUDE 'com/example/TestEnum.sqls';
+INCLUDE 'com/example.kafka';
+INCLUDE 'com/example/TestScalar.kafka';
+INCLUDE 'com/example/TestEnum.kafka';
 
-USE CONTEXT com.example;
+USE CONTEXT .com.example;
 
 CREATE UNION TestUnion (
     ScalarValue com.example.TestScalar,

@@ -5,10 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import kafkasql.core.ParseArgs;
-import kafkasql.core.ParseHelpers;
+import kafkasql.core.KafkaSqlParser;
 import kafkasql.core.ParseResult;
 import kafkasql.core.ast.Ast;
 import kafkasql.core.ast.Stmt;
@@ -18,11 +19,11 @@ public class TestHelpers {
     }
 
     public static ParseResult parse(String script) {
-        return ParseHelpers.parse(new ParseArgs(false, false), script);
+        return KafkaSqlParser.parseText(script, new ParseArgs(Path.of(""), false, false));
     }
 
     public static Ast parseAssert(String script) {
-        var result = ParseHelpers.parse(new ParseArgs(false, false), script);
+        var result = KafkaSqlParser.parseText(script, new ParseArgs(Path.of(""), false, false));
         assertNoErrors(result);
         return result.ast();
     }

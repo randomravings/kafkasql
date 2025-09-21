@@ -7,52 +7,51 @@ import java.util.stream.Collectors;
 import kafkasql.core.ast.*;
 
 public final class AstValidator {
-  public final Catalog catalog;
-  private final Diagnostics diags = new Diagnostics();
+  public final Catalog catalog = new Catalog();
+  private final Diagnostics diags;
 
   private QName currentContext = QName.ROOT;
-  private List<Stmt> stmts = new ArrayList<>();
 
-  public AstValidator(Catalog catalog) {
-    this.catalog = catalog;
+  public AstValidator(Diagnostics diags) {
+    this.diags = diags;
   }
 
-  public AstValidator(Catalog catalog, QName initialContext) {
-    this.catalog = catalog;
-    this.currentContext = initialContext;
+  public Diagnostics diags() {
+    return diags;
   }
 
-  public ParseResult validate(Ast ast) {
+  public Ast validate(Ast ast) {
     if (diags.hasErrors())
       throw new IllegalStateException("Validator used after errors detected");
 
-    for (Stmt stmt : ast.statements()) {
-      if (null == stmt)
-        continue;
-      Stmt s = switch (stmt) {
-        case UseStmt us -> validateUseStmt(us);
-        case CreateStmt cs -> validateCreateStmt(cs);
-        case ReadStmt rq -> validateReadStmt(rq);
-        case WriteStmt ws -> validateWriteStmt(ws);
-        default -> stmt;
-      };
+    Ast result = new Ast();
+    for (Stmt stmt : ast) {
+      Stmt s = validateStmt(stmt);
+      result.add(s);
       if (diags.hasErrors())
         break;
-      else
-        stmts.add(s);
     }
-    return new ParseResult(new Ast(ast.range(), stmts), diags);
+    return result;
   }
 
-  private boolean contextNotSet() {
+  private boolean contextNotSet(Range range) {
     if (currentContext.isRoot()) {
-      diags.error("Only CONTEXT statements allowed at the root. Use `USE CONTEXT <name>;` first.");
+      diags.addFatal(range, "Only CONTEXT statements allowed at the root. Use `USE CONTEXT <name>;` first.");
       return true;
     }
     return false;
   }
 
-  // return new context when use succeeds
+  private Stmt validateStmt(Stmt s) {
+    return switch (s) {
+      case UseStmt us -> validateUseStmt(us);
+      case CreateStmt cs -> validateCreateStmt(cs);
+      case ReadStmt rq -> validateReadStmt(rq);
+      case WriteStmt ws -> validateWriteStmt(ws);
+      default -> s;
+    };
+  }
+
   private UseStmt validateUseStmt(UseStmt us) {
     return switch (us) {
       case UseContext uc -> validateUseContext(uc);
@@ -62,11 +61,24 @@ public final class AstValidator {
 
   private UseContext validateUseContext(UseContext uc) {
     var fqn = uc.qname();
+    if (fqn.isRoot()) {
+      currentContext = fqn;
+      return uc;
+    }
+
     Optional<Context> ctx = catalog.getContext(currentContext, fqn);
     if (!ctx.isPresent()) {
-      diags.error("Unknown context '" + fqn.fullName() + "' as child of '" + currentContext.fullName() + "'");
+      diags.addError(uc.range(),
+          "Unknown context '" + fqn.fullName() + "' as child of '" + currentContext.fullName() + "'");
     } else {
-      currentContext = fqn;
+      if (ctx.get().qName().dotPrefix().isPresent()) {
+        currentContext = fqn;
+      } else {
+        var parts = new IdentifierList(fqn.range());
+        parts.addAll(currentContext.parts());
+        parts.addAll(fqn.parts());
+        currentContext = new QName(fqn.range(), fqn.dotPrefix(), parts);
+      }
     }
     return uc;
   }
@@ -83,7 +95,7 @@ public final class AstValidator {
   private CreateContext validateCreateContext(CreateContext cd) {
     var fqn = cd.context().qName();
     if (catalog.containsKey(currentContext, fqn)) {
-      diags.error("Context '" + fqn + "' already defined at '" + currentContext.fullName() + "'");
+      diags.addError(cd.range(), "Context '" + fqn + "' already defined at '" + currentContext.fullName() + "'");
     } else {
       catalog.put(currentContext, cd.context());
     }
@@ -91,10 +103,10 @@ public final class AstValidator {
   }
 
   private CreateType validateCreateType(CreateType ct) {
-    if (contextNotSet())
+    if (contextNotSet(ct.range()))
       return ct;
     if (catalog.containsKey(currentContext, ct.qName())) {
-      diags.error("Type '" + ct.qName() + "' already defined at '" + currentContext.fullName() + "'");
+      diags.addError(ct.range(), "Type '" + ct.qName() + "' already defined at '" + currentContext.fullName() + "'");
       return ct;
     }
     ComplexT type = switch (ct.type()) {
@@ -115,18 +127,25 @@ public final class AstValidator {
     if (diags.hasErrors())
       return tp;
 
-    // validate default symbol (if present) refers to one of the defined symbols
     if (tp.defaultValue().isPresent()) {
-      var defaultSymbol = tp.defaultValue().get().enumName().name();
-      boolean found = converted.stream().anyMatch(s -> s.name().name().equals(defaultSymbol));
-      if (!found) {
-        diags.error(
-            "Enum '" + tp.qName().fullName() + "' default symbol '" + defaultSymbol
-                + "' is not one of the enum symbols");
+      var enumName = tp.qName().name();
+      var defaultEnumName = tp.defaultValue().get().enumName().name();
+      if (!defaultEnumName.equals(enumName)) {
+        diags.addError(tp.defaultValue().get().range(),
+            "Enum '" + tp.qName().fullName() + "' default symbol refers to wrong enum '"
+                + defaultEnumName + "'");
+      } else {
+        var defaultSymbol = tp.defaultValue().get().symbol().name();
+        boolean found = converted.stream().anyMatch(s -> s.name().name().equals(defaultSymbol));
+        if (!found) {
+          diags.addError(tp.range(),
+              "Enum '" + tp.qName().fullName() + "' default symbol '" + defaultSymbol
+                  + "' is not one of the enum symbols");
+        }
       }
-      if (diags.hasErrors())
-        return tp;
     }
+    if (diags.hasErrors())
+      return tp;
     return new EnumT(tp.range(), tp.qName(), enumBase, converted, tp.defaultValue());
   }
 
@@ -142,7 +161,8 @@ public final class AstValidator {
       IntegerV v = alignIntegerValue(sym.value(), base);
 
       if (diags.hasErrors()) {
-        diags.error("Enum symbol value for '" + sym.name().name() + "' has unsupported underlying integer type");
+        diags.addError(sym.range(),
+            "Enum symbol value for '" + sym.name().name() + "' has unsupported underlying integer type");
         continue;
       }
 
@@ -154,13 +174,14 @@ public final class AstValidator {
   private StructT validateStruct(StructT tp) {
     QName fqn = tp.qName();
     if (tp.fieldList().isEmpty()) {
-      diags.error("Struct '" + fqn.fullName() + "' must have at least one field");
+      diags.addError(tp.range(), "Struct '" + fqn.fullName() + "' must have at least one field");
       return tp;
     }
     var seen = new HashSet<String>();
     for (var field : tp.fieldList()) {
       if (!seen.add(field.name().name()))
-        diags.error("Struct '" + tp.qName().fullName() + "' reuses field name '" + field.name().name() + "'");
+        diags.addError(field.range(),
+            "Struct '" + tp.qName().fullName() + "' reuses field name '" + field.name().name() + "'");
     }
     if (diags.hasErrors())
       return tp;
@@ -170,13 +191,13 @@ public final class AstValidator {
   private UnionT validateUnion(UnionT tp) {
     var fqn = tp.qName();
     if (tp.types().isEmpty()) {
-      diags.error("Union '" + fqn.fullName() + "' must have at least one option");
+      diags.addError(tp.range(), "Union '" + fqn.fullName() + "' must have at least one option");
       return tp;
     }
     var seen = new HashSet<String>();
     for (var opt : tp.types()) {
       if (!seen.add(opt.name().name()))
-        diags.error("Union '" + fqn.fullName() + "' reuses option name '" + opt.name().name() + "'");
+        diags.addError(opt.range(), "Union '" + fqn.fullName() + "' reuses option name '" + opt.name().name() + "'");
     }
     if (diags.hasErrors())
       return tp;
@@ -189,7 +210,7 @@ public final class AstValidator {
     AstOptionalNode<Expr> vl = tp.validation();
     AstOptionalNode<PrimitiveV> dv = tp.defaultValue();
     if (catalog.containsKey(currentContext, fqn)) {
-      diags.error("Type '" + fqn + "' already defined");
+      diags.addError(tp.range(), "Type '" + fqn + "' already defined");
       return tp;
     }
     if (dv.isPresent()) {
@@ -212,11 +233,12 @@ public final class AstValidator {
   }
 
   private CreateStream validateStream(CreateStream cs) {
-    if (contextNotSet())
+    if (contextNotSet(cs.range()))
       return null;
     var fqn = cs.qName();
     if (catalog.containsKey(currentContext, fqn)) {
-      diags.error("Stream '" + fqn.fullName() + "' already defined for context '" + currentContext.fullName() + "'");
+      diags.addError(cs.range(),
+          "Stream '" + fqn.fullName() + "' already defined for context '" + currentContext.fullName() + "'");
       return cs;
     }
     var stream = cs.stream();
@@ -229,19 +251,20 @@ public final class AstValidator {
       AstOptionalNode<DistributeClause> distributeClause = alt.distributeClause();
       AstListNode<Field> fields = null;
       if (!seen.add(alias.name()))
-        diags.error("Stream '" + fqn.fullName() + "' reuses alias '" + alias.name() + "'");
+        diags.addError(alt.range(), "Stream '" + fqn.fullName() + "' reuses alias '" + alias.name() + "'");
       if (alt instanceof StreamReferenceT ra) {
         var tname = ra.ref().qName();
         Optional<StructT> structOpt = catalog.getStruct(currentContext, tname);
         if (structOpt.isEmpty()) {
-          diags.error("Stream '" + fqn.fullName() + "' references unknown type '" + tname.fullName() + "'");
+          diags.addError(ra.range(),
+              "Stream '" + fqn.fullName() + "' references unknown type '" + tname.fullName() + "'");
           continue;
         }
         fields = structOpt.get().fieldList();
       } else if (alt instanceof StreamInlineT it) {
         fields = it.fields();
       } else {
-        diags.fatal("Unexpected stream type definition");
+        diags.addFatal(alt.range(), "Unexpected stream type definition");
         continue;
       }
 
@@ -251,7 +274,7 @@ public final class AstValidator {
       // Uniqueness
       for (Identifier k : distributeClause.get().keys()) {
         if (!keySet.add(k.name())) {
-          diags.error(
+          diags.addError(k.range(),
               "Duplicate field '" + k + "' in DISTRIBUTE clause for stream " +
                   stream.qName().fullName() + " type alias '" +
                   alias.name() + "'.");
@@ -263,7 +286,7 @@ public final class AstValidator {
 
       for (Identifier k : distributeClause.get().keys()) {
         if (!keySet.contains(k.name())) {
-          diags.error(
+          diags.addError(k.range(),
               "Field '" + k + "' not found in type for DISTRIBUTE clause (stream " +
                   stream.qName().fullName() + ").");
         }
@@ -277,7 +300,7 @@ public final class AstValidator {
   private ReadStmt validateReadStmt(ReadStmt rs) {
     Optional<StreamT> streamOpt = catalog.getStream(currentContext, rs.stream());
     if (streamOpt.isEmpty()) {
-      diags.error("Unknown stream '" + rs.stream().fullName() + "'");
+      diags.addError(rs.range(), "Unknown stream '" + rs.stream().fullName() + "'");
       return rs;
     }
     StreamT stream = streamOpt.get();
@@ -285,7 +308,8 @@ public final class AstValidator {
     for (var block : rs.blocks()) {
       Set<Identifier> fields = topLevelFields(stream, block.alias(), catalog);
       if (fields == null) {
-        diags.error("Stream '" + rs.stream().fullName() + "': unknown TYPE alias '" + block.alias().name() + "'");
+        diags.addError(block.alias().range(),
+            "Stream '" + rs.stream().fullName() + "': unknown TYPE alias '" + block.alias().name() + "'");
         continue;
       }
       if (block.projection() instanceof ProjectionAll)
@@ -295,7 +319,8 @@ public final class AstValidator {
           validatePath(p, fields, rs, block);
         }
       } else {
-        diags.fatal("Unexpected projection type: " + block.projection().getClass().getSimpleName());
+        diags.addFatal(block.projection().range(),
+            "Unexpected projection type: " + block.projection().getClass().getSimpleName());
       }
     }
 
@@ -307,19 +332,20 @@ public final class AstValidator {
   }
 
   private WriteStmt validateWriteStmt(WriteStmt ws) {
-    if (contextNotSet())
+    if (contextNotSet(ws.range()))
       return null;
     var fqn = ws.stream();
     Optional<StreamT> streamOpt = catalog.getStream(currentContext, ws.stream());
     if (streamOpt.isEmpty()) {
-      diags.error("Unknown stream '" + fqn.fullName() + "'");
+      diags.addError(ws.range(), "Unknown stream '" + fqn.fullName() + "'");
       return ws;
     }
     StreamT ds = streamOpt.get();
 
     Set<Identifier> fields = topLevelFields(ds, ws.alias(), catalog);
     if (fields == null) {
-      diags.error("Stream '" + fqn.fullName() + "': unknown TYPE alias '" + ws.alias().name() + "'");
+      diags.addError(ws.alias().range(),
+          "Stream '" + fqn.fullName() + "': unknown TYPE alias '" + ws.alias().name() + "'");
       return ws;
     }
 
@@ -388,7 +414,7 @@ public final class AstValidator {
 
   private AnyV alignValue(AnyV value, AnyT type) {
     if (type instanceof VoidT) {
-      diags.error("Cannot assign value to VOID type");
+      diags.addError(value.range(), "Cannot assign value to VOID type");
       return value;
     }
 
@@ -399,19 +425,20 @@ public final class AstValidator {
         if (value instanceof PrimitiveV l)
           result = alignPrimitive(l, pt);
         else
-          diags.error("Expected literal value for primitive type, got '" + value.getClass().getSimpleName() + "'");
+          diags.addError(value.range(),
+              "Expected literal value for primitive type, got '" + value.getClass().getSimpleName() + "'");
         break;
       case ComplexT ct:
-        diags.error("Cannot assign value to COMPLEX type (yet ...)");
+        diags.addError(value.range(), "Cannot assign value to COMPLEX type (yet ...)");
         break;
       case CompositeT ct:
-        diags.error("Cannot assign value to COMPOSITE type (yet ...)");
+        diags.addError(value.range(), "Cannot assign value to COMPOSITE type (yet ...)");
         break;
       case TypeReference tr:
-        diags.error("Cannot assign value to TYPE REF (yet ...)");
+        diags.addError(value.range(), "Cannot assign value to TYPE REF (yet ...)");
         break;
       default:
-        diags.error("Unsupported combination '" + type.getClass().getSimpleName() + "' and  '"
+        diags.addError(value.range(), "Unsupported combination '" + type.getClass().getSimpleName() + "' and  '"
             + value.getClass().getSimpleName() + "'");
         break;
     }
@@ -423,29 +450,33 @@ public final class AstValidator {
     switch (type) {
       case BoolT __:
         if (!(lit instanceof BoolV))
-          diags.error("Expected BOOL literal, got '" + lit.getClass().getSimpleName().toString() + "'");
+          diags.addError(lit.range(), "Expected BOOL literal, got '" + lit.getClass().getSimpleName().toString() + "'");
         break;
       case AlphaT __:
         if (!(lit instanceof AlphaV))
-          diags.error("Expected ALPHA literal, got '" + lit.toString() + "'");
+          diags.addError(lit.range(), "Expected ALPHA literal, got '" + lit.toString() + "'");
         break;
       case BinaryT __:
         if (!(lit instanceof BinaryV))
-          diags.error("Expected BINARY literal, got '" + lit.getClass().getSimpleName().toString() + "'");
+          diags.addError(lit.range(),
+              "Expected BINARY literal, got '" + lit.getClass().getSimpleName().toString() + "'");
         break;
       case NumberT nt:
         if (!(lit instanceof NumberV nv))
-          diags.error("Expected NUMBER literal, got '" + lit.getClass().getSimpleName().toString() + "'");
+          diags.addError(lit.range(),
+              "Expected NUMBER literal, got '" + lit.getClass().getSimpleName().toString() + "'");
         else
           result = alignNumericValue(nv, (NumberT) type);
         break;
       case TemporalT tt:
         if (!(lit instanceof TemporalV))
-          diags.error("Expected TEMPORAL literal, got '" + lit.getClass().getSimpleName().toString() + "'");
+          diags.addError(lit.range(),
+              "Expected TEMPORAL literal, got '" + lit.getClass().getSimpleName().toString() + "'");
         break;
       default:
-        diags.error("Unsupported combination of literal type '" + type.getClass().getSimpleName() + "' and literal '"
-            + lit.getClass().getSimpleName() + "'");
+        diags.addError(lit.range(),
+            "Unsupported combination of literal type '" + type.getClass().getSimpleName() + "' and literal '"
+                + lit.getClass().getSimpleName() + "'");
         break;
     }
     return result;
@@ -465,7 +496,7 @@ public final class AstValidator {
       return alignFractionalValue(new Float64V(iv.range(), v), ft);
     } else {
       // Safeguard for future implementations
-      diags.error("Unsupported numeric value type '" + value.getClass().getSimpleName() + "'");
+      diags.addError(value.range(), "Unsupported numeric value type '" + value.getClass().getSimpleName() + "'");
       return value;
     }
   }
@@ -477,13 +508,14 @@ public final class AstValidator {
       case DecimalT d:
         var dec = BigDecimal.valueOf(v);
         if (dec.precision() > d.precision() || dec.scale() > d.scale())
-          diags.error("Value '" + v + "' does not fit in DECIMAL(" + d.precision() + "," + d.scale() + ")");
+          diags.addError(value.range(),
+              "Value '" + v + "' does not fit in DECIMAL(" + d.precision() + "," + d.scale() + ")");
         else
           result = new DecimalV(value.range(), dec);
         break;
       case Float32T __:
         if (v < Float.MIN_VALUE || v > Float.MAX_VALUE)
-          diags.error("Value '" + v + "' does not fit in FLOAT32");
+          diags.addError(value.range(), "Value '" + v + "' does not fit in FLOAT32");
         else
           result = new Float32V(value.range(), (float) v);
         break;
@@ -492,7 +524,7 @@ public final class AstValidator {
         break;
       default:
         // Safeguard for future implementations
-        diags.error("Unknown fractional type '" + type.toString() + "'");
+        diags.addError(value.range(), "Unknown fractional type '" + type.toString() + "'");
     }
     return result;
   }
@@ -503,19 +535,19 @@ public final class AstValidator {
     switch (type) {
       case Int8T __:
         if (v < Byte.MIN_VALUE || v > Byte.MAX_VALUE)
-          diags.error("Value '" + v + "' does not fit in INT8");
+          diags.addError(value.range(), "Value '" + v + "' does not fit in INT8");
         else
           result = new Int8V(value.range(), (byte) v);
         break;
       case Int16T __:
         if (v < Short.MIN_VALUE || v > Short.MAX_VALUE)
-          diags.error("Value '" + v + "' does not fit in INT16");
+          diags.addError(value.range(), "Value '" + v + "' does not fit in INT16");
         else
           result = new Int16V(value.range(), (short) v);
         break;
       case Int32T __:
         if (v < Integer.MIN_VALUE || v > Integer.MAX_VALUE)
-          diags.error("Value '" + v + "' does not fit in INT32");
+          diags.addError(value.range(), "Value '" + v + "' does not fit in INT32");
         else
           result = new Int32V(value.range(), (int) v);
         break;
@@ -524,7 +556,7 @@ public final class AstValidator {
         break;
       default:
         // Safeguard for future implementations
-        diags.error("Unknown integer type '" + type.toString() + "'");
+        diags.addError(value.range(), "Unknown integer type '" + type.toString() + "'");
         break;
     }
     return result;

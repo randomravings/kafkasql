@@ -45,7 +45,7 @@ public final class AstPrinter extends Printer {
   public void write(Ast ast) throws IOException {
     writeKey("ast", 0, true);
     writeTypeListNode(Stmt.class);
-    forEach(ast.statements(), this::writeStmt, 0);
+    forEach(ast, this::writeStmt, 0);
     newLine();
   }
 

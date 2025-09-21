@@ -2,7 +2,4 @@ package kafkasql.core;
 
 import kafkasql.core.ast.Ast;
 
-public record ParseResult(
-    Ast ast,
-    Diagnostics diags
-) {}
+public final record ParseResult (Ast ast, Diagnostics diags) { }

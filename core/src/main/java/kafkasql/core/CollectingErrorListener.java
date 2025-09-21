@@ -8,11 +8,11 @@ import org.antlr.v4.runtime.Recognizer;
 import org.antlr.v4.runtime.atn.ATNConfigSet;
 import org.antlr.v4.runtime.dfa.DFA;
 
-
 public class CollectingErrorListener extends BaseErrorListener {
   private final String source;
   private final Diagnostics diagnostics;
-  private CollectingErrorListener(String source, Diagnostics diagnostics) {
+
+  public CollectingErrorListener(String source, Diagnostics diagnostics) {
     this.source = source;
     this.diagnostics = diagnostics;
   }
@@ -25,19 +25,36 @@ public class CollectingErrorListener extends BaseErrorListener {
                 int charPositionInLine,
                 String msg,
                 RecognitionException e) {
-    diagnostics.error("Syntax | src: " + source + ", ln: " + line + ", col: " + (charPositionInLine + 1) + " | Symbol: " + offendingSymbol + " | Message: " + msg);
+    int line1 = Math.max(0, line);   // ANTLR provides 1-based line
+    int col1 = Math.max(1, charPositionInLine + 1); // convert to 1-based column
+
+    // best-effort end position: try to size from offendingSymbol, else mark that token only
+    int endLine = line1;
+    int endCol = col1;
+    try {
+      if (offendingSymbol != null) {
+        String s = offendingSymbol.toString();
+        if (s != null && s.length() > 0) {
+          endCol = col1 + Math.max(0, s.length() - 1);
+        }
+      }
+    } catch (Throwable ignore) {}
+
+    Range range = new Range(source, new kafkasql.core.ast.Pos(line1, col1), new kafkasql.core.ast.Pos(endLine, endCol));
+    diagnostics.addError(range, msg);
   }
 
-	@Override
-	public void reportAmbiguity(
+  @Override
+  public void reportAmbiguity(
                 Parser recognizer,
-								DFA dfa,
-								int startIndex,
-								int stopIndex,
-								boolean exact,
-								BitSet ambigAlts,
-								ATNConfigSet configs) {
-    diagnostics.error("Ambiguity | src: " + source + " - Ambiguity detected between tokens " + startIndex + " and " + stopIndex);
+                DFA dfa,
+                int startIndex,
+                int stopIndex,
+                boolean exact,
+                BitSet ambigAlts,
+                ATNConfigSet configs) {
+    String message = "Ambiguity detected between tokens " + startIndex + " and " + stopIndex;
+    diagnostics.addError(Range.NONE, message);
   }
 
   @Override
@@ -48,7 +65,8 @@ public class CollectingErrorListener extends BaseErrorListener {
                 int stopIndex,
                 BitSet conflictingAlts,
                 ATNConfigSet configs) {
-    diagnostics.error("Full Context | src: " + source + " - Attempting full context between tokens " + startIndex + " and " + stopIndex);
+    String message = "Attempting full context between tokens " + startIndex + " and " + stopIndex;
+    diagnostics.addError(Range.NONE, message);
   }
 
   @Override
@@ -59,9 +77,7 @@ public class CollectingErrorListener extends BaseErrorListener {
                 int stopIndex,
                 int prediction,
                 ATNConfigSet configs) {
-    diagnostics.error("Context Sensitivity | src: " + source + ": Context sensitivity detected between tokens " + startIndex + " and " + stopIndex);
-  }
-  public static CollectingErrorListener withDiagnostics(String source, Diagnostics diagnostics) {
-    return new CollectingErrorListener(source, diagnostics);
+    String message = "Context sensitivity detected between tokens " + startIndex + " and " + stopIndex;
+    diagnostics.addError(Range.NONE, message);
   }
 }

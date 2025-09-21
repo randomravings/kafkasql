@@ -11,19 +11,23 @@ import kafkasql.core.ast.*;
 
 import java.util.*;
 import java.util.function.Function;
-import java.util.stream.Stream;
 
 import static java.util.stream.Collectors.toList;
 
 public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
+  private final String source;
+
+  public AstBuilder(String source) {
+    this.source = source;
+  }
+
   @Override
   public Ast visitScript(SqlStreamParser.ScriptContext c) {
-    var range = range(c);
     var statements = c.statement().stream()
-        .map(s -> (Stmt) visit(s))
+        .map(s -> visitStatement(s))
         .collect(toList());
-    return new Ast(range, statements);
+    return new Ast(Range.NONE, statements);
   }
 
   @Override
@@ -239,25 +243,19 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     Range range = range(c);
     QName qn = visitQname(c.qname());
     PrimitiveT pt = visitPrimitiveType(c.primitiveType());
-    AstOptionalNode<PrimitiveV> defaultValue = visitScalarDefaultValue(c.scalarDefaultValue());
-    AstOptionalNode<Expr> validation = visitScalarCheckExpr(c.scalarCheckExpr());
+    AstOptionalNode<PrimitiveV> defaultValue = visitOptionalContext(c.scalarDefaultValue(), this::visitScalarDefaultValue);
+    AstOptionalNode<Expr> validation = visitOptionalContext(c.scalarCheckExpr(), this::visitScalarCheckExpr);
     return new ScalarT(range, qn, pt, validation, defaultValue);
   }
 
-  
-
   @Override
-  public AstOptionalNode<PrimitiveV> visitScalarDefaultValue(SqlStreamParser.ScalarDefaultValueContext c) {
-    AstOptionalNode<PrimitiveV> defaultValue = AstOptionalNode.empty();
-    if (c.literalValue() != null) defaultValue = AstOptionalNode.of(visitLiteralValue(c.literalValue()));
-    return defaultValue;
+  public PrimitiveV visitScalarDefaultValue(SqlStreamParser.ScalarDefaultValueContext c) {
+    return visitLiteralValue(c.literalValue());
   }
 
   @Override
-  public AstOptionalNode<Expr> visitScalarCheckExpr(SqlStreamParser.ScalarCheckExprContext c) {
-    AstOptionalNode<Expr> check = AstOptionalNode.empty();
-    if (c.checkExpr() != null) check = AstOptionalNode.of(visitCheckExpr(c.checkExpr()));
-    return check;
+  public Expr visitScalarCheckExpr(SqlStreamParser.ScalarCheckExprContext c) {
+    return visitCheckExpr(c.checkExpr());
   }
 
   @Override
@@ -278,6 +276,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   @Override
   public AstOptionalNode<IntegerT> visitEnumBaseType(SqlStreamParser.EnumBaseTypeContext c) {
     AstOptionalNode<IntegerT> type = AstOptionalNode.empty();
+    if (c == null) return type;
     Range range = range(c);
     if (c.INT8() != null) type = AstOptionalNode.of(new Int8T(range));
     else if (c.INT16() != null) type = AstOptionalNode.of(new Int16T(range));
@@ -289,7 +288,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
   public EnumSymbolList visitEnumSymbolList(SqlStreamParser.EnumSymbolListContext c) {
-    return listContext(c.enumSymbol(), this::visitEnumSymbol, EnumSymbolList::new);
+    return visitListContext(c.enumSymbol(), this::visitEnumSymbol, EnumSymbolList::new);
   }
 
   @Override
@@ -334,7 +333,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
   public FieldList visitFieldList(SqlStreamParser.FieldListContext c) {
-    return listContext(c.field(), this::visitField, FieldList::new);
+    return visitListContext(c.field(), this::visitField, FieldList::new);
   }
 
   @Override
@@ -400,7 +399,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
   public UnionMemberList visitUnionMemberList(SqlStreamParser.UnionMemberListContext c) {
-    return listContext(c.unionMember(), this::visitUnionMember, UnionMemberList::new);
+    return visitListContext(c.unionMember(), this::visitUnionMember, UnionMemberList::new);
   }
 
   @Override
@@ -431,7 +430,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
   public StreamTypeList visitStreamTypeList(SqlStreamParser.StreamTypeListContext c) {
-    return listContext(c.streamType(), this::visitStreamType, StreamTypeList::new);
+    return visitListContext(c.streamType(), this::visitStreamType, StreamTypeList::new);
   }
 
   @Override
@@ -458,7 +457,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     AstOptionalNode<DistributeClause> dc = AstOptionalNode.empty();
     if (c == null) return dc;
     Range range = range(c);
-    IdentifierList keys = listContext(c.fieldName(), this::visitFieldName, IdentifierList::new);
+    IdentifierList keys = visitListContext(c.fieldName(), this::visitFieldName, IdentifierList::new);
     dc = AstOptionalNode.of(new DistributeClause(range, keys));
     return dc;
   }
@@ -490,7 +489,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
   public ReadTypeBlockList visitReadBlockList(SqlStreamParser.ReadBlockListContext c) {
-    return listContext(c.readBlock(), this::visitReadBlock, ReadTypeBlockList::new);
+    return visitListContext(c.readBlock(), this::visitReadBlock, ReadTypeBlockList::new);
   }
 
   @Override
@@ -509,7 +508,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     Range range = range(c);
     if (c.STAR() != null)
       return new ProjectionAll(range);
-    return listContext(c.readProjectionExpr(), this::visitReadProjectionExpr, ProjectionList::new);
+    return visitListContext(c.readProjectionExpr(), this::visitReadProjectionExpr, ProjectionList::new);
   }
 
   @Override
@@ -547,7 +546,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
   public ListV visitWriteValues(SqlStreamParser.WriteValuesContext c) {
-    return listContext(c.structLiteral(), this::visitStructLiteral, ListV::new);
+    return visitListContext(c.structLiteral(), this::visitStructLiteral, ListV::new);
   }
 
   @Override
@@ -567,13 +566,13 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
   public Expr visitOrExpr(SqlStreamParser.OrExprContext c) {
-    ExprList exprs = listContext(c.andExpr(), this::visitAndExpr, ExprList::new);
+    ExprList exprs = visitListContext(c.andExpr(), this::visitAndExpr, ExprList::new);
     return exprs.size() == 1 ? exprs.get(0) : fold(exprs, InfixOp.OR);
   }
 
   @Override
   public Expr visitAndExpr(SqlStreamParser.AndExprContext c) {
-    ExprList exprs = listContext(c.notExpr(), this::visitNotExpr, ExprList::new);
+    ExprList exprs = visitListContext(c.notExpr(), this::visitNotExpr, ExprList::new);
     return exprs.size() == 1 ? exprs.get(0) : fold(exprs, InfixOp.AND);
   }
 
@@ -652,10 +651,10 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
             } else if (up.equals("BETWEEN")) {
               Expr lower = (Expr) visit(c.shiftExpr().get(shiftIndex++));
               Expr upper = (Expr) visit(c.shiftExpr().get(shiftIndex++));
-              Range r = new Range(result.range().start(), upper.range().end());
+              Range r = new Range(this.source, result.range().start(), upper.range().end());
               result = new Ternary(r, TernaryOp.BETWEEN, result, lower, upper, new VoidT(r));
             } else if (up.equals("IN")) {
-              ListV lits = listContext(c.literal(), this::visitLiteral, ListV::new);
+              ListV lits = visitListContext(c.literal(), this::visitLiteral, ListV::new);
               Range r = range(c);
               result = new InfixExpr(r, InfixOp.IN, result, lits, new VoidT(r));
             }
@@ -668,7 +667,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
   public Expr visitAddExpr(SqlStreamParser.AddExprContext c) {
-    ExprList exprs = listContext(c.mulExpr(), this::visitMulExpr, ExprList::new);
+    ExprList exprs = visitListContext(c.mulExpr(), this::visitMulExpr, ExprList::new);
     if (exprs.size() == 1) return exprs.get(0);
     Expr res = exprs.get(0);
     for (int i = 1; i < exprs.size(); i++) {
@@ -682,7 +681,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
   public Expr visitMulExpr(SqlStreamParser.MulExprContext c) {
-    ExprList parts = listContext(c.unaryExpr(), this::visitUnaryExpr, ExprList::new);
+    ExprList parts = visitListContext(c.unaryExpr(), this::visitUnaryExpr, ExprList::new);
     if (parts.size() == 1) return parts.get(0);
     Expr result = parts.get(0);
     for (int i = 1; i < parts.size(); i++) {
@@ -707,7 +706,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
   public Expr visitShiftExpr(SqlStreamParser.ShiftExprContext c) {
-    ExprList parts = listContext(c.addExpr(), this::visitAddExpr, ExprList::new);
+    ExprList parts = visitListContext(c.addExpr(), this::visitAddExpr, ExprList::new);
     if (parts.size() == 1) return parts.get(0);
     Expr res = parts.get(0);
     for (int i = 1; i < parts.size(); i++) {
@@ -728,7 +727,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   public Expr visitUnaryExpr(SqlStreamParser.UnaryExprContext c) {
     if (c.MINUS() != null) {
       Expr inner = (Expr) visit(c.unaryExpr());
-      Range r = new Range(inner.range().start(), inner.range().end());
+      Range r = new Range(this.source, inner.range().start(), inner.range().end());
       return new PrefixExpr(r, PrefixOp.NEG, inner, new VoidT(r));
     }
     // otherwise it's a postfixExpr
@@ -829,12 +828,12 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
   public ListV visitListLiteral(SqlStreamParser.ListLiteralContext c) {
-    return listContext(c.literal(), this::visitLiteral, ListV::new);
+    return visitListContext(c.literal(), this::visitLiteral, ListV::new);
   }
 
   @Override
   public MapV visitMapLiteral(SqlStreamParser.MapLiteralContext c) {
-    return mapContext(c.mapEntry(), this::visitMapEntry, MapV::new);
+    return visitMapContext(c.mapEntry(), this::visitMapEntry, MapV::new);
   }
 
   @Override
@@ -847,7 +846,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   @Override
   public StructV visitStructLiteral(SqlStreamParser.StructLiteralContext c) {
-    return mapContext(c.structEntry(), this::visitStructEntry, StructV::new);
+    return visitMapContext(c.structEntry(), this::visitStructEntry, StructV::new);
   }
 
   @Override
@@ -879,7 +878,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   public QName visitQname(SqlStreamParser.QnameContext q) {
     Range range = range(q);
     AstOptionalNode<DotPrefix> dotPrefix = AstOptionalNode.empty();
-    IdentifierList parts = listContext(q.identifier(), this::visitIdentifier, IdentifierList::new);
+    IdentifierList parts = visitListContext(q.identifier(), this::visitIdentifier, IdentifierList::new);
     if (q.dotPrefix() != null) {
       var dp = visitDotPrefix(q.dotPrefix());
       dotPrefix = AstOptionalNode.of(dp);
@@ -899,10 +898,11 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     return new Identifier(range, id.ID().getText());
   }
 
-  private static Range range(ParserRuleContext c) {
+  private Range range(ParserRuleContext c) {
     var start = c.getStart();
     var stop = c.getStop();
     return new Range(
+      this.source,
       new Pos(start.getLine(), start.getCharPositionInLine()),
       new Pos(stop.getLine(), stop.getCharPositionInLine() + stop.getText().length())
     );
@@ -918,14 +918,14 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     return new Pos(stop.getLine(), stop.getCharPositionInLine() + stop.getText().length());
   }
 
-  private static Expr fold(List<Expr> xs, InfixOp op) {
+  private Expr fold(List<Expr> xs, InfixOp op) {
     if (xs == null || xs.isEmpty()) {
       throw new IllegalArgumentException("fold requires a non-empty list");
     }
     Expr acc = xs.get(0);
     for (int i = 1; i < xs.size(); i++) {
       Expr b = xs.get(i);
-      Range r = new Range(acc.range().start(), b.range().end());
+      Range r = new Range(this.source, acc.range().start(), b.range().end());
       acc = new InfixExpr(r, op, acc, b, new VoidT(r));
     }
     return acc;
@@ -968,14 +968,14 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   }
 
   // helper to create infix with a proper range/type
-  private static InfixExpr mkInfix(InfixOp op, Expr left, Expr right) {
-    Range r = new Range(left.range().start(), right.range().end());
+  private InfixExpr mkInfix(InfixOp op, Expr left, Expr right) {
+    Range r = new Range(this.source, left.range().start(), right.range().end());
     return new InfixExpr(r, op, left, right, new VoidT(r));
   }
 
   // helper to create postfix with a proper range/type
-  private static PostfixExpr mkPostfix(PostfixOp op, Expr operand) {
-    Range r = new Range(operand.range().start(), operand.range().end());
+  private PostfixExpr mkPostfix(PostfixOp op, Expr operand) {
+    Range r = new Range(this.source, operand.range().start(), operand.range().end());
     return new PostfixExpr(r, op, operand, new VoidT(r));
   }
 
@@ -985,32 +985,42 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     return s;
   }
 
-  public static <C extends ParserRuleContext, T extends AstNode, L extends AstListNode<T>> L listContext(
+  public <C extends ParserRuleContext, T extends AstNode, L extends AstListNode<T>> L visitListContext(
       List<C> input,
       Function<? super C, ? extends T> transform,
       Function<? super Range, ? extends L> listFactory
   ) {
     Pos upperLeft = start(input.get(0));
     Pos bottomRight = end(input.get(input.size() - 1));
-    Range rn = new Range(upperLeft, bottomRight);
+    Range rn = new Range(this.source, upperLeft, bottomRight);
     L result = listFactory.apply(rn);
     input.forEach(c -> result.add(transform.apply(c)));
     return result;
   }
 
-  public static <C extends ParserRuleContext, KT extends AstNode, VT extends AstNode, M extends AstMapNode<KT, VT>> M mapContext(
+  public <C extends ParserRuleContext, KT extends AstNode, VT extends AstNode, M extends AstMapNode<KT, VT>> M visitMapContext(
       List<C> input,
       Function<? super C, ? extends AstMapEntryNode<KT, VT>> transform,
       Function<? super Range, ? extends M> mapFactory
   ) {
     Pos upperLeft = start(input.get(0));
     Pos bottomRight = end(input.get(input.size() - 1));
-    Range rn = new Range(upperLeft, bottomRight);
+    Range rn = new Range(this.source, upperLeft, bottomRight);
     M result = mapFactory.apply(rn);
     for (C c : input) {
       AstMapEntryNode<KT, VT> e = transform.apply(c);
       result.put(e.key(), e.value());
     }
+    return result;
+  }
+
+  public static <C extends ParserRuleContext, V extends ParserRuleContext, T extends AstNode> AstOptionalNode<T> visitOptionalContext(
+      C input,
+      Function<? super C, ? extends T> transform
+  ) {
+
+    if (input == null) return AstOptionalNode.empty();
+    AstOptionalNode<T> result = AstOptionalNode.of(transform.apply(input));
     return result;
   }
 }

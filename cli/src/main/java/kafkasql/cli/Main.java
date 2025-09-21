@@ -1,5 +1,6 @@
 package kafkasql.cli;
 
+import java.io.Console;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
@@ -7,9 +8,10 @@ import java.nio.file.*;
 import java.util.*;
 
 import kafkasql.core.AstPrinter;
-import kafkasql.core.Catalog;
+import kafkasql.core.Diagnostics;
 import kafkasql.core.ParseArgs;
-import kafkasql.core.ParseHelpers;
+import kafkasql.core.KafkaSqlParser;
+import kafkasql.core.ParseResult;
 import kafkasql.core.Printer;
 import kafkasql.core.ast.Ast;
 
@@ -17,7 +19,7 @@ public class Main {
 
   private static void usage() {
     System.out.println("Usage:");
-    System.out.println("  kafkasql [-a] [-n] (-f <f1.sqls>[,<f2.sqls>...] ...)");
+    System.out.println("  kafkasql [-a] [-n] (-f <f1.kafka>[,<f2.kafka>...] ...)");
     System.out.println("  kafkasql [-a] -t <script...>");
     System.out.println("Options:");
     System.out.println("  -w, --working-dir   Base directory for includes (default: .)");
@@ -30,24 +32,24 @@ public class Main {
   }
 
   public static void main(String[] args) throws Exception {
-    Path workingDir = null;
+    String workingDir = null;
     boolean printAst = false;
     boolean resolveIncludes = true;
     boolean trace = false;
     String inlineText = null;
-    List<Path> fileArgs = new ArrayList<>();
+    List<String> fileArgs = new ArrayList<>();
 
     for (int i = 0; i < args.length; i++) {
       String a = args[i];
       switch (a) {
         case "-w", "--working-dir" -> {
           if (++i >= args.length) { err("missing value for --working-dir/-w"); return; }
-          workingDir = Paths.get(args[i]);
+          workingDir = args[i].trim();
         }
         case "-f", "--files" -> {
           if (++i >= args.length) { err("missing value for --files/-f"); return; }
             for (String f : args[i].split(",")) {
-              if (!f.isBlank()) fileArgs.add(Paths.get(f.trim()));
+              if (!f.isBlank()) fileArgs.add(f.trim());
             }
         }
         case "-n", "--no-include" -> resolveIncludes = false;
@@ -71,15 +73,10 @@ public class Main {
             usage();
             return;
           } else {
-            fileArgs.add(Paths.get(a));
+            fileArgs.add(a);
           }
         }
       }
-    }
-
-    if (trace) {
-      // make trace flag available globally as well (keeps compatibility)
-      System.setProperty("kafkasql.trace", "true");
     }
 
     if (inlineText != null && !fileArgs.isEmpty()) {
@@ -87,73 +84,53 @@ public class Main {
       usage();
       return;
     }
-    if (inlineText == null && fileArgs.isEmpty()) {
-      err("no input (use --files or --text)");
-      usage();
-      return;
-    }
 
-    if (workingDir == null) workingDir = Paths.get(".").toAbsolutePath().normalize();
-    else workingDir = workingDir.toAbsolutePath().normalize();
-
-    // New: validate working directory
-    if (!Files.exists(workingDir)) {
-      err("working directory does not exist: " + workingDir);
-      System.exit(2);
-    }
-    if (!Files.isDirectory(workingDir)) {
-      err("working directory is not a directory: " + workingDir);
-      System.exit(2);
-    }
-    if (!Files.isReadable(workingDir)) {
-      err("working directory not readable: " + workingDir);
-      System.exit(2);
-    }
-
-    // catalog still created for later phases (validation, etc.)
-    var catalog = new Catalog();
-
-    boolean anyErrors = false;
-
-    // Build ParseArgs and pass to ParseHelpers
-    ParseArgs parseArgs = new ParseArgs(resolveIncludes, trace);
+    Path wd = Path.of(workingDir != null ? workingDir : ".").toAbsolutePath().normalize();
+    ParseArgs parseArgs = new ParseArgs(wd, resolveIncludes, trace);
+    ParseResult parseResult = null;
 
     if (inlineText != null) {
-      var pr = ParseHelpers.parse(parseArgs, inlineText);
-      if (!pr.diags().errors().isEmpty()) {
-        anyErrors = true;
-        System.out.println("Errors:");
-        pr.diags().errors().forEach(e -> System.out.println(" - " + e));
-      } else if (printAst) {
-        printAst(pr.ast());
-      }
-    } else {
-      // Normalize file args relative to workingDir (avoid double prefix)
-      Path wd = workingDir;
-      fileArgs = fileArgs.stream().map(p -> {
-        Path abs = p.toAbsolutePath().normalize();
-        if (abs.startsWith(wd)) return wd.relativize(abs);
-        return p;
+      parseResult = KafkaSqlParser.parseText(inlineText, parseArgs);
+    } else if (!fileArgs.isEmpty()) {
+      List<Path> fs = fileArgs.stream().map(p -> {
+        Path path = Path.of(p);
+        if (path.isAbsolute())
+          return path.normalize();
+        else
+          return wd.resolve(p).toAbsolutePath().normalize();
       }).toList();
 
-      var pr = ParseHelpers.parseFiles(wd, fileArgs, parseArgs);
-      if (pr.diags().hasErrors()) {
-        anyErrors = true;
-        System.out.println("Syntax errors:");
-        pr.diags().errors().forEach(e -> System.out.println(" - " + e));
-      }
-
-      var vr = ParseHelpers.validate(catalog, pr.ast());
-      if (vr.diags().hasErrors()) {
-        anyErrors = true;
-        System.out.println("Validation errors:");
-        vr.diags().errors().forEach(e -> System.out.println(" - " + e));
-      } else if (printAst) {
-        printAst(vr.ast());
-      }
+      parseResult = KafkaSqlParser.parseFiles(fs, parseArgs);
+    } else {
+      System.err.println("error: no input (use --files or --text)");
+      usage();
+      System.exit(1);
     }
 
-    if (anyErrors) System.exit(1);
+    if (parseResult.diags().hasErrors()) {
+      System.out.println("Parsing failed with errors:");
+      printDiags(parseResult.diags());
+      System.exit(1);
+    }
+
+    parseResult = KafkaSqlParser.validate(parseResult);
+    if (parseResult.diags().hasErrors()) {
+      System.out.println("Validation failed with errors:");
+      printDiags(parseResult.diags());
+      System.exit(1);
+    }
+
+    if(printAst) {
+      printAst(parseResult.ast());
+    }
+
+    System.exit(0);
+  }
+
+  private static void printDiags(Diagnostics diags) {
+    for (var e : diags.all()) {
+      System.out.println(" - " + e);
+    }
   }
 
   private static void printAst(Ast ast) throws IOException {

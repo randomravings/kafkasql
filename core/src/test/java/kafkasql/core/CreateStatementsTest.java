@@ -8,7 +8,6 @@ import kafkasql.core.ast.CreateStream;
 import kafkasql.core.ast.CreateType;
 import kafkasql.core.ast.Int32T;
 import kafkasql.core.ast.ScalarT;
-import kafkasql.core.ast.Stmt;
 import kafkasql.core.ast.StreamInlineT;
 import kafkasql.core.ast.StreamReferenceT;
 import kafkasql.core.ast.StreamT;
@@ -17,8 +16,6 @@ import kafkasql.core.ast.UnionT;
 import kafkasql.core.ast.UseContext;
 import kafkasql.core.util.TestHelpers;
 
-import java.util.List;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 public class CreateStatementsTest {
@@ -26,14 +23,14 @@ public class CreateStatementsTest {
   @Test
   void createContextSimple() {
     Ast p = TestHelpers.parseAssert("CREATE CONTEXT foo;");
-    CreateContext ctx = TestHelpers.only(p.statements(), CreateContext.class);
+    CreateContext ctx = TestHelpers.only(p, CreateContext.class);
     assertEquals("foo", ctx.qName().fullName().toString());
   }
 
   @Test
   void createScalarPrimitive() {
     Ast p = TestHelpers.parseAssert("CREATE SCALAR MyInt AS INT32;");
-    CreateType ct = TestHelpers.only(p.statements(), CreateType.class);
+    CreateType ct = TestHelpers.only(p, CreateType.class);
     assertEquals("MyInt", ct.qName().fullName().toString());
     ScalarT scalar = TestHelpers.assertType(ct.type(), ScalarT.class);
     assertTrue(scalar.primitive() instanceof Int32T, "Expected Int32 primitive");
@@ -48,7 +45,7 @@ public class CreateStatementsTest {
         Blue: 3
       );
       """);
-    CreateType ct = TestHelpers.only(p.statements(), CreateType.class);
+    CreateType ct = TestHelpers.only(p, CreateType.class);
     kafkasql.core.ast.EnumT en = TestHelpers.assertType(ct.type(), kafkasql.core.ast.EnumT.class);
     assertEquals("Color", ct.qName().fullName());
     assertEquals(3, en.symbols().size());
@@ -68,7 +65,7 @@ public class CreateStatementsTest {
         Friend com.example.User NULL
       );
       """);
-    CreateType ct = TestHelpers.only(p.statements(), CreateType.class);
+    CreateType ct = TestHelpers.only(p, CreateType.class);
     StructT st = TestHelpers.assertType(ct.type(), StructT.class);
     assertEquals("Person", ct.qName().fullName());
     assertEquals(7, st.fieldList().size());
@@ -84,7 +81,7 @@ public class CreateStatementsTest {
         Ref com.example.Other
       );
       """);
-    CreateType ct = TestHelpers.only(p.statements(), CreateType.class);
+    CreateType ct = TestHelpers.only(p, CreateType.class);
     UnionT un = TestHelpers.assertType(ct.type(), UnionT.class);
     assertEquals("Value", ct.qName().fullName());
     assertEquals(3, un.types().size());
@@ -98,7 +95,7 @@ public class CreateStatementsTest {
         TYPE ( Id INT32, Kind STRING ) AS Base
         TYPE com.example.Payload AS Payload;
       """);
-    CreateStream cs = TestHelpers.only(p.statements(), CreateStream.class);
+    CreateStream cs = TestHelpers.only(p, CreateStream.class);
     StreamT log = TestHelpers.assertType(cs.stream(), StreamT.class);
     assertEquals("Events", cs.qName().fullName());
     assertEquals(2, log.types().size());
@@ -114,7 +111,7 @@ public class CreateStatementsTest {
         TYPE ( UserId INT64, End TIMESTAMP(3) ) AS EndRec
         TYPE com.example.Extra AS Extra;
       """);
-    CreateStream cs = TestHelpers.only(p.statements(), CreateStream.class);
+    CreateStream cs = TestHelpers.only(p, CreateStream.class);
     StreamT cmp = TestHelpers.assertType(cs.stream(), StreamT.class);
     assertEquals("Session", cs.qName().fullName());
     assertEquals(3, cmp.types().size());
@@ -132,12 +129,12 @@ public class CreateStatementsTest {
       USE CONTEXT finance;
       CREATE STRUCT Account ( Id INT32 );
       """);
-    assertEquals(5, p.statements().size());
-    CreateContext ctx0 = TestHelpers.at(p.statements(), 0, CreateContext.class);
-    UseContext utx0 = TestHelpers.at(p.statements(), 1, UseContext.class);
-    CreateContext ctx1 = TestHelpers.at(p.statements(), 2, CreateContext.class);
-    UseContext utx1 = TestHelpers.at(p.statements(), 3, UseContext.class);
-    CreateType ct = TestHelpers.at(p.statements(), 4, CreateType.class);
+    assertEquals(5, p.size());
+    CreateContext ctx0 = TestHelpers.at(p, 0, CreateContext.class);
+    UseContext utx0 = TestHelpers.at(p, 1, UseContext.class);
+    CreateContext ctx1 = TestHelpers.at(p, 2, CreateContext.class);
+    UseContext utx1 = TestHelpers.at(p, 3, UseContext.class);
+    CreateType ct = TestHelpers.at(p, 4, CreateType.class);
     StructT struct = TestHelpers.assertType(ct.type(), StructT.class);
     assertEquals("company", ctx0.qName().fullName().toString());
     assertEquals("company", utx0.qname().fullName().toString());
@@ -153,7 +150,7 @@ public class CreateStatementsTest {
         Data LIST<MAP<STRING, LIST<INT32>>>
       );
       """);
-    CreateType ct = TestHelpers.only(p.statements(), CreateType.class);
+    CreateType ct = TestHelpers.only(p, CreateType.class);
     StructT st = TestHelpers.assertType(ct.type(), StructT.class);
     assertEquals(1, st.fieldList().size());
     assertEquals("Data", st.fieldList().get(0).name().name());
@@ -166,7 +163,7 @@ public class CreateStatementsTest {
     @Test
     void duplicateEnumValuesStillParse() {
       Ast p = TestHelpers.parseAssert("CREATE ENUM Dups ( A: 1, B: 1 );");
-      CreateType ct = TestHelpers.only(p.statements(), CreateType.class);
+      CreateType ct = TestHelpers.only(p, CreateType.class);
       assertEquals("Dups", ct.qName().fullName());
       assertTrue(ct.type() instanceof kafkasql.core.ast.EnumT);
     }

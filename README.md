@@ -63,7 +63,7 @@ which should output:
 
 ```bash
 Usage:
-  kafkasql [-a] [-n] (-f <f1.sqls>[,<f2.sqls>...] ...)
+  kafkasql [-a] [-n] (-f <f1.kafka>[,<f2.kafka>...] ...)
   kafkasql [-a] -t <script...>
 Options:
   -w, --working-dir   Base directory for includes (default: .)
@@ -147,7 +147,7 @@ CREATE STRUCT Person (
 Here is a more complete example that shows includes in action. This should look familiar to people with C, Protobuf, or Avro IDL experience.
 
 ```SQL
-INCLUDE 'com/example/Email.sqls'
+INCLUDE 'com/example/Email.kafka'
 
 CREATE STRUCT User (
     Id INT32,
@@ -222,7 +222,7 @@ Here is a basic reference stream definition (many topics one schema)
 
 ```SQL
 -- Basic referencing (many streams one schema)
-INCLUDE 'com/example/User.sqls';
+INCLUDE 'com/example/User.kafka';
 
 CREATE STREAM Users
 TYPE com.example.User AS User
@@ -231,7 +231,7 @@ DISTRIBUTE BY (Id);
 
 ```SQL
 -- Stream with atwon inline types (one stream many schemas)
-INCLUDE 'com/example/User.sqls';
+INCLUDE 'com/example/User.kafka';
 
 CREATE STREAM Users
 TYPE (
@@ -248,7 +248,7 @@ TYPE (
 
 ```SQL
 -- Stream with an inline and a reference (many streams many schemas)
-INCLUDE 'com/example/User.sqls';
+INCLUDE 'com/example/User.kafka';
 
 CREATE STREAM Users
 TYPE (

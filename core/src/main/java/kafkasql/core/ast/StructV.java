@@ -2,6 +2,8 @@ package kafkasql.core.ast;
 
 import java.util.Map;
 
+import kafkasql.core.Range;
+
 public final class StructV extends AstMapNode<Identifier, AnyV> implements ComplexV {
     public StructV(Range range) {
         super(range);

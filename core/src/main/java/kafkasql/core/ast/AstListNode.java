@@ -3,6 +3,8 @@ package kafkasql.core.ast;
 import java.util.ArrayList;
 import java.util.List;
 
+import kafkasql.core.Range;
+
 public abstract class AstListNode<T extends AstNode> extends ArrayList<T> implements AstNode {
     private final Range range;
 

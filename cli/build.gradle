@@ -16,8 +16,10 @@ application {
 }
 
 shadowJar {
-  archiveClassifier = 'all'
-  manifest { attributes 'Main-Class': 'kafkasql.cli.Main' }
+  archiveClassifier.set('all')
+  manifest {
+    attributes 'Main-Class': application.mainClass.get()
+  }
 }
 
 tasks.named('build') {

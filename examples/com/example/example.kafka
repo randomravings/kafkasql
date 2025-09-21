@@ -1,5 +1,0 @@
-INCLUDE 'com/com.sqls';
-
-USE CONTEXT com;
-
-CREATE CONTEXT example;
