@@ -4,4 +4,6 @@ import java.time.LocalTime;
 
 import kafkasql.core.Range;
 
-public final record TimeV(Range range, LocalTime value) implements TemporalV { }
+public final record TimeV(Range range, LocalTime value) implements TemporalV {
+    public byte precision() { return (byte) Math.log10(value.getNano()); }
+}

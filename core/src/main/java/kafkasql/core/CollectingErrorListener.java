@@ -25,22 +25,20 @@ public class CollectingErrorListener extends BaseErrorListener {
                 int charPositionInLine,
                 String msg,
                 RecognitionException e) {
-    int line1 = Math.max(0, line);   // ANTLR provides 1-based line
-    int col1 = Math.max(1, charPositionInLine + 1); // convert to 1-based column
-
-    // best-effort end position: try to size from offendingSymbol, else mark that token only
-    int endLine = line1;
-    int endCol = col1;
+    int lnb = line;
+    int chb = charPositionInLine;
+    int lne = lnb;
+    int che = chb;
     try {
       if (offendingSymbol != null) {
         String s = offendingSymbol.toString();
         if (s != null && s.length() > 0) {
-          endCol = col1 + Math.max(0, s.length() - 1);
+          che = lnb + Math.max(0, s.length());
         }
       }
     } catch (Throwable ignore) {}
 
-    Range range = new Range(source, new kafkasql.core.ast.Pos(line1, col1), new kafkasql.core.ast.Pos(endLine, endCol));
+    Range range = new Range(source, new Pos(lnb, chb), new Pos(lne, che));
     diagnostics.addError(range, msg);
   }
 
@@ -54,7 +52,7 @@ public class CollectingErrorListener extends BaseErrorListener {
                 BitSet ambigAlts,
                 ATNConfigSet configs) {
     String message = "Ambiguity detected between tokens " + startIndex + " and " + stopIndex;
-    diagnostics.addError(Range.NONE, message);
+    diagnostics.addFatal(Range.NONE, message);
   }
 
   @Override
@@ -66,7 +64,7 @@ public class CollectingErrorListener extends BaseErrorListener {
                 BitSet conflictingAlts,
                 ATNConfigSet configs) {
     String message = "Attempting full context between tokens " + startIndex + " and " + stopIndex;
-    diagnostics.addError(Range.NONE, message);
+    diagnostics.addFatal(Range.NONE, message);
   }
 
   @Override
@@ -78,6 +76,6 @@ public class CollectingErrorListener extends BaseErrorListener {
                 int prediction,
                 ATNConfigSet configs) {
     String message = "Context sensitivity detected between tokens " + startIndex + " and " + stopIndex;
-    diagnostics.addError(Range.NONE, message);
+    diagnostics.addFatal(Range.NONE, message);
   }
 }

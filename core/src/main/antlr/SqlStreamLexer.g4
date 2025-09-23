@@ -59,6 +59,7 @@ BETWEEN       : [Bb][Ee][Tt][Ww][Ee][Ee][Nn] ;
 IN            : [Ii][Nn] ;
 OF            : [Oo][Ff] ;
 CHECK         : [Cc][Hh][Ee][Cc][Kk] ;
+WITH          : [Ww][Ii][Tt][Hh] ;
 
 // Punctuation / operators
 COMMA         : ',' ;
@@ -95,12 +96,25 @@ TILDE         : '~' ;
 SHL           : {angleDepth==0 && !pendingType}? '<<' ;
 SHR           : {angleDepth==0 && !pendingType}? '>>' ;
 
-// Literals / identifiers
 NUMBER_LIT    : '-'? [0-9]+ ('.' [0-9]+ | [eE] [+-]? [0-9]+)? ;
 STRING_LIT    : '\'' ( ~[\r\n'] | '\'\'' )* '\'' ;
 BYTES_LIT     : [0][xX][0-9a-fA-F]+ ;
 ID            : [a-zA-Z] [a-zA-Z0-9_]* ;
 
-// Whitespace / comments
-WS            : [ \t\r\n]+ -> skip ;
-COMMENT       : '--' ~[\r\n]* -> skip ;
+// DOC_COMMENT: contiguous lines that start with '#'
+DOC_COMMENT
+  : '#' [ \t]* ~[\r\n]* ( '\r'? '\n' '#' [ \t]* ~[\r\n]* )*
+  ;
+
+BLOCK_COMMENT
+  : '/*' ( . | '\r' | '\n' )*? '*/' -> skip
+  ;
+
+LINE_COMMENT
+  : '--' ~[\r\n]* -> skip
+  ;
+ 
+WS
+  : [ \t\r\n]+ -> skip
+  ;
+

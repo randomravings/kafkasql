@@ -3,9 +3,6 @@ package kafkasql.core;
 import com.google.common.jimfs.Configuration;
 import com.google.common.jimfs.Jimfs;
 
-import kafkasql.core.Diagnostics;
-import kafkasql.core.IncludeResolver;
-
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.*;

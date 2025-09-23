@@ -1,14 +1,21 @@
+/*
+ Standard multi line comment
+*/
+
 CREATE CONTEXT com;
 USE CONTEXT com;
 
+-- single line comment
 CREATE CONTEXT example;
 USE CONTEXT example;
 
 CREATE SCALAR Money AS
 DECIMAL(18, 2)
 DEFAULT(0)
-CHECK (value > 'thing');
+CHECK (value > 100);
 
+# 1. Define custom types
+# 2. xys
 CREATE ENUM Status (
   ACTIVE: 0,
   PENDING: 1,
@@ -51,9 +58,11 @@ CREATE STREAM customers AS
 TYPE .com.example.Customer AS CustomerV2
 TYPE (
   Id CustomerIdOrName,
+  Ts TIMESTAMP(3),
   Email STRING NULL
 ) AS CustomerV1
 DISTRIBUTE BY (Id)
+WITH TIMESTAMP (Ts)
 ;
 
 WRITE TO customers

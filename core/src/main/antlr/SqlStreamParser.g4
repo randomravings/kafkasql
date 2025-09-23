@@ -79,9 +79,9 @@ writeValues
   :  structLiteral (COMMA structLiteral)*
   ;
 
-/* ─────────────────────── Create Statements ─────────────────── */
+/* ─────────────────────── Create Statements ─────────────────────── */
 createStmt
-  : CREATE objDef
+  : docComment? CREATE objDef
   ;
   
 objDef
@@ -200,7 +200,7 @@ listType
   ;
 
 mapType
-  : MAP  LT primitiveType COMMA type GT
+  : MAP LT primitiveType COMMA type GT
   ;
 
 complexType
@@ -247,7 +247,7 @@ enumSymbolList
   ;
 
 enumSymbol
-  : enumSymbolName COLON enumSymbolValue
+  : docComment? enumSymbolName COLON enumSymbolValue
   ;
 
 enumSymbolName
@@ -263,7 +263,7 @@ enumDefaultValue
   ;
 
 structType
-  : STRUCT structName fieldList
+  : STRUCT structName fieldList checkExpr?
   ;
 
 structName
@@ -275,7 +275,7 @@ fieldList
   ;
 
 field
-  : fieldName fieldType fieldNullable? fieldDefaultValue?
+  : docComment? fieldName fieldType fieldNullable? fieldDefaultValue?
   ;
 
 fieldName
@@ -335,7 +335,7 @@ streamName
   ;
 
 streamType
-  : TYPE (streamTypeInline | streamTypeReference) AS streamTypeName distributeClause?
+  : docComment? TYPE (streamTypeInline | streamTypeReference) AS streamTypeName distributeClause? timestampClause? checkExpr*
   ;
 
 streamTypeList
@@ -343,11 +343,15 @@ streamTypeList
   ;
 
 streamTypeName
-  : identifier
+  :  identifier
   ;
 
 distributeClause
   : DISTRIBUTE BY LPAREN fieldName (COMMA fieldName)* RPAREN
+  ;
+
+timestampClause
+  : WITH TIMESTAMP LPAREN fieldName RPAREN
   ;
 
 streamTypeReference
@@ -359,7 +363,11 @@ streamTypeInline
   ;
 
 checkExpr
-  : CHECK LPAREN expr RPAREN
+  : CHECK checkExprName? LPAREN expr RPAREN
+  ;
+
+checkExprName
+  : identifier AS
   ;
 
 /* ──────────────── Expressions ──────────────── */
@@ -496,4 +504,8 @@ dotPrefix
 
 identifier
   : ID
+  ;
+
+docComment
+  : DOC_COMMENT
   ;

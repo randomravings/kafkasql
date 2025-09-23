@@ -1,6 +1,5 @@
 package kafkasql.cli;
 
-import java.io.Console;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.Writer;

@@ -7,14 +7,22 @@ public class Diagnostics {
 
   private final List<DiagnosticEntry> entries = new ArrayList<>();
 
+  private boolean hasFatal = false;
+  private boolean hasErrors = false;
+  private boolean hasWarnings = false;
+
+  public void addFatal(Range range, String message) {
+    entries.add(new DiagnosticEntry(range, message, DiagnosticEntry.Severity.FATAL));
+    hasFatal = true;
+    hasErrors = true;
+  }
   public void addError(Range range, String message) {
     entries.add(new DiagnosticEntry(range, message, DiagnosticEntry.Severity.ERROR));
+    hasErrors = true;
   }
   public void addWarning(Range range, String message) {
     entries.add(new DiagnosticEntry(range, message, DiagnosticEntry.Severity.WARNING));
-  }
-  public void addFatal(Range range, String message) {
-    entries.add(new DiagnosticEntry(range, message, DiagnosticEntry.Severity.FATAL));
+    hasWarnings = true;
   }
 
   public List<DiagnosticEntry> entriesOf(DiagnosticEntry.Severity level) {
@@ -62,18 +70,14 @@ public class Diagnostics {
   }
 
   public boolean hasWarnings() {
-    return containsMin(DiagnosticEntry.Severity.WARNING);
+    return this.hasWarnings;
   }
   
   public boolean hasErrors() {
-    return containsMin(DiagnosticEntry.Severity.ERROR);
+    return this.hasErrors;
   }
 
   public boolean hasFatal() {
-    return containsMin(DiagnosticEntry.Severity.FATAL);
-  }
-
-  private boolean containsMin(DiagnosticEntry.Severity level) {
-    return entries.stream().anyMatch(e -> e.severity().ordinal() >= level.ordinal());
+    return this.hasFatal;
   }
 }

@@ -17,6 +17,7 @@ import static java.util.stream.Collectors.toList;
 public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
 
   private final String source;
+  private AstOptionalNode<Doc> currentDoc = AstOptionalNode.empty();
 
   public AstBuilder(String source) {
     this.source = source;
@@ -31,18 +32,30 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   }
 
   @Override
+  public Doc visitDocComment(SqlStreamParser.DocCommentContext c) {
+    Range range = range(c);
+    String raw = c.getText();
+    String[] lines = raw.split("\\r?\\n", -1);
+    for (int i = 0; i < lines.length; i++)
+      if (lines[i].startsWith("# "))
+        lines[i] = lines[i].substring(2);
+    range = new Range(range.source(), range.start(), new Pos(range.start().ln() + lines.length, lines[lines.length - 1].length()));
+    return new Doc(range, String.join("\n", lines));
+  }
+
+  @Override
   public Stmt visitStatement(SqlStreamParser.StatementContext c) {
     if (c.useStmt() != null) return visitUseStmt(c.useStmt());
     if (c.createStmt() != null) return visitCreateStmt(c.createStmt());
     if (c.readStmt() != null) return visitReadStmt(c.readStmt());
     if (c.writeStmt() != null) return visitWriteStmt(c.writeStmt());
-    throw new IllegalStateException("unknown statement");
+    throw new AstBuildException(range(c), "unknown statement");
   }
 
   @Override
   public UseStmt visitUseStmt(SqlStreamParser.UseStmtContext c) {
     if (c.useContext() != null) return visitUseContext(c.useContext());
-    throw new IllegalStateException("unknown use statement");
+    throw new AstBuildException(range(c),"unknown use statement");
   }
 
   @Override
@@ -55,20 +68,34 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   @Override
   public CreateStmt visitCreateStmt(SqlStreamParser.CreateStmtContext c) {
     Range range = range(c);
+    currentDoc = visitOptionalContext(c.docComment(), this::visitDocComment);
+    if (currentDoc.isPresent()) {
+      int createLn = c.CREATE().getSymbol().getLine();
+      int docEndLine = currentDoc.get().range().end().ln();
+      if (docEndLine != createLn)
+        throw new AstBuildException(currentDoc.get().range(),"documentation comment is not adjacent to the create statement");
+    }
+      
+
+
+    CreateStmt stmt = null;
+    c.CREATE().getSymbol().getLine();
     if (c.objDef().context() != null) {
       Context context = visitContext(c.objDef().context());
-      return new CreateContext(range, context);
-
+      stmt = new CreateContext(range, context);
     }
     if (c.objDef().complexType() != null) {
       ComplexT complexT = visitComplexType(c.objDef().complexType());
-      return new CreateType(range, complexT);
+      stmt = new CreateType(range, complexT);
     }
     if (c.objDef().stream() != null) {
       StreamT streamT = visitStream(c.objDef().stream());
-      return new CreateStream(range, streamT);
+      stmt = new CreateStream(range, streamT);
     }
-    throw new IllegalStateException("unknown create statement");
+    if (stmt == null)
+      throw new AstBuildException(range(c),"unknown create statement");
+    currentDoc = AstOptionalNode.empty();
+    return stmt;
   }
 
   @Override
@@ -84,29 +111,29 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     if (c.compositeType() != null) return visitCompositeType(c.compositeType());
     if (c.complexType() != null) return visitComplexType(c.complexType());
     if (c.typeReference() != null) return visitTypeReference(c.typeReference());
-    throw new IllegalStateException("unknown type");
+    throw new AstBuildException(range(c),"unknown type");
   }
 
   @Override
-  public PrimitiveT visitPrimitiveType(SqlStreamParser.PrimitiveTypeContext p) {
-    if (p.booleanType() != null) return visitBooleanType(p.booleanType());
-    if (p.int8Type() != null) return visitInt8Type(p.int8Type());
-    if (p.int16Type() != null) return visitInt16Type(p.int16Type());
-    if (p.int32Type() != null) return visitInt32Type(p.int32Type());
-    if (p.int64Type() != null) return visitInt64Type(p.int64Type());
-    if (p.float32Type() != null) return visitFloat32Type(p.float32Type());
-    if (p.float64Type() != null) return visitFloat64Type(p.float64Type());
-    if (p.decimalType() != null) return visitDecimalType(p.decimalType());
-    if (p.stringType() != null) return visitStringType(p.stringType());
-    if (p.charType() != null) return visitCharType(p.charType());
-    if (p.bytesType() != null) return visitBytesType(p.bytesType());
-    if (p.fixedType() != null) return visitFixedType(p.fixedType());
-    if (p.uuidType() != null) return visitUuidType(p.uuidType());
-    if (p.dateType() != null) return visitDateType(p.dateType());
-    if (p.timeType() != null) return visitTimeType(p.timeType());
-    if (p.timestampType() != null) return visitTimestampType(p.timestampType());
-    if (p.timestampTzType() != null) return visitTimestampTzType(p.timestampTzType());
-    throw new IllegalStateException("unknown primitive type");
+  public PrimitiveT visitPrimitiveType(SqlStreamParser.PrimitiveTypeContext c) {
+    if (c.booleanType() != null) return visitBooleanType(c.booleanType());
+    if (c.int8Type() != null) return visitInt8Type(c.int8Type());
+    if (c.int16Type() != null) return visitInt16Type(c.int16Type());
+    if (c.int32Type() != null) return visitInt32Type(c.int32Type());
+    if (c.int64Type() != null) return visitInt64Type(c.int64Type());
+    if (c.float32Type() != null) return visitFloat32Type(c.float32Type());
+    if (c.float64Type() != null) return visitFloat64Type(c.float64Type());
+    if (c.decimalType() != null) return visitDecimalType(c.decimalType());
+    if (c.stringType() != null) return visitStringType(c.stringType());
+    if (c.charType() != null) return visitCharType(c.charType());
+    if (c.bytesType() != null) return visitBytesType(c.bytesType());
+    if (c.fixedType() != null) return visitFixedType(c.fixedType());
+    if (c.uuidType() != null) return visitUuidType(c.uuidType());
+    if (c.dateType() != null) return visitDateType(c.dateType());
+    if (c.timeType() != null) return visitTimeType(c.timeType());
+    if (c.timestampType() != null) return visitTimestampType(c.timestampType());
+    if (c.timestampTzType() != null) return visitTimestampTzType(c.timestampTzType());
+    throw new AstBuildException(range(c),"unknown primitive type");
   }
 
   @Override
@@ -211,7 +238,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   public AnyT visitCompositeType(SqlStreamParser.CompositeTypeContext c) {
     if (c.listType() != null) return visitListType(c.listType());
     if (c.mapType() != null) return visitMapType(c.mapType());
-    throw new IllegalStateException("unknown composite type");
+    throw new AstBuildException(range(c),"unknown composite type");
   }
 
   @Override
@@ -235,7 +262,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     if (c.structType() != null) return visitStructType(c.structType());
     if (c.enumType() != null) return visitEnumType(c.enumType());
     if (c.unionType() != null) return visitUnionType(c.unionType());
-    throw new IllegalStateException("unknown complex type");
+    throw new AstBuildException(range(c),"unknown complex type");
   }
 
   @Override
@@ -243,9 +270,9 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     Range range = range(c);
     QName qn = visitQname(c.qname());
     PrimitiveT pt = visitPrimitiveType(c.primitiveType());
-    AstOptionalNode<PrimitiveV> defaultValue = visitOptionalContext(c.scalarDefaultValue(), this::visitScalarDefaultValue);
-    AstOptionalNode<Expr> validation = visitOptionalContext(c.scalarCheckExpr(), this::visitScalarCheckExpr);
-    return new ScalarT(range, qn, pt, validation, defaultValue);
+    AstOptionalNode<PrimitiveV> dv = visitOptionalContext(c.scalarDefaultValue(), this::visitScalarDefaultValue);
+    AstOptionalNode<CheckClause> cc = visitOptionalContext(c.scalarCheckExpr(), this::visitScalarCheckExpr);
+    return new ScalarT(range, qn, pt, cc, dv, currentDoc);
   }
 
   @Override
@@ -254,7 +281,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   }
 
   @Override
-  public Expr visitScalarCheckExpr(SqlStreamParser.ScalarCheckExprContext c) {
+  public CheckClause visitScalarCheckExpr(SqlStreamParser.ScalarCheckExprContext c) {
     return visitCheckExpr(c.checkExpr());
   }
 
@@ -265,7 +292,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     AstOptionalNode<IntegerT> type = visitEnumBaseType(c.enumBaseType());
     EnumSymbolList symbols = visitEnumSymbolList(c.enumSymbolList());
     AstOptionalNode<EnumV> defaultValue = visitEnumDefaultValue(c.enumDefaultValue());
-    return new EnumT(range, name, type, symbols, defaultValue);
+    return new EnumT(range, name, type, symbols, defaultValue, currentDoc);
   }
 
   @Override
@@ -282,7 +309,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     else if (c.INT16() != null) type = AstOptionalNode.of(new Int16T(range));
     else if (c.INT32() != null) type = AstOptionalNode.of(new Int32T(range));
     else if (c.INT64() != null) type = AstOptionalNode.of(new Int64T(range));
-    else throw new IllegalStateException("unknown enum base type");
+    else throw new AstBuildException(range(c),"unknown enum base type");
     return type;
   }
 
@@ -323,7 +350,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     Range range = range(c);
     QName name = visitStructName(c.structName());
     AstListNode<Field> fs = visitFieldList(c.fieldList());
-    return new StructT(range, name, fs);
+    return new StructT(range, name, fs, currentDoc);
   }
 
   @Override
@@ -368,7 +395,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   public NullV visitFieldNullable(SqlStreamParser.FieldNullableContext c) {
     Range range = range(c);
     if (c.NULL() != null) return new NullV(range);
-    throw new IllegalStateException("unknown field nullable");
+    throw new AstBuildException(range(c),"unknown field nullable");
   }
 
   @Override
@@ -382,7 +409,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     QName name = visitUnionName(c.unionName());
     UnionMemberList alts = visitUnionMemberList(c.unionMemberList());
     AstOptionalNode<UnionV> defaultValue = visitUnionDefaultValue(c.unionDefaultValue());
-    return new UnionT(range, name, alts, defaultValue);
+    return new UnionT(range, name, alts, defaultValue, currentDoc);
   }
 
   @Override
@@ -425,7 +452,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     Range range = range(c);
     QName name = visitStreamName(c.streamName());
     AstListNode<StreamType> types = visitStreamTypeList(c.streamTypeList());
-    return new StreamT(range, name, types);
+    return new StreamT(range, name, types, currentDoc);
   }
 
   @Override
@@ -446,7 +473,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
       FieldList fieldList = visitStreamTypeInline(c.streamTypeInline());
       return new StreamInlineT(range, streamTypeName, fieldList, distributeClause);
     }
-    throw new IllegalStateException("unknown stream type");
+    throw new AstBuildException(range(c),"unknown stream type");
   }
 
   public Identifier visitStreamTypeName(SqlStreamParser.StreamTypeNameContext c) {
@@ -555,8 +582,15 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   }
 
   @Override
-  public Expr visitCheckExpr(SqlStreamParser.CheckExprContext c) {
-    return visitExpr(c.expr());
+  public CheckClause visitCheckExpr(SqlStreamParser.CheckExprContext c) {
+    Expr expr = visitExpr(c.expr());
+    AstOptionalNode<Identifier> name = visitOptionalContext(c.checkExprName(), this::visitCheckExprName);
+    return new CheckClause(range(c), name, expr);
+  }
+
+  @Override
+  public Identifier visitCheckExprName(SqlStreamParser.CheckExprNameContext c) {
+    return visitIdentifier(c.identifier());
   }
 
   @Override
@@ -644,7 +678,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
                   result = mkPostfix(PostfixOp.IS_NOT_NULL, result);
                   i += 2;
                 } else {
-                  throw new IllegalStateException("Unsupported IS expression");
+                  throw new AstBuildException(range(c),"Unsupported IS expression");
                 }
               }
 
@@ -698,7 +732,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
           result = mkInfix(InfixOp.MOD, result, right);
           break;
         default:
-          throw new IllegalStateException("Unknown multiplicative operator: " + op);
+          throw new AstBuildException(range(c),"Unknown multiplicative operator: " + op);
       }
     }
     return result;
@@ -717,7 +751,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
       } else if (op.equals(">>")) {
         res = mkInfix(InfixOp.SHR, res, right);
       } else {
-        throw new IllegalStateException("Unknown shift operator: " + op);
+        throw new AstBuildException(range(c),"Unknown shift operator: " + op);
       }
     }
     return res;
@@ -759,7 +793,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
         String t = ch.getText();
         if (t.equals(".") || t.equals("[") || t.equals("]"))
           continue;
-        throw new IllegalStateException("Unexpected token in postfix expression: " + t);
+        throw new AstBuildException(range(c),"Unexpected token in postfix expression: " + t);
       }
     }
     return node;
@@ -791,7 +825,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     if (c.identifier() != null) {
       return new IdentifierExpr(range, visitIdentifier(c.identifier()), new VoidT(range));
     }
-    throw new IllegalStateException("unknown primary");
+    throw new AstBuildException(range(c),"unknown primary");
   }
 
   @Override
@@ -802,7 +836,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     if (c.structLiteral() != null) return visitStructLiteral(c.structLiteral());
     if (c.enumLiteral() != null) return visitEnumLiteral(c.enumLiteral());
     if (c.unionLiteral() != null) return visitUnionLiteral(c.unionLiteral());
-    throw new IllegalStateException("unknown literal");
+    throw new AstBuildException(range(c),"unknown literal");
   }
 
   @Override
@@ -813,7 +847,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     if (c.STRING_LIT() != null) return new StringV(range(c), unquote(c.STRING_LIT().getText()));
     if (c.NUMBER_LIT() != null) return new Float64V(range(c), float64(c.NUMBER_LIT()));
     if (c.BYTES_LIT() != null) return new BytesV(range(c), bytes(c.BYTES_LIT()));
-    throw new IllegalStateException("unknown literal value");
+    throw new AstBuildException(range(c),"unknown literal value");
   }
 
   @Override
@@ -823,7 +857,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     } else if (c.mapLiteral() != null) {
       return visitMapLiteral(c.mapLiteral());
     }
-    throw new IllegalStateException("unknown literal sequence");
+    throw new AstBuildException(range(c),"unknown literal sequence");
   }
 
   @Override
@@ -1022,5 +1056,13 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     if (input == null) return AstOptionalNode.empty();
     AstOptionalNode<T> result = AstOptionalNode.of(transform.apply(input));
     return result;
+  }
+
+  private void ensureDocIsAdjacent(AstOptionalNode<Doc> doc, Range target) {
+    if (doc.isEmpty()) return;
+    int a = doc.range().end().ln();
+    int b = target.start().ln();
+    if (a == b) return;
+    throw new AstBuildException(doc.range(),"Documentation must be immediately before the declaration it documents");
   }
 }

@@ -104,11 +104,10 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
     List<org.eclipse.lsp4j.Diagnostic> lspDiags = new ArrayList<>();
     for (kafkasql.core.DiagnosticEntry entry : diags.all()) {
       kafkasql.core.Range r = entry.range();
-      // assume Pos has line() and col() 1-based
       int startLine = Math.max(0, r.start().ln() - 1);
-      int startChar = Math.max(0, r.start().ch() - 1);
+      int startChar = Math.max(0, r.start().ch());
       int endLine = Math.max(startLine, r.end().ln() - 1);
-      int endChar = Math.max(startChar, r.end().ch() - 1);
+      int endChar = Math.max(0, r.end().ch());
 
       org.eclipse.lsp4j.Position start = new org.eclipse.lsp4j.Position(startLine, startChar);
       org.eclipse.lsp4j.Position end = new org.eclipse.lsp4j.Position(endLine, endChar);

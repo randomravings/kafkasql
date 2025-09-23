@@ -324,9 +324,17 @@ public final class AstPrinter extends Printer {
     writeKey("type", indent, false);
     writePrimitive(s.primitive(), indent + 1);
     writeKey("check", indent, false);
-    writeOptional(s.validation(), (v, i) -> writeExpr(v, i), indent);
+    writeOptional(s.checkClause(), (v, i) -> writeCheckClause(v, i), indent);
     writeKey("default", indent, true);
     writeOptional(s.defaultValue(), (v, i) -> writeLiteralValue(v, i), indent);
+  }
+
+  private void writeCheckClause(CheckClause c, int indent) throws IOException {
+    writeTypeNode(CheckClause.class);
+    writeKey("name", indent, false);
+    writeOptional(c.name(), this::writeIdentifier, indent);
+    writeKey("expr", indent, true);
+    writeExpr(c.expr(), indent + 1);
   }
 
   private void writeEnum(kafkasql.core.ast.EnumT e, int indent) throws IOException {

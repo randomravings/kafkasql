@@ -9,10 +9,12 @@ import java.util.List;
 
 import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CommonTokenStream;
+import org.antlr.v4.runtime.RecognitionException;
 
 import kafkasql.core.ast.Ast;
 import kafkasql.core.lex.SqlStreamLexer;
 import kafkasql.core.parse.SqlStreamParser;
+import kafkasql.core.parse.SqlStreamParser.ScriptContext;
 
 public class KafkaSqlParser {
 
@@ -99,12 +101,36 @@ public class KafkaSqlParser {
     parser.addErrorListener(errs);
     parser.setTrace(args.trace());
 
-    var tree = parser.script();
-    if (diags.hasErrors()) {
+    var builder = new AstBuilder(src.source());
+    try {
+      ScriptContext tree = parser.script();
+      if (diags.hasErrors())
+        return Ast.EMPTY;
+      return builder.visitScript(tree);
+    } 
+    catch (RecognitionException e) {
+      var range = range(src.source(), e);
+      diags.addFatal(range, "Parse error: " + e.getMessage());
       return Ast.EMPTY;
     }
+    catch (AstBuildException e) {
+      diags.addFatal(e.range(), e.getMessage());
+      return Ast.EMPTY;
+    }
+  }
 
-    var builder = new AstBuilder(src.source());
-    return builder.visitScript(tree);
+  public static Range range(String source, RecognitionException e) {
+    int lnb = e.getOffendingToken().getLine();
+    int chb = e.getOffendingToken().getCharPositionInLine();
+    int lne = lnb;
+    int che = chb;
+    try {
+      String s = e.getOffendingToken().getText();
+      if (s != null && s.length() > 0) {
+        che = lnb + Math.max(0, s.length());
+      }
+    } catch (Throwable ignore) {}
+    Range range = new Range(source, new Pos(lnb, chb), new Pos(lne, che));
+    return range;
   }
 }

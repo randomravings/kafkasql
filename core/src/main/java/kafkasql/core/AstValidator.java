@@ -1,19 +1,21 @@
 package kafkasql.core;
 
-import java.math.BigDecimal;
 import java.util.*;
 import java.util.stream.Collectors;
 
 import kafkasql.core.ast.*;
+import kafkasql.core.validation.ExprValidator;
 
 public final class AstValidator {
   public final Catalog catalog = new Catalog();
   private final Diagnostics diags;
+  private final ExprValidator exprValidator;
 
   private QName currentContext = QName.ROOT;
 
   public AstValidator(Diagnostics diags) {
     this.diags = diags;
+    this.exprValidator = new ExprValidator(diags);
   }
 
   public Diagnostics diags() {
@@ -146,7 +148,7 @@ public final class AstValidator {
     }
     if (diags.hasErrors())
       return tp;
-    return new EnumT(tp.range(), tp.qName(), enumBase, converted, tp.defaultValue());
+    return new EnumT(tp.range(), tp.qName(), enumBase, converted, tp.defaultValue(), tp.doc());
   }
 
   private EnumSymbolList alignEnumSymbols(EnumSymbolList e, AstOptionalNode<IntegerT> type) {
@@ -158,7 +160,7 @@ public final class AstValidator {
       if (diags.hasErrors())
         return converted;
 
-      IntegerV v = alignIntegerValue(sym.value(), base);
+      IntegerV v = exprValidator.alignIntegerValue(sym.value(), base);
 
       if (diags.hasErrors()) {
         diags.addError(sym.range(),
@@ -207,14 +209,14 @@ public final class AstValidator {
   private ScalarT validateScalar(ScalarT tp) {
     QName fqn = tp.qName();
     PrimitiveT pt = tp.primitive();
-    AstOptionalNode<Expr> vl = tp.validation();
+    AstOptionalNode<CheckClause> vl = tp.checkClause();
     AstOptionalNode<PrimitiveV> dv = tp.defaultValue();
     if (catalog.containsKey(currentContext, fqn)) {
       diags.addError(tp.range(), "Type '" + fqn + "' already defined");
       return tp;
     }
     if (dv.isPresent()) {
-      dv = AstOptionalNode.of(alignPrimitive(dv.get(), pt));
+      dv = AstOptionalNode.of(exprValidator.alignPrimitive(dv.get(), pt));
       if (diags.hasErrors())
         return tp;
     }
@@ -223,13 +225,12 @@ public final class AstValidator {
       IntegerT ct = new Int32T(Range.NONE);
       Map<String, AnyT> symbols = new HashMap<>();
       symbols.put("value", pt);
-      Expr sexpr = trimExpression(vl.get(), ct, symbols);
+      AnyT sexpr = exprValidator.trimExpression(vl.get().expr(), ct, symbols);
       if (diags.hasErrors())
         return tp;
-      vl = AstOptionalNode.of(sexpr);
     }
 
-    return new ScalarT(tp.range(), fqn, pt, vl, dv);
+    return new ScalarT(tp.range(), fqn, pt, vl, dv, tp.doc());
   }
 
   private CreateStream validateStream(CreateStream cs) {
@@ -292,7 +293,7 @@ public final class AstValidator {
         }
       }
     }
-    var newStream = new StreamT(cs.range(), fqn, stream.types());
+    var newStream = new StreamT(cs.range(), fqn, stream.types(), stream.doc());
     catalog.put(currentContext, newStream);
     return new CreateStream(cs.range(), newStream);
   }
@@ -365,224 +366,5 @@ public final class AstValidator {
     return null;
   }
 
-  private Expr trimExpression(Expr e, AnyT constrainingType, Map<String, AnyT> symbols) {
-    switch (e) {
-      case PostfixExpr pe:
-        return trimPostfix(pe, constrainingType, symbols);
-      case PrefixExpr ue:
-        return trimUnary(ue, constrainingType, symbols);
-      case InfixExpr be:
-        return trimBinary(be, constrainingType, symbols);
-      case Ternary te:
-        return trimTernary(te, constrainingType, symbols);
-      case IdentifierExpr s:
-        // Handle symbol trimming
-        break;
-      case MemberExpr me:
-        // Handle member expression trimming
-        break;
-      case IndexExpr ie:
-        // Handle index expression trimming
-        break;
-      case AnyV av:
-        // Handle any value trimming
-        break;
-    }
-    return e;
-  }
-
-  private PostfixExpr trimPostfix(PostfixExpr e, AnyT constrainingType, Map<String, AnyT> symbols) {
-    return e;
-  }
-
-  private PrefixExpr trimUnary(PrefixExpr e, AnyT constrainingType, Map<String, AnyT> symbols) {
-    return e;
-  }
-
-  private InfixExpr trimBinary(InfixExpr e, AnyT constrainingType, Map<String, AnyT> symbols) {
-    Expr l = trimExpression(e.left(), constrainingType, symbols);
-    Expr r = trimExpression(e.right(), constrainingType, symbols);
-    return e;
-  }
-
-  private Ternary trimTernary(Ternary e, AnyT constrainingType, Map<String, AnyT> symbols) {
-    Expr l = trimExpression(e.left(), constrainingType, symbols);
-    Expr m = trimExpression(e.middle(), constrainingType, symbols);
-    Expr r = trimExpression(e.right(), constrainingType, symbols);
-    return e;
-  }
-
-  private AnyV alignValue(AnyV value, AnyT type) {
-    if (type instanceof VoidT) {
-      diags.addError(value.range(), "Cannot assign value to VOID type");
-      return value;
-    }
-
-    AnyV result = value;
-
-    switch (type) {
-      case PrimitiveT pt:
-        if (value instanceof PrimitiveV l)
-          result = alignPrimitive(l, pt);
-        else
-          diags.addError(value.range(),
-              "Expected literal value for primitive type, got '" + value.getClass().getSimpleName() + "'");
-        break;
-      case ComplexT ct:
-        diags.addError(value.range(), "Cannot assign value to COMPLEX type (yet ...)");
-        break;
-      case CompositeT ct:
-        diags.addError(value.range(), "Cannot assign value to COMPOSITE type (yet ...)");
-        break;
-      case TypeReference tr:
-        diags.addError(value.range(), "Cannot assign value to TYPE REF (yet ...)");
-        break;
-      default:
-        diags.addError(value.range(), "Unsupported combination '" + type.getClass().getSimpleName() + "' and  '"
-            + value.getClass().getSimpleName() + "'");
-        break;
-    }
-    return result;
-  }
-
-  private PrimitiveV alignPrimitive(PrimitiveV lit, PrimitiveT type) {
-    PrimitiveV result = lit;
-    switch (type) {
-      case BoolT __:
-        if (!(lit instanceof BoolV))
-          diags.addError(lit.range(), "Expected BOOL literal, got '" + lit.getClass().getSimpleName().toString() + "'");
-        break;
-      case AlphaT __:
-        if (!(lit instanceof AlphaV))
-          diags.addError(lit.range(), "Expected ALPHA literal, got '" + lit.toString() + "'");
-        break;
-      case BinaryT __:
-        if (!(lit instanceof BinaryV))
-          diags.addError(lit.range(),
-              "Expected BINARY literal, got '" + lit.getClass().getSimpleName().toString() + "'");
-        break;
-      case NumberT nt:
-        if (!(lit instanceof NumberV nv))
-          diags.addError(lit.range(),
-              "Expected NUMBER literal, got '" + lit.getClass().getSimpleName().toString() + "'");
-        else
-          result = alignNumericValue(nv, (NumberT) type);
-        break;
-      case TemporalT tt:
-        if (!(lit instanceof TemporalV))
-          diags.addError(lit.range(),
-              "Expected TEMPORAL literal, got '" + lit.getClass().getSimpleName().toString() + "'");
-        break;
-      default:
-        diags.addError(lit.range(),
-            "Unsupported combination of literal type '" + type.getClass().getSimpleName() + "' and literal '"
-                + lit.getClass().getSimpleName() + "'");
-        break;
-    }
-    return result;
-  }
-
-  private NumberV alignNumericValue(NumberV value, NumberT type) {
-
-    if (value instanceof IntegerV iv && type instanceof IntegerT it) {
-      // both integer
-      return alignIntegerValue(iv, it);
-    } else if (value instanceof FractionalV fv && type instanceof FractionalT ft) {
-      // both fractional
-      return alignFractionalValue(fv, ft);
-    } else if (value instanceof IntegerV iv && type instanceof FractionalT ft) {
-      // integer to fractional
-      double v = getIntegerValue(iv);
-      return alignFractionalValue(new Float64V(iv.range(), v), ft);
-    } else {
-      // Safeguard for future implementations
-      diags.addError(value.range(), "Unsupported numeric value type '" + value.getClass().getSimpleName() + "'");
-      return value;
-    }
-  }
-
-  private FractionalV alignFractionalValue(FractionalV value, FractionalT type) {
-    double v = getFractionalValue(value);
-    FractionalV result = value;
-    switch (type) {
-      case DecimalT d:
-        var dec = BigDecimal.valueOf(v);
-        if (dec.precision() > d.precision() || dec.scale() > d.scale())
-          diags.addError(value.range(),
-              "Value '" + v + "' does not fit in DECIMAL(" + d.precision() + "," + d.scale() + ")");
-        else
-          result = new DecimalV(value.range(), dec);
-        break;
-      case Float32T __:
-        if (v < Float.MIN_VALUE || v > Float.MAX_VALUE)
-          diags.addError(value.range(), "Value '" + v + "' does not fit in FLOAT32");
-        else
-          result = new Float32V(value.range(), (float) v);
-        break;
-      case Float64T __:
-        // all doubles fit in Float64
-        break;
-      default:
-        // Safeguard for future implementations
-        diags.addError(value.range(), "Unknown fractional type '" + type.toString() + "'");
-    }
-    return result;
-  }
-
-  private IntegerV alignIntegerValue(IntegerV value, IntegerT type) {
-    long v = getIntegerValue(value);
-    IntegerV result = value;
-    switch (type) {
-      case Int8T __:
-        if (v < Byte.MIN_VALUE || v > Byte.MAX_VALUE)
-          diags.addError(value.range(), "Value '" + v + "' does not fit in INT8");
-        else
-          result = new Int8V(value.range(), (byte) v);
-        break;
-      case Int16T __:
-        if (v < Short.MIN_VALUE || v > Short.MAX_VALUE)
-          diags.addError(value.range(), "Value '" + v + "' does not fit in INT16");
-        else
-          result = new Int16V(value.range(), (short) v);
-        break;
-      case Int32T __:
-        if (v < Integer.MIN_VALUE || v > Integer.MAX_VALUE)
-          diags.addError(value.range(), "Value '" + v + "' does not fit in INT32");
-        else
-          result = new Int32V(value.range(), (int) v);
-        break;
-      case Int64T __:
-        // all longs fit in Int64
-        break;
-      default:
-        // Safeguard for future implementations
-        diags.addError(value.range(), "Unknown integer type '" + type.toString() + "'");
-        break;
-    }
-    return result;
-  }
-
-  private static long getIntegerValue(IntegerV v) {
-    return switch (v) {
-      case Int8V iv -> iv.value();
-      case Int16V iv -> iv.value();
-      case Int32V iv -> iv.value();
-      case Int64V iv -> iv.value();
-    };
-  }
-
-  private static double getFractionalValue(FractionalV v) {
-    return switch (v) {
-      case Float32V fv -> fv.value();
-      case Float64V fv -> fv.value();
-      case DecimalV dv -> dv.value().doubleValue();
-    };
-  }
-
-  public static double getNumericValue(NumberV v) {
-    return switch (v) {
-      case IntegerV iv -> getIntegerValue(iv);
-      case FractionalV fv -> getFractionalValue(fv);
-    };
-  }
+  
 }
