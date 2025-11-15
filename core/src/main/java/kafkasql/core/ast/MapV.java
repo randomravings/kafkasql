@@ -1,14 +1,7 @@
 package kafkasql.core.ast;
 
-import java.util.Map;
-
-import kafkasql.core.Range;
-
-public final class MapV extends AstMapNode<PrimitiveV, AnyV> implements CompositeV {
+public final class MapV<K extends PrimitiveV, V extends AnyV> extends AstMapNode<K, V> implements CompositeV {
     public MapV(Range range) {
         super(range);
-    }
-    public MapV(Range range, Map<PrimitiveV, AnyV> other) {
-        super(range, other);
     }
 }

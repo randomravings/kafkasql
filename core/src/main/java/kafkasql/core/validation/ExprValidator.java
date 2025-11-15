@@ -4,7 +4,6 @@ import java.math.BigDecimal;
 import java.util.Map;
 
 import kafkasql.core.Diagnostics;
-import kafkasql.core.Range;
 import kafkasql.core.ast.*;
 
 public class ExprValidator {

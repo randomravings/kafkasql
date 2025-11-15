@@ -1,5 +1,7 @@
 package kafkasql.core;
 
+import kafkasql.core.ast.Range;
+
 public final class DiagnosticEntry {
   public enum Severity { INFO, WARNING, ERROR, FATAL }
 

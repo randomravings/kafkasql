@@ -2,7 +2,6 @@ package kafkasql.core;
 
 import java.io.Writer;
 import java.io.IOException;
-import java.util.List;
 import java.util.Map;
 
 import kafkasql.core.ast.*;
@@ -156,12 +155,12 @@ public final class AstPrinter extends Printer {
     forEach(w.values(), (row, ind) -> writeValue(row, ind), indent + 1);
   }
 
-  private void writeField(Map.Entry<Identifier, AnyV> field, int indent) throws IOException {
+  private void writeField(AstMapEntryNode<Identifier, AnyV> field, int indent) throws IOException {
     writeTypeNode(Map.Entry.class);
     writeKey("name", indent, false);
-    writeIdentifier(field.getKey(), indent + 1);
+    writeIdentifier(field.key(), indent + 1);
     writeKey("value", indent, true);
-    writeValue(field.getValue(), indent + 1);
+    writeValue(field.value(), indent + 1);
   }
 
   private void writeCreateStatement(CreateStmt createStatement, int indent) throws IOException {
@@ -528,18 +527,18 @@ public final class AstPrinter extends Printer {
 
   private void writeCompositeValue(CompositeV v, int indent) throws IOException {
     switch (v) {
-      case ListV l -> writeListV(l, indent);
-      case MapV m -> writeMapV(m, indent);
+      case ListV<?> l -> writeListV(l, indent);
+      case MapV<?, ?> m -> writeMapV(m, indent);
     }
   }
 
-  private void writeListV(ListV l, int indent) throws IOException {
+  private void writeListV(ListV<?> l, int indent) throws IOException {
     writeTypeNode(ListV.class);
     writeKey("values", indent, true);
     forEach(l, (v, i) -> writeValue(v, i), indent + 1);
   }
 
-  private void writeMapV(MapV m, int indent) throws IOException {
+  private void writeMapV(MapV<?, ?> m, int indent) throws IOException {
     writeTypeNode(MapV.class);
     writeKey("entries", indent, true);
     forEach(m, (kv, i) -> writeMapEntry(kv, i + 1), indent + 1);
@@ -587,12 +586,12 @@ public final class AstPrinter extends Printer {
     forEach(struct, (field, ind) -> writeField(field, ind), indent + 1);
   }
 
-  private void writeMapEntry(Map.Entry<PrimitiveV, AnyV> entry, int indent) throws IOException {
+  private void writeMapEntry(AstMapEntryNode<? extends AnyV, ? extends AnyV> entry, int indent) throws IOException {
     writeTypeNode(Map.Entry.class);
     writeKey("key", indent, false);
-    writeValue(entry.getKey(), indent + 1);
+    writeValue(entry.key(), indent + 1);
     writeKey("value", indent, true);
-    writeValue(entry.getValue(), indent + 1);
+    writeValue(entry.value(), indent + 1);
   }
 
   private void writeLiteralValue(PrimitiveV v, int indent) throws IOException {
@@ -627,13 +626,12 @@ public final class AstPrinter extends Printer {
     write("NULL");
   }
 
-  // Utility for forEach with last-element detection
-  private interface ForEach<T> {
+  private interface ForEach<T extends AstNode> {
     void each(T t, int indent) throws IOException;
   }
 
-  private interface BiForEach<K, V> {
-    void each(Map.Entry<K, V> entry, int indent) throws IOException;
+  private interface BiForEach<K extends AstNode, V extends AstNode> {
+    void each(AstMapEntryNode<K, V> entry, int indent) throws IOException;
   }
 
   private interface IfPresent<T> {
@@ -641,7 +639,7 @@ public final class AstPrinter extends Printer {
 
   }
 
-  private <T> void forEach(List<T> xs, ForEach<T> fn, int indent) throws IOException {
+  private <T extends AstNode> void forEach(AstListNode<T> xs, ForEach<T> fn, int indent) throws IOException {
     int size = xs.size();
     if (size == 0) {
       empty();
@@ -655,7 +653,7 @@ public final class AstPrinter extends Printer {
     }
   }
 
-private <K, V> void forEach(Map<K, V> map, BiForEach<K, V> fn, int indent) throws IOException {
+private <K extends AstNode, V extends AstNode> void forEach(AstMapNode<K, V> map, BiForEach<K, V> fn, int indent) throws IOException {
     int size = map.size();
     if (size == 0) {
       empty();
@@ -663,7 +661,7 @@ private <K, V> void forEach(Map<K, V> map, BiForEach<K, V> fn, int indent) throw
     else {
       int last = size - 1;
       int i = 0;
-      for (Map.Entry<K, V> entry : map.entrySet()) {
+      for (AstMapEntryNode<K, V> entry : map.values()) {
         branch(indent, i == last);
         fn.each(entry, indent + 1);
         i++;

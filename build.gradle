@@ -1,23 +1,24 @@
-allprojects {
-  group = 'kafka-sql'
-  version = '0.1.0'
+plugins {
+  id 'java'
+}
 
+allprojects {
   repositories {
     mavenCentral()
   }
+}
 
-  // configure Java toolchain for all subprojects that apply the java plugin
-  plugins.withType(org.gradle.api.plugins.JavaPlugin) {
-    java {
-      toolchain {
-        languageVersion = org.gradle.jvm.toolchain.JavaLanguageVersion.of(21)
-      }
+subprojects {
+
+  java {
+    toolchain {
+      languageVersion = org.gradle.jvm.toolchain.JavaLanguageVersion.of(21)
     }
   }
 }
 
-tasks.register('build') {
+tasks.named('build') {
   group = 'build'
-  description = 'Builds core, cli, and lsp subprojects'
-  dependsOn ':core:build', ':cli:build', ':lsp:build'
+  description = 'Builds all subprojects'
+  dependsOn subprojects.collect { ":${it.name}:build" }
 }

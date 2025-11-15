@@ -1,7 +1,5 @@
 package kafkasql.core.ast;
 
-import kafkasql.core.Range;
-
 public final class ExprList extends AstListNode<Expr> {
     public ExprList(Range range) {
         super(range);

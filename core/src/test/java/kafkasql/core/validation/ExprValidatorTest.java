@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import kafkasql.core.Diagnostics;
 import kafkasql.core.ast.Int32V;
 import kafkasql.core.ast.Int8V;
+import kafkasql.core.ast.Range;
 import kafkasql.core.ast.VoidT;
 import kafkasql.core.ast.Int8T;
 import kafkasql.core.ast.AnyT;
@@ -18,7 +19,6 @@ import kafkasql.core.ast.Expr;
 import kafkasql.core.ast.InfixExpr;
 import kafkasql.core.ast.InfixOp;
 import kafkasql.core.ast.Int32T;
-import kafkasql.core.Range;
 
 /**
  * Basic tests for ExprValidator.trimExpression focused on literal alignment.

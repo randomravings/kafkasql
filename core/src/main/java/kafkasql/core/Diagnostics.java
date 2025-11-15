@@ -3,6 +3,8 @@ package kafkasql.core;
 import java.util.ArrayList;
 import java.util.List;
 
+import kafkasql.core.ast.Range;
+
 public class Diagnostics {
 
   private final List<DiagnosticEntry> entries = new ArrayList<>();

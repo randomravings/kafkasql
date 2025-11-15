@@ -12,6 +12,7 @@ import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.RecognitionException;
 
 import kafkasql.core.ast.Ast;
+import kafkasql.core.ast.Range;
 import kafkasql.core.lex.SqlStreamLexer;
 import kafkasql.core.parse.SqlStreamParser;
 import kafkasql.core.parse.SqlStreamParser.ScriptContext;

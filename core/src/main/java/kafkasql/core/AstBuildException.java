@@ -1,5 +1,7 @@
 package kafkasql.core;
 
+import kafkasql.core.ast.Range;
+
 public class AstBuildException extends RuntimeException {
   private final Range range;
 

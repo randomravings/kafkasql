@@ -8,6 +8,8 @@ import org.antlr.v4.runtime.Recognizer;
 import org.antlr.v4.runtime.atn.ATNConfigSet;
 import org.antlr.v4.runtime.dfa.DFA;
 
+import kafkasql.core.ast.Range;
+
 public class CollectingErrorListener extends BaseErrorListener {
   private final String source;
   private final Diagnostics diagnostics;

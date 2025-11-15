@@ -2,8 +2,6 @@ package kafkasql.core.ast;
 
 import java.util.Optional;
 
-import kafkasql.core.Range;
-
 public final class AstOptionalNode<T extends AstNode>  implements AstNode {
     private final T value;
     private final Range range;

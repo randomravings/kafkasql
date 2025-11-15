@@ -1,4 +1,6 @@
-package kafkasql.core;
+package kafkasql.core.ast;
+
+import kafkasql.core.Pos;
 
 public final record Range(String source, Pos start, Pos end) {
     public static final Range NONE = new Range("", Pos.NONE, Pos.NONE);

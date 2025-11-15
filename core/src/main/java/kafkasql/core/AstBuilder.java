@@ -567,12 +567,12 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     Range range = range(c);
     QName streamName = visitStreamName(c.streamName());
     Identifier typeAlias = visitStreamTypeName(c.streamTypeName());
-    ListV values = visitWriteValues(c.writeValues());
+    ListV<AnyV> values = visitWriteValues(c.writeValues());
     return new WriteStmt(range, streamName, typeAlias, values);
   }
 
   @Override
-  public ListV visitWriteValues(SqlStreamParser.WriteValuesContext c) {
+  public ListV<AnyV> visitWriteValues(SqlStreamParser.WriteValuesContext c) {
     return visitListContext(c.structLiteral(), this::visitStructLiteral, ListV::new);
   }
 
@@ -688,7 +688,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
               Range r = new Range(this.source, result.range().start(), upper.range().end());
               result = new Ternary(r, TernaryOp.BETWEEN, result, lower, upper, new VoidT(r));
             } else if (up.equals("IN")) {
-              ListV lits = visitListContext(c.literal(), this::visitLiteral, ListV::new);
+              ListV<AnyV> lits = visitListContext(c.literal(), this::visitLiteral, ListV::new);
               Range r = range(c);
               result = new InfixExpr(r, InfixOp.IN, result, lits, new VoidT(r));
             }
@@ -861,12 +861,12 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
   }
 
   @Override
-  public ListV visitListLiteral(SqlStreamParser.ListLiteralContext c) {
+  public ListV<AnyV> visitListLiteral(SqlStreamParser.ListLiteralContext c) {
     return visitListContext(c.literal(), this::visitLiteral, ListV::new);
   }
 
   @Override
-  public MapV visitMapLiteral(SqlStreamParser.MapLiteralContext c) {
+  public MapV<PrimitiveV, AnyV> visitMapLiteral(SqlStreamParser.MapLiteralContext c) {
     return visitMapContext(c.mapEntry(), this::visitMapEntry, MapV::new);
   }
 
@@ -1043,7 +1043,7 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     M result = mapFactory.apply(rn);
     for (C c : input) {
       AstMapEntryNode<KT, VT> e = transform.apply(c);
-      result.put(e.key(), e.value());
+      result.put(e.key(), e);
     }
     return result;
   }
@@ -1056,13 +1056,5 @@ public class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
     if (input == null) return AstOptionalNode.empty();
     AstOptionalNode<T> result = AstOptionalNode.of(transform.apply(input));
     return result;
-  }
-
-  private void ensureDocIsAdjacent(AstOptionalNode<Doc> doc, Range target) {
-    if (doc.isEmpty()) return;
-    int a = doc.range().end().ln();
-    int b = target.start().ln();
-    if (a == b) return;
-    throw new AstBuildException(doc.range(),"Documentation must be immediately before the declaration it documents");
   }
 }

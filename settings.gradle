@@ -4,5 +4,5 @@ pluginManagement {
     mavenCentral()
   }
 }
-rootProject.name = 'kafkasql-root'
-include 'core', 'lsp', 'cli'
+rootProject.name = 'kafkasql'
+include 'core', 'lsp', 'cli', 'io', 'codegen'

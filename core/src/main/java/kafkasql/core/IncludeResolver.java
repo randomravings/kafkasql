@@ -12,6 +12,8 @@ import org.antlr.v4.runtime.CharStreams;
 import org.antlr.v4.runtime.CodePointCharStream;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.Token;
+
+import kafkasql.core.ast.Range;
 import kafkasql.core.lex.SqlStreamLexer;
 
 public final class IncludeResolver {
