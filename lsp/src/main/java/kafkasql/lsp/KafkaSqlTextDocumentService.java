@@ -2,16 +2,16 @@ package kafkasql.lsp;
 
 import java.nio.file.*;
 
-import kafkasql.core.KafkaSqlParser;
-import kafkasql.core.ParseArgs;
-import kafkasql.core.ParseResult;
+import kafkasql.lang.Diagnostics;
+import kafkasql.lang.KafkaSqlParser;
+import kafkasql.lang.ParseArgs;
+import kafkasql.lang.ParseResult;
 
 import org.eclipse.lsp4j.*;
 import org.eclipse.lsp4j.services.*;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import kafkasql.core.Diagnostics;
 
 public class KafkaSqlTextDocumentService implements TextDocumentService {
 
@@ -79,13 +79,13 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
     ParseResult pr = null;
     
     pr = KafkaSqlParser.parseText(text, args);
-    if (pr.diags().hasErrors()) {
+    if (pr.diags().hasError()) {
       sendDiagnostics(uri, pr.diags());
       return;
     }
 
     pr = KafkaSqlParser.validate(pr);
-    if (pr.diags().hasErrors()) {
+    if (pr.diags().hasError()) {
       sendDiagnostics(uri, pr.diags());
       return;
     }
@@ -102,8 +102,8 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
     if (client == null || diags == null) return;
 
     List<org.eclipse.lsp4j.Diagnostic> lspDiags = new ArrayList<>();
-    for (kafkasql.core.DiagnosticEntry entry : diags.all()) {
-      kafkasql.core.ast.Range r = entry.range();
+    for (kafkasql.lang.DiagnosticEntry entry : diags.get()) {
+      kafkasql.lang.ast.Range r = entry.range();
       int startLine = Math.max(0, r.start().ln() - 1);
       int startChar = Math.max(0, r.start().ch());
       int endLine = Math.max(startLine, r.end().ln() - 1);

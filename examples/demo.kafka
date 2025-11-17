@@ -19,7 +19,7 @@ CHECK (value > 100);
 CREATE ENUM Status (
   ACTIVE: 0,
   PENDING: 1,
-  DISABLED: 4096  
+  DISABLED: 4096
 )
 DEFAULT(Status::DISABLED);
 

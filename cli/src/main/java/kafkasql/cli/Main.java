@@ -6,13 +6,13 @@ import java.io.Writer;
 import java.nio.file.*;
 import java.util.*;
 
-import kafkasql.core.AstPrinter;
-import kafkasql.core.Diagnostics;
-import kafkasql.core.ParseArgs;
-import kafkasql.core.KafkaSqlParser;
-import kafkasql.core.ParseResult;
-import kafkasql.core.Printer;
-import kafkasql.core.ast.Ast;
+import kafkasql.lang.AstPrinter;
+import kafkasql.lang.Diagnostics;
+import kafkasql.lang.KafkaSqlParser;
+import kafkasql.lang.ParseArgs;
+import kafkasql.lang.ParseResult;
+import kafkasql.lang.Printer;
+import kafkasql.lang.ast.Ast;
 
 public class Main {
 
@@ -91,12 +91,14 @@ public class Main {
     if (inlineText != null) {
       parseResult = KafkaSqlParser.parseText(inlineText, parseArgs);
     } else if (!fileArgs.isEmpty()) {
+      // Resolve input files relative to CURRENT directory, not working directory
+      Path currentDir = Paths.get("").toAbsolutePath();
       List<Path> fs = fileArgs.stream().map(p -> {
         Path path = Path.of(p);
         if (path.isAbsolute())
           return path.normalize();
         else
-          return wd.resolve(p).toAbsolutePath().normalize();
+          return currentDir.resolve(p).toAbsolutePath().normalize();
       }).toList();
 
       parseResult = KafkaSqlParser.parseFiles(fs, parseArgs);
@@ -106,14 +108,14 @@ public class Main {
       System.exit(1);
     }
 
-    if (parseResult.diags().hasErrors()) {
+    if (parseResult.diags().hasError()) {
       System.out.println("Parsing failed with errors:");
       printDiags(parseResult.diags());
       System.exit(1);
     }
 
     parseResult = KafkaSqlParser.validate(parseResult);
-    if (parseResult.diags().hasErrors()) {
+    if (parseResult.diags().hasError()) {
       System.out.println("Validation failed with errors:");
       printDiags(parseResult.diags());
       System.exit(1);
@@ -127,7 +129,7 @@ public class Main {
   }
 
   private static void printDiags(Diagnostics diags) {
-    for (var e : diags.all()) {
+    for (var e : diags.get()) {
       System.out.println(" - " + e);
     }
   }

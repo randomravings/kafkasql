@@ -1,0 +1,4 @@
+package kafkasql.lang.ast;
+
+public sealed interface ComplexV extends AnyV
+    permits StructV, EnumV, UnionV, ScalarV { }

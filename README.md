@@ -47,19 +47,13 @@ Then create the shadow jar:
 ./gradlew clean build
 ```
 
-You can now run something like:
-
-```bash
-./kafkasql -a --text 'CREATE SCALAR Email AS String;'
-```
-
-Print the usage:
+The enables the usage of the kafkasql CLI using the bash script:
 
 ```bash
 ./kafkasql -h
 ```
 
-which should output:
+Should output something like (like because this is changing every now and then ...):
 
 ```bash
 Usage:
@@ -74,6 +68,20 @@ Options:
   -v, --verbose       Enable antlr trace output
   -h, --help          Show this help
 ```
+
+You can now run a short text and parse the syntax tree like so:
+
+```bash
+./kafkasql -a --text '
+CREATE CONTEXT com;
+USE CONTEXT com;
+CREATE SCALAR Email AS STRING;
+'
+```
+
+
+
+This highlights the fact that the context is a first class concept in Kafka SQL and is the only construct that can exist in the `root` context, or empty domain. All other constructs *must* belong to a named parent context. The `USE CONTEXT` sets the current context, but it has to be created first using the `CREATE CONTEX` statement which creates a context under the currently active context.
 
 ## Example Statements
 

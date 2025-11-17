@@ -17,15 +17,15 @@ dependencies {
   ebnfConvert 'de.bottlecaps.ebnf-convert:ebnf-convert-webapp:0.72'
 }
 
-def antlrLexerOut  = file("$buildDir/generated-src/antlr/kafkasql/core/lex")
-def antlrParserOut = file("$buildDir/generated-src/antlr/kafkasql/core/parse")
+def antlrLexerOut  = file("$buildDir/generated-src/antlr/kafkasql/core/lang/lex")
+def antlrParserOut = file("$buildDir/generated-src/antlr/kafkasql/core/lang/parse")
 
 tasks.register('generateLexerSource', org.gradle.api.plugins.antlr.AntlrTask) {
   description = "Generate lexer sources"
   group = "antlr"
   source = files('src/main/antlr/SqlStreamLexer.g4')
   outputDirectory = antlrLexerOut
-  arguments += ['-visitor','-long-messages','-package','kafkasql.core.lex']
+  arguments += ['-visitor','-long-messages','-package','kafkasql.core.lang.lex']
   maxHeapSize = '256m'
 }
 
@@ -37,7 +37,7 @@ tasks.register('generateParserSource', org.gradle.api.plugins.antlr.AntlrTask) {
   inputs.files(fileTree(antlrLexerOut))
   outputDirectory = antlrParserOut
   arguments += [
-    '-visitor','-long-messages','-package','kafkasql.core.parse',
+    '-visitor','-long-messages','-package','kafkasql.core.lang.parse',
     '-lib', antlrLexerOut.absolutePath
   ]
   maxHeapSize = '256m'
