@@ -6,8 +6,6 @@ import org.apache.kafka.clients.producer.Producer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.header.Header;
 
-import kafkasql.core.RecordValue;
-
 /**
  * A lightweight wrapper for producing Kafka records with type-safe serialization.
  * <p>

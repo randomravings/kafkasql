@@ -1,7 +1,5 @@
 package kafkasql.io;
 
-import kafkasql.core.RecordValue;
-
 /**
  * A lightweight interface for serializing record values into byte arrays.
  * <p>

@@ -1,343 +1,284 @@
 package kafkasql.codegen;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.LocalTime;
-import java.time.ZonedDateTime;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
 
-import kafkasql.lang.ast.AlphaT;
-import kafkasql.lang.ast.AnyT;
-import kafkasql.lang.ast.Ast;
-import kafkasql.lang.ast.BinaryT;
-import kafkasql.lang.ast.BoolT;
-import kafkasql.lang.ast.BytesT;
-import kafkasql.lang.ast.CharT;
-import kafkasql.lang.ast.ComplexT;
-import kafkasql.lang.ast.CompositeT;
-import kafkasql.lang.ast.CreateStmt;
-import kafkasql.lang.ast.CreateType;
-import kafkasql.lang.ast.DateT;
-import kafkasql.lang.ast.DecimalT;
-import kafkasql.lang.ast.EnumSymbol;
-import kafkasql.lang.ast.EnumT;
-import kafkasql.lang.ast.Field;
-import kafkasql.lang.ast.FixedT;
-import kafkasql.lang.ast.Float32T;
-import kafkasql.lang.ast.Float64T;
-import kafkasql.lang.ast.FractionalT;
-import kafkasql.lang.ast.Int16T;
-import kafkasql.lang.ast.Int32T;
-import kafkasql.lang.ast.Int64T;
-import kafkasql.lang.ast.Int8T;
-import kafkasql.lang.ast.IntegerT;
-import kafkasql.lang.ast.ListT;
-import kafkasql.lang.ast.MapT;
-import kafkasql.lang.ast.NumberT;
-import kafkasql.lang.ast.PrimitiveT;
-import kafkasql.lang.ast.QName;
-import kafkasql.lang.ast.ReadStmt;
-import kafkasql.lang.ast.ScalarT;
-import kafkasql.lang.ast.StringT;
-import kafkasql.lang.ast.StructT;
-import kafkasql.lang.ast.TemporalT;
-import kafkasql.lang.ast.TimeT;
-import kafkasql.lang.ast.TimestampT;
-import kafkasql.lang.ast.TimestampTzT;
-import kafkasql.lang.ast.TypeReference;
-import kafkasql.lang.ast.UnionT;
-import kafkasql.lang.ast.UuidT;
-import kafkasql.lang.ast.VoidT;
-import kafkasql.lang.ast.WriteStmt;
+import kafkasql.lang.semantic.SemanticModel;
+import kafkasql.lang.semantic.symbol.SymbolTable;
+import kafkasql.runtime.Name;
+import kafkasql.runtime.type.*;
 
+/**
+ * Compiler - Generates Java source code from KafkaSQL type definitions.
+ * 
+ * Takes a SemanticModel with bound types and generates:
+ * - Scalar types → type aliases / wrapper classes
+ * - Enum types → Java enums
+ * - Struct types → Java records
+ * - Union types → sealed interfaces (TODO)
+ */
 public class Compiler {
     private static final String INDENT = "    ";
-
-    private Compiler() { }
-
-    public Map<String, String>  compile(Ast ast) {
-        var map = new LinkedHashMap<String, String>();
-        compileStmts(ast, map);
-        return map;
+    
+    private final SemanticModel model;
+    private final SymbolTable symbols;
+    private final Map<String, String> generatedFiles;
+    
+    public Compiler(SemanticModel model) {
+        this.model = model;
+        this.symbols = model.symbols();
+        this.generatedFiles = new LinkedHashMap<>();
     }
-
-    private void compileStmts(Ast ast, Map<String, String> map) {
-        for(var stmt : ast) {
-            switch (stmt) {
-                case CreateStmt createStmt:
-                    compileCreateStmt(createStmt, map);
-                    break;
-                case ReadStmt readStmt:
-                    compileReadStmt(readStmt, map);
-                    break;
-                case WriteStmt writeStmt:
-                    compileWriteStmt(writeStmt, map);
-                    break;
-                default:
-                    // TODO: log?
-                    break;
+    
+    /**
+     * Compile all type definitions to Java source files.
+     * Returns a map of qualified class name → source code.
+     */
+    public Map<String, String> compile() {
+        // Generate code for each type in the symbol table
+        for (Map.Entry<Name, kafkasql.lang.syntax.ast.decl.Decl> entry : symbols._decl.entrySet()) {
+            Name typeName = entry.getKey();
+            Object typeDecl = entry.getValue();
+            
+            // Skip non-type declarations
+            if (!(typeDecl instanceof kafkasql.lang.syntax.ast.decl.TypeDecl)) {
+                continue;
             }
+            
+            // Get the bound runtime type
+            Object boundType = model.bindings().get(typeDecl);
+            
+            if (boundType instanceof ScalarType scalarType) {
+                generateScalar(typeName, scalarType);
+            } else if (boundType instanceof EnumType enumType) {
+                generateEnum(typeName, enumType);
+            } else if (boundType instanceof StructType structType) {
+                generateStruct(typeName, structType);
+            }
+            // TODO: UnionType
         }
-    }
-
-    private static void compileCreateStmt(CreateStmt createStmt, Map<String, String> map) {
-        switch (createStmt) {
-            case CreateType createType:
-                String code = compileType(createType.type());
-                map.put(createType.type().qName().fullName(), code);
-                break;
-            default:
-                // TODO: log?
-                break;
-        }
-    }
-
-    private static String compileType(ComplexT complexType) {
-        return switch (complexType) {
-            case ScalarT scalarType -> compileScalar(scalarType);
-            case EnumT enumType -> compileEnum(enumType);
-            case StructT structType -> compileStruct(structType);
-            case UnionT unionType -> compileUnion(unionType);
-        };
-    }
-
-    private static String compileScalar(ScalarT scalarType) {
-        StringBuilder sb = beginDecl(scalarType.qName(), "record");
-        beginScope(sb, 0);
-        space(sb, 1);
-        endScope(sb, 0);
-        newLine(sb, 1);
-        return sb.toString();
-    }
-
-    private static String compileEnum(EnumT enumType) {
-        StringBuilder sb = beginDecl(enumType.qName(), "enum");
-        beginScope(sb, 0);
-        newLine(sb, 1);
-
-        writeEnumSymbols(sb, enumType.symbols(), 1);
-
-
-        var type = Integer.class.getSimpleName();
-        if (enumType.type().isPresent())
-            sb.append(integerType(enumType.type().get()));
-
-        newLine(sb, 1);
-        indent(sb, 1);
-        sb.append("public final ");
-        sb.append(type);
-        sb.append(" value;");
-
-        newLine(sb, 1);
-        indent(sb, 1);
-        sb.append("private ");
-        sb.append(enumType.qName().name());
-        sb.append("(");
         
-        sb.append(type);
-        sb.append(" value) {");
-        newLine(sb, 1);
-        indent(sb, 2);
-        sb.append("this.value = value;");
-        newLine(sb, 1);
-        indent(sb, 1);
-        sb.append("}");
-        endScope(sb, 0);
-        newLine(sb, 1);
-        return sb.toString();
+        return generatedFiles;
     }
-
-    private static void writeEnumSymbols(StringBuilder sb, List<EnumSymbol> symbols, int indentLevel) {
-        var size = symbols.size();
-        if(size > 0)
-            writeEnumSymbol(sb, symbols.get(0), indentLevel);
-        for (int i = 1; i < size; i++) {
-            newLine(sb, 1);
-            indent(sb, indentLevel);
-            writeEnumSymbol(sb, symbols.get(i), indentLevel);
-        }
-    }
-
-    private static void writeEnumSymbol(StringBuilder sb, EnumSymbol symbol, int indentLevel) {
-        indent(sb, indentLevel);
-        sb.append(symbol.name());
-        sb.append("(");
-        sb.append(symbol.value());
-        sb.append(")");
-    }
-
-    private static String compileStruct(StructT structType) {
-        StringBuilder sb = beginDecl(structType.qName(), "class");
-        beginScope(sb, 0);
-        writeFields(sb, structType.fieldList(), 1);
-
-        newLine(sb, 1);
-        endScope(sb, 0);
-        newLine(sb, 1);
-        return sb.toString();
-    }
-
-    private static void writeFields(StringBuilder sb, List<Field> fields, int indentLevel) {
-        for (var field : fields) {
-            newLine(sb, 1);
-            indent(sb, indentLevel);
-            writeField(sb, field, indentLevel);
-        }
-    }
-
-    private static void writeField(StringBuilder sb, Field field, int indentLevel) {
-        indent(sb, indentLevel);
-        sb.append("private ");
-        sb.append(optional(field.type(), field.nullable().isPresent()));
-        sb.append(" _");
-        sb.append(field.name());
-        sb.append(";");
-    }
-
-    private static String compileUnion(UnionT unionType) {
-        StringBuilder sb = beginDecl(unionType.qName(), "class");
-        beginScope(sb, 0);
-        space(sb, 1);
-        endScope(sb, 0);
-        newLine(sb, 1);
-        return sb.toString();
-    }
-
-    private static void compileReadStmt(ReadStmt readStmt, Map<String, String> map) {
+    
+    // ========================================================================
+    // Scalar Generation
+    // ========================================================================
+    
+    private void generateScalar(Name name, ScalarType type) {
+        String className = toClassName(name);
+        String javaType = mapPrimitiveType(type.primitive());
         
-    }
-
-    private static void compileWriteStmt(WriteStmt writeStmt, Map<String, String> map) {
-    }
-
-    private static StringBuilder beginDecl(QName name, String type) {
         StringBuilder sb = new StringBuilder();
-        sb.append("package ");
-        sb.append(name.context());
+        
+        // Package
+        if (!name.context().isEmpty()) {
+            sb.append("package ").append(toPackage(name)).append(";\n\n");
+        }
+        
+        // Imports
+        if (needsImport(type.primitive())) {
+            sb.append("import java.math.BigDecimal;\n");
+            sb.append("import java.time.*;\n");
+            sb.append("import java.util.UUID;\n\n");
+        }
+        
+        // Documentation
+        type.doc().ifPresent(doc -> {
+            sb.append("/**\n");
+            sb.append(" * ").append(doc).append("\n");
+            sb.append(" */\n");
+        });
+        
+        // Type alias as record wrapper
+        sb.append("public record ").append(name.name()).append("(").append(javaType).append(" value) {\n");
+        sb.append("}\n");
+        
+        generatedFiles.put(className, sb.toString());
+    }
+    
+    // ========================================================================
+    // Enum Generation
+    // ========================================================================
+    
+    private void generateEnum(Name name, EnumType type) {
+        String className = toClassName(name);
+        
+        StringBuilder sb = new StringBuilder();
+        
+        // Package
+        if (!name.context().isEmpty()) {
+            sb.append("package ").append(toPackage(name)).append(";\n\n");
+        }
+        
+        // Documentation
+        type.doc().ifPresent(doc -> {
+            sb.append("/**\n");
+            sb.append(" * ").append(doc).append("\n");
+            sb.append(" */\n");
+        });
+        
+        // Enum declaration
+        sb.append("public enum ").append(name.name()).append(" {\n");
+        
+        // Enum constants
+        boolean first = true;
+        for (EnumTypeSymbol symbol : type.symbols()) {
+            if (!first) {
+                sb.append(",\n");
+            }
+            first = false;
+            
+            // Symbol documentation
+            symbol.doc().ifPresent(doc -> {
+                sb.append(INDENT).append("/** ").append(doc).append(" */\n");
+            });
+            
+            sb.append(INDENT).append(symbol.name()).append("(").append(symbol.value()).append(")");
+        }
         sb.append(";\n\n");
-        sb.append("public final ");
-        sb.append(type);
-        sb.append(" ");
-        sb.append(name.name());
-        sb.append(" {\n");
-        return sb;
+        
+        // Value field and constructor
+        sb.append(INDENT).append("private final int value;\n\n");
+        sb.append(INDENT).append(name.name()).append("(int value) {\n");
+        sb.append(INDENT).append(INDENT).append("this.value = value;\n");
+        sb.append(INDENT).append("}\n\n");
+        
+        // Getter
+        sb.append(INDENT).append("public int getValue() {\n");
+        sb.append(INDENT).append(INDENT).append("return value;\n");
+        sb.append(INDENT).append("}\n");
+        
+        sb.append("}\n");
+        
+        generatedFiles.put(className, sb.toString());
     }
-
-    private static String beginScope(StringBuilder sb, int indentLevel) {
-        indent(sb, indentLevel);
-        sb.append("{");
-        return sb.toString();
-    }
-
-    private static String endScope(StringBuilder sb, int indentLevel) {
-        indent(sb, indentLevel);
-        sb.append("}");
-        return sb.toString();
-    }
-
-    private static void space(StringBuilder sb, int count) {
-        for (int i = 0; i < count; i++) {
-            sb.append(" ");
+    
+    // ========================================================================
+    // Struct Generation
+    // ========================================================================
+    
+    private void generateStruct(Name name, StructType type) {
+        String className = toClassName(name);
+        
+        StringBuilder sb = new StringBuilder();
+        
+        // Package
+        if (!name.context().isEmpty()) {
+            sb.append("package ").append(toPackage(name)).append(";\n\n");
         }
-    }
-
-    private static void indent(StringBuilder sb, int indentLevel) {
-        for (int i = 0; i < indentLevel; i++) {
-            sb.append(INDENT);
+        
+        // Imports
+        sb.append("import java.math.BigDecimal;\n");
+        sb.append("import java.time.*;\n");
+        sb.append("import java.util.*;\n\n");
+        
+        // Documentation
+        type.doc().ifPresent(doc -> {
+            sb.append("/**\n");
+            sb.append(" * ").append(doc).append("\n");
+            sb.append(" */\n");
+        });
+        
+        // Record declaration
+        sb.append("public record ").append(name.name()).append("(\n");
+        
+        // Fields
+        boolean first = true;
+        for (var entry : type.fields().entrySet()) {
+            String fieldName = entry.getKey();
+            StructTypeField field = entry.getValue();
+            
+            if (!first) {
+                sb.append(",\n");
+            }
+            first = false;
+            
+            // Field documentation
+            field.doc().ifPresent(doc -> {
+                sb.append(INDENT).append("/** ").append(doc).append(" */\n");
+            });
+            
+            String javaType = mapFieldType(field.type(), field.nullable());
+            sb.append(INDENT).append(javaType).append(" ").append(fieldName);
         }
+        
+        sb.append("\n) {\n}\n");
+        
+        generatedFiles.put(className, sb.toString());
     }
-
-    private static void newLine(StringBuilder sb, int count) {
-        for (int i = 0; i < count; i++) {
-            sb.append("\n");
+    
+    // ========================================================================
+    // Helper Methods
+    // ========================================================================
+    
+    private String toClassName(Name name) {
+        if (!name.context().isEmpty()) {
+            return name.context().replace('.', '/') + "/" + name.name();
         }
+        return name.name();
     }
-
-    private static String optional(AnyT type, boolean optional) {
-        var dataType = dataType(type);
-        if(optional)
-            return Optional.class.getSimpleName() + "<" + dataType + ">";
-        else
-            return dataType;
+    
+    private String toPackage(Name name) {
+        return name.context();
     }
-
-    private static String dataType(AnyT type) {
-        return switch (type) {
-            case PrimitiveT primitiveType -> primitiveType(primitiveType);
-            case CompositeT compositeType -> compositeType(compositeType);
-            case ComplexT complexType -> complexType.qName().fullName();
-            case TypeReference typeReference -> typeReference.qName().fullName();
-            case VoidT voidType -> Void.class.getSimpleName();
-        };
-    }
-
-    private static String primitiveType(PrimitiveT primitiveType) {
-        return switch (primitiveType) {
-            case BoolT boolType -> Boolean.class.getSimpleName();
-            case AlphaT alphaType -> alphaType(alphaType);
-            case BinaryT binaryType -> binaryType(binaryType);
-            case NumberT numberType -> numberType(numberType);
-            case TemporalT temporalType -> temporalType(temporalType);
-        };
-    }
-
-    private static String alphaType(AlphaT alphaType) {
-        return switch (alphaType) {
-            case StringT stringType -> String.class.getSimpleName();
-            case CharT charType -> String.class.getSimpleName();
-            case UuidT uuidType -> UUID.class.getSimpleName();
-        };
-    }
-
-    private static String binaryType(BinaryT binaryType) {
-        return switch (binaryType) {
-            case BytesT byteType -> Byte[].class.getSimpleName();
-            case FixedT fixedType -> Byte[].class.getSimpleName();
+    
+    private boolean needsImport(PrimitiveType type) {
+        return switch (type.kind()) {
+            case DECIMAL, DATE, TIME, TIMESTAMP, TIMESTAMP_TZ, UUID -> true;
+            default -> false;
         };
     }
     
-    private static String numberType(NumberT numberType) {
-        return switch (numberType) {
-            case IntegerT integerType -> integerType(integerType);
-            case FractionalT fractionalType -> fractionalType(fractionalType);
+    private String mapPrimitiveType(PrimitiveType type) {
+        return switch (type.kind()) {
+            case BOOL -> "boolean";
+            case INT8 -> "byte";
+            case INT16 -> "short";
+            case INT32 -> "int";
+            case INT64 -> "long";
+            case FLOAT32 -> "float";
+            case FLOAT64 -> "double";
+            case STRING -> "String";
+            case BYTES -> "byte[]";
+            case UUID -> "UUID";
+            case DATE -> "LocalDate";
+            case TIME -> "LocalTime";
+            case TIMESTAMP -> "LocalDateTime";
+            case TIMESTAMP_TZ -> "ZonedDateTime";
+            case DECIMAL -> "BigDecimal";
         };
     }
-
-    private static String integerType(IntegerT integerType) {
-        return switch (integerType) {
-            case Int8T int8Type -> Byte.class.getSimpleName();
-            case Int16T int16Type -> Short.class.getSimpleName();
-            case Int32T int32Type -> Integer.class.getSimpleName();
-            case Int64T int64Type -> Long.class.getSimpleName();
+    
+    private String mapFieldType(AnyType type, boolean nullable) {
+        String baseType = switch (type) {
+            case PrimitiveType pt -> mapPrimitiveType(pt);
+            case ScalarType st -> st.fqn().toString().replace('.', '.');
+            case EnumType et -> et.fqn().toString().replace('.', '.');
+            case StructType st -> st.fqn().toString().replace('.', '.');
+            case ListType lt -> "List<" + mapFieldType(lt.item(), false) + ">";
+            case MapType mt -> "Map<" + mapFieldType(mt.key(), false) + ", " + 
+                                        mapFieldType(mt.value(), false) + ">";
+            case UnionType ut -> ut.fqn().toString().replace('.', '.');
+            default -> "Object";
         };
+        
+        // Make nullable for reference types
+        if (nullable && isReferenceType(type)) {
+            return baseType; // Already nullable in Java
+        }
+        
+        return baseType;
     }
-
-    private static String fractionalType(FractionalT numericType) {
-        return switch (numericType) {
-            case Float32T float32Type -> Float.class.getSimpleName();
-            case Float64T float64Type -> Double.class.getSimpleName();
-            case DecimalT decimalType -> BigDecimal.class.getSimpleName();
-        };
+    
+    private boolean isReferenceType(AnyType type) {
+        return !(type instanceof PrimitiveType pt && isPrimitivePrimitive(pt));
     }
-
-    private static String temporalType(TemporalT temporalType) {
-        return switch (temporalType) {
-            case DateT dateType -> LocalDate.class.getSimpleName();
-            case TimeT timeType -> LocalTime.class.getSimpleName();
-            case TimestampT dateTimeType -> LocalDateTime.class.getSimpleName();
-            case TimestampTzT timestampType -> ZonedDateTime.class.getSimpleName();
-        };
-    }
-
-    private static String compositeType(CompositeT compositeType) {
-        return switch (compositeType) {
-            case ListT listType -> List.class.getSimpleName() + "<" + dataType(listType.item()) + ">";
-            case MapT mapType -> Map.class.getSimpleName() + "<" + dataType(mapType.key()) + ", " + dataType(mapType.value()) + ">";
+    
+    private boolean isPrimitivePrimitive(PrimitiveType type) {
+        return switch (type.kind()) {
+            case BOOL, INT8, INT16, INT32, INT64, FLOAT32, FLOAT64 -> true;
+            default -> false;
         };
     }
 }

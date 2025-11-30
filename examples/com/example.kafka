@@ -1,5 +1,5 @@
 INCLUDE 'com.kafka';
 
-USE CONTEXT .com;
+USE CONTEXT com;
 
 CREATE CONTEXT example;

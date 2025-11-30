@@ -1,4 +1,0 @@
-package kafkasql.lang.ast;
-
-public sealed interface PrimitiveV extends AnyV
-    permits BoolV, AlphaV, BinaryV, NumberV, TemporalV { }

@@ -1,6 +1,6 @@
 INCLUDE 'com/example.kafka';
 
-USE CONTEXT .com.example;
+USE CONTEXT com.example;
 
 CREATE SCALAR TestScalar
 AS INT32;

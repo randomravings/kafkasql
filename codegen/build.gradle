@@ -3,7 +3,8 @@ plugins {
 }
 
 dependencies {
-  implementation project(':core')
+  implementation project(':runtime')
+  implementation project(':lang')
   testImplementation 'com.google.jimfs:jimfs:1.3.0'
   testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.3'
   testImplementation 'org.assertj:assertj-core:3.24.2'

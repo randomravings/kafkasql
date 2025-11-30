@@ -2,10 +2,11 @@ package kafkasql.lsp;
 
 import java.nio.file.*;
 
-import kafkasql.lang.Diagnostics;
+import kafkasql.lang.KafkaSqlArgs;
 import kafkasql.lang.KafkaSqlParser;
-import kafkasql.lang.ParseArgs;
 import kafkasql.lang.ParseResult;
+import kafkasql.lang.diagnostics.Diagnostics;
+import kafkasql.lang.input.StringInput;
 
 import org.eclipse.lsp4j.*;
 import org.eclipse.lsp4j.services.*;
@@ -75,20 +76,19 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
 
     System.err.println("[kafkasql-lsp] parseAndPublishDiagnostics for " + uri);
 
-    ParseArgs args = new ParseArgs(Path.of(this.workspaceRoot), true, false);
-    ParseResult pr = null;
-    
-    pr = KafkaSqlParser.parseText(text, args);
+    KafkaSqlArgs args = new KafkaSqlArgs(Path.of(this.workspaceRoot), true, false);
+    List<kafkasql.lang.input.Input> inputs = List.of(new StringInput(uri, text));
+    ParseResult pr = KafkaSqlParser.parse(inputs, args);
     if (pr.diags().hasError()) {
       sendDiagnostics(uri, pr.diags());
       return;
     }
 
-    pr = KafkaSqlParser.validate(pr);
-    if (pr.diags().hasError()) {
-      sendDiagnostics(uri, pr.diags());
-      return;
-    }
+    // pr = KafkaSqlParser.validate(pr);
+    // if (pr.diags().hasError()) {
+    //   sendDiagnostics(uri, pr.diags());
+    //   return;
+    // }
 
     sendOk(uri);
   }
@@ -102,12 +102,12 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
     if (client == null || diags == null) return;
 
     List<org.eclipse.lsp4j.Diagnostic> lspDiags = new ArrayList<>();
-    for (kafkasql.lang.DiagnosticEntry entry : diags.get()) {
-      kafkasql.lang.ast.Range r = entry.range();
-      int startLine = Math.max(0, r.start().ln() - 1);
-      int startChar = Math.max(0, r.start().ch());
-      int endLine = Math.max(startLine, r.end().ln() - 1);
-      int endChar = Math.max(0, r.end().ch());
+    for (kafkasql.lang.diagnostics.DiagnosticEntry entry : diags.all()) {
+      kafkasql.lang.diagnostics.Range r = entry.range();
+      int startLine = Math.max(0, r.from().ln() - 1);
+      int startChar = Math.max(0, r.from().ch());
+      int endLine = Math.max(startLine, r.to().ln() - 1);
+      int endChar = Math.max(0, r.to().ch());
 
       org.eclipse.lsp4j.Position start = new org.eclipse.lsp4j.Position(startLine, startChar);
       org.eclipse.lsp4j.Position end = new org.eclipse.lsp4j.Position(endLine, endChar);

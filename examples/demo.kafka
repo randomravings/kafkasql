@@ -2,26 +2,33 @@
  Standard multi line comment
 */
 
-CREATE CONTEXT com;
+CREATE CONTEXT com
+COMMENT 'Mother of all domains';
+
 USE CONTEXT com;
 
 -- single line comment
 CREATE CONTEXT example;
-USE CONTEXT example;
+USE CONTEXT com.example;
 
 CREATE SCALAR Money AS
 DECIMAL(18, 2)
 DEFAULT(0)
 CHECK (value > 100);
 
-# 1. Define custom types
-# 2. xys
 CREATE ENUM Status (
-  ACTIVE: 0,
-  PENDING: 1,
+  ACTIVE: 0
+  COMMENT 'Active customer',
+  
+  PENDING: 1
+  COMMENT 'Pending customer',
+
   DISABLED: 4096
+  COMMENT 'Disabled customer'
 )
-DEFAULT(Status::DISABLED);
+DEFAULT(Status::DISABLED)
+COMMENT 'This enum represents
+customer status';
 
 CREATE STRUCT Address (
   Street STRING,
@@ -36,71 +43,61 @@ DEFAULT(CustomerIdOrName$Id(1001));
 
 CREATE STRUCT Customer (
   Id INT64,
-  Name STRING NULL DEFAULT('Unknown'),
+  Name STRING NULL DEFAULT 'Unknown',
   Email STRING NULL,
   Tags LIST<STRING>,
-  Attrs MAP<STRING, MAP<TIMESTAMP(3), LIST<.com.example.Money>>>,
-  Classification CHAR(5),
-  Status .com.example.Status,
-  Address .com.example.Address DEFAULT([{
-    Street: 'N/A',
-    Zip: 'N/A'
-  },{
-    10: 'N/A',
-    11: 'N/A'
-  },{
-    'x': 20,
-    'y': 10
-  }])
+  Attrs MAP<STRING, MAP<TIMESTAMP(3), LIST<com.example.Money>>>,
+  Classification STRING(5),
+  Status com.example.Status,
+  Address com.example.Address DEFAULT {
+    Street: 'Knowhere',
+    Zip: 'Space 101'
+  }
 );
 
-CREATE STREAM customers AS
-TYPE .com.example.Customer AS CustomerV2
+CREATE STREAM CustomerEvents AS
+TYPE com.example.Customer AS CustomerV2
 TYPE (
-  Id CustomerIdOrName,
+  Id com.example.CustomerIdOrName,
   Ts TIMESTAMP(3),
   Email STRING NULL
 ) AS CustomerV1
 DISTRIBUTE BY (Id)
-WITH TIMESTAMP (Ts)
+TIMESTAMP BY (Ts)
 ;
 
-WRITE TO customers
+WRITE TO com.example.CustomerEvents
 TYPE CustomerV1
 VALUES({
-  Id: CustomerIdOrName$Id(5000),
+  Id: com.example.CustomerIdOrName$Id(5000),
   Email: 'joe@example.com'
 });
 
-WRITE TO customers
+WRITE TO com.example.CustomerEvents
 TYPE CustomerV2
 VALUES ({
   Id: 1001,
   Name: 'Alice',
   Email: 'alice@example.com',
-  Status: Status::ACTIVE
+  Status: com.example.Status::ACTIVE
 }, {
   Id: 1002,
   Name: 'Bob',
   Email: NULL,
-  Status: Status::PENDING
+  Status: com.example.Status::PENDING
 });
 
-READ FROM customers
+READ FROM com.example.CustomerEvents
 TYPE CustomerV1
   *
 WHERE
-  Name = 'Alice' AND
-  Id < 1 AND
-  Id >> 1 >= 0.5
+  Email = 'joe@example.com' AND
+  Email IS NOT NULL
 TYPE CustomerV2
   Id,
   Tags,
-  Id * 10 AS
-   TenTimesId,
-  Attrs['key1'][98][0]
-   AS
-    FirstMoney
+  Id * 10 AS TenTimesId,
+  Attrs.A['key1'][98][Id] AS FirstMoney
 WHERE
-  Status <> Status::DISABLED
+  Status <> com.example.Status::DISABLED
 ;

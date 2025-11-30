@@ -2,8 +2,6 @@ package kafkasql.io;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
-import kafkasql.core.RecordValue;
-
 /**
  * A lightweight record wrapper for read operations.
  * <p>

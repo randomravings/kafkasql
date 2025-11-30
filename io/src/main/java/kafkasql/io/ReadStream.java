@@ -13,8 +13,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
-import kafkasql.core.RecordValue;
-
 /**
  * A lightweight wrapper for consuming Kafka records with type-safe deserialization.
  * <p>

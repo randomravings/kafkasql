@@ -2,8 +2,6 @@ package kafkasql.io;
 
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 
-import kafkasql.core.RecordValue;
-
 public interface RecordDeserializer<T extends RecordValue<T>> {
     /**
      * Deserializes the given byte array into a record value.

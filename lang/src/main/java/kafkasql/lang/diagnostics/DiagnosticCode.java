@@ -1,0 +1,43 @@
+package kafkasql.lang.diagnostics;
+
+public enum DiagnosticCode {
+
+    // Lexer / Parser
+    UNEXPECTED_TOKEN,
+    SYNTAX_ERROR,
+    AMBIGUITY,
+    CONTEXT_SENSITIVITY,
+
+    // Includes
+    INCLUDE_NOT_FOUND,
+    INCLUDE_CYCLE,
+    INCLUDE_INVALID,
+
+    // Resolution
+    UNKNOWN_TYPE,
+    UNKNOWN_STREAM,
+    UNKNOWN_MEMBER,
+    UNKNOWN_CONTEXT,
+    INVALID_CONTEXT_SCOPE,
+    DUPLICATE_DECLARATION,
+    INVALID_ENUM_BASE_TYPE,
+
+    // Types
+    TYPE_MISMATCH,
+    INVALID_TYPE_REF,
+    UNKNOWN_FIELD,
+    MISSING_FIELD,
+    INVALID_LITERAL,
+    OUT_OF_RANGE_LITERAL,
+
+    // Expression
+    INVALID_OPERATOR,
+    INVALID_PROJECTION,
+    INVALID_WHERE_TYPE,
+
+    // Runtime
+    RUNTIME_ERROR,
+
+    // Internal
+    INTERNAL_ERROR
+}

@@ -42,6 +42,4 @@ public class Main {
       // do not call System.out/println here
     }
   }
-
-  
 }

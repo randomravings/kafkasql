@@ -4,8 +4,6 @@ import java.util.concurrent.Future;
 
 import org.apache.kafka.clients.producer.RecordMetadata;
 
-import kafkasql.core.RecordValue;
-
 /**
  * A lightweight record wrapper for write operations.
  * <p>
