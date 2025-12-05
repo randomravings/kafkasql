@@ -19,7 +19,7 @@ public class ContextResolutionTest {
             "USE CONTEXT com; " +
             "CREATE CONTEXT example; " +
             "USE CONTEXT example; " +
-            "CREATE STRUCT Foo ( Bar STRING );"
+            "CREATE TYPE Foo AS STRUCT ( Bar STRING );"
         );
 
         assertEquals(4, stmts.size());
@@ -33,13 +33,13 @@ public class ContextResolutionTest {
         assertEquals("com", ((ContextUse)uc1.target()).qname().fullName());
         TestHelpers.assertDecl(
             ContextDecl.class,
-            cc,
+            cc.decl(),
             "example"
         );
         assertEquals("example", ((ContextUse) uc2.target()).qname().fullName());
         TestHelpers.assertDecl(
             TypeDecl.class,
-            ct,
+            ct.decl(),
             "Foo"
         );
     }
@@ -49,7 +49,7 @@ public class ContextResolutionTest {
         var stmts = TestHelpers.parseAssert(
             "USE CONTEXT com; " +
             "CREATE CONTEXT example; " +
-            "CREATE STRUCT Foo ( Bar STRING );"
+            "CREATE TYPE Foo AS STRUCT ( Bar STRING );"
         );
 
         assertEquals(3, stmts.size());
@@ -61,12 +61,12 @@ public class ContextResolutionTest {
         assertEquals("com", ((ContextUse) uc.target()).qname().fullName());
         TestHelpers.assertDecl(
             ContextDecl.class,
-            cc,
+            cc.decl(),
             "example"
         );
         TestHelpers.assertDecl(
             TypeDecl.class,
-            ct,
+            ct.decl(),
             "Foo"
         );
     }

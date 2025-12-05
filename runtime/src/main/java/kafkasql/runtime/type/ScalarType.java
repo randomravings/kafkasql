@@ -7,5 +7,6 @@ public record ScalarType(
     Name fqn,
     PrimitiveType primitive,
     Optional<Object> defaultValue,
+    Optional<CheckConstraint> check,
     Optional<String> doc
 ) implements ComplexType {}

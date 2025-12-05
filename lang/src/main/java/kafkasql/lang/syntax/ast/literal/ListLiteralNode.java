@@ -1,9 +1,9 @@
 package kafkasql.lang.syntax.ast.literal;
 
-import kafkasql.lang.TypedList;
 import kafkasql.lang.diagnostics.Range;
+import kafkasql.lang.syntax.ast.AstListNode;
 
 public record ListLiteralNode(
     Range range,
-    TypedList<LiteralNode> elements
+    AstListNode<LiteralNode> elements
 ) implements CompositeLiteralNode { }

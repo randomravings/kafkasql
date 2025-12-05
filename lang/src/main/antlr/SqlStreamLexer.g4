@@ -61,6 +61,8 @@ OF            : [Oo][Ff] ;
 CHECK         : [Cc][Hh][Ee][Cc][Kk] ;
 WITH          : [Ww][Ii][Tt][Hh] ;
 COMMENT       : [Cc][Oo][Mm][Mm][Ee][Nn][Tt];
+CONSTRAINT    : [Cc][Oo][Nn][Ss][Tt][Rr][Aa][Ii][Nn][Tt] ;
+SYNONYM       : [Ss][Yy][Nn][Oo][Nn][Yy][Mm] ;
 
 // Punctuation / operators
 COMMA         : ',' ;
@@ -91,6 +93,7 @@ PERCENT       : '%' ;
 PLUS          : '+' ;
 MINUS         : '-' ;
 AMP           : '&' ;
+PIPE_PIPE     : '||' ;
 PIPE          : '|' ;
 CARET         : '^' ;
 TILDE         : '~' ;
@@ -98,7 +101,7 @@ SHL           : {angleDepth==0 && !pendingType}? '<<' ;
 SHR           : {angleDepth==0 && !pendingType}? '>>' ;
 
 NUMBER_LIT    : '-'? [0-9]+ ('.' [0-9]+ | [eE] [+-]? [0-9]+)? ;
-STRING_LIT    : '\'' ( . | '\r' | '\n' | '\'\'' )*? '\'' ;
+STRING_LIT    : '\'' ( ~'\'' | '\'\'')* '\'' ;
 BYTES_LIT     : [0][xX][0-9a-fA-F]+ ;
 ID            : [a-zA-Z] [a-zA-Z0-9_]* ;
 
@@ -109,7 +112,7 @@ BLOCK_COMMENT
 LINE_COMMENT
   : '--' ~[\r\n]* -> skip
   ;
- 
+
 WS
   : [ \t\r\n]+ -> skip
   ;

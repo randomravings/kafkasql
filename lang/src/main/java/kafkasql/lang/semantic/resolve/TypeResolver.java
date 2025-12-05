@@ -9,16 +9,17 @@ import kafkasql.lang.diagnostics.Diagnostics;
 import kafkasql.lang.semantic.BindingEnv;
 import kafkasql.lang.semantic.symbol.SymbolTable;
 import kafkasql.lang.syntax.ast.Script;
+import kafkasql.lang.syntax.ast.decl.DerivedTypeDecl;
 import kafkasql.lang.syntax.ast.decl.EnumDecl;
 import kafkasql.lang.syntax.ast.decl.ScalarDecl;
 import kafkasql.lang.syntax.ast.decl.StreamDecl;
 import kafkasql.lang.syntax.ast.decl.StreamMemberDecl;
-import kafkasql.lang.syntax.ast.decl.StreamMemberInlineDecl;
-import kafkasql.lang.syntax.ast.decl.StreamMemberRefDecl;
 import kafkasql.lang.syntax.ast.decl.StructDecl;
 import kafkasql.lang.syntax.ast.decl.StructFieldDecl;
 import kafkasql.lang.syntax.ast.decl.TypeDecl;
 import kafkasql.lang.syntax.ast.decl.TypeMemberDecl;
+import kafkasql.lang.syntax.ast.fragment.DistributeDecl;
+import kafkasql.lang.syntax.ast.fragment.TimestampDecl;
 import kafkasql.lang.syntax.ast.decl.UnionDecl;
 import kafkasql.lang.syntax.ast.decl.UnionMemberDecl;
 import kafkasql.lang.syntax.ast.misc.QName;
@@ -84,27 +85,40 @@ public final class TypeResolver {
 
             bindings.put(decl, Boolean.FALSE); // mark resolving
 
-            switch (decl) {
+            switch (decl.kind()) {
                 case StructDecl s -> resolveStruct(s);
                 case ScalarDecl s -> resolveScalar(s);
                 case EnumDecl e   -> resolveEnum(e);
                 case UnionDecl u  -> resolveUnion(u);
+                case DerivedTypeDecl d -> resolveDerivedType(d);
+                default -> throw new IllegalStateException("Unexpected type kind: " + decl.kind());
             }
 
             bindings.put(decl, Boolean.TRUE); // mark resolved
         }
 
         public void visitStreamDecl(StreamDecl decl) {
-            for (StreamMemberDecl m : decl.streamTypes()) {
-                switch (m) {
-                    case StreamMemberInlineDecl inline -> {
-                        for (StructFieldDecl f : inline.fields()) {
-                            resolveFieldType(f);
-                        }
-                    }
-                    case StreamMemberRefDecl ref ->
-                        resolveStreamMemberReference(ref);
+            // Validate that stream-level fragments don't contain DISTRIBUTE or TIMESTAMP
+            for (var frag : decl.fragments()) {
+                if (frag instanceof DistributeDecl dist) {
+                    diags.error(
+                        dist.range(),
+                        DiagnosticKind.SEMANTIC,
+                        DiagnosticCode.INVALID_FRAGMENT_LOCATION,
+                        "DISTRIBUTE BY is not allowed at stream level. It must be specified on individual TYPE declarations."
+                    );
+                } else if (frag instanceof TimestampDecl ts) {
+                    diags.error(
+                        ts.range(),
+                        DiagnosticKind.SEMANTIC,
+                        DiagnosticCode.INVALID_FRAGMENT_LOCATION,
+                        "TIMESTAMP BY is not allowed at stream level. It must be specified on individual TYPE declarations."
+                    );
                 }
+            }
+            
+            for (StreamMemberDecl m : decl.streamTypes()) {
+                visitTypeDecl(m.memberDecl());
             }
         }
 
@@ -119,7 +133,7 @@ public final class TypeResolver {
         }
 
         private void resolveScalar(ScalarDecl s) {
-            resolveTypeNode(s.baseType());
+            resolveTypeNode(s.type());
         }
 
         private void resolveEnum(EnumDecl e) {
@@ -132,31 +146,9 @@ public final class TypeResolver {
             }
         }
 
-        // ==============================================================
-        // STREAM MEMBER RESOLUTION
-        // ==============================================================
-
-        private void resolveStreamMemberReference(StreamMemberRefDecl refDecl) {
-
-            ComplexTypeNode ref = refDecl.ref();
-            Name name = toName(ref.name());
-
-            Optional<StructDecl> tdecl = symbols.lookupStruct(name);
-            if (tdecl.isEmpty()) {
-                diags.error(
-                    ref.range(),
-                    DiagnosticKind.SEMANTIC,
-                    DiagnosticCode.INVALID_TYPE_REF,
-                    "Stream reference '" + name + "' must refer to a STRUCT"
-                );
-                return;
-            }
-
-            // Bind reference
-            bindings.put(ref, tdecl.get());
-
-            // Ensure struct is fully resolved
-            visitTypeDecl(tdecl.get());
+        private void resolveDerivedType(DerivedTypeDecl d) {
+            // Resolve the target type reference
+            resolveTypeReference(d.target());
         }
 
         // ==============================================================

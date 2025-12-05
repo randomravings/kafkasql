@@ -4,15 +4,18 @@ import java.io.IOException;
 import java.io.Writer;
 import java.util.ArrayList;
 
-import kafkasql.lang.TypedList;
-import kafkasql.lang.TypedOptional;
 import kafkasql.lang.syntax.ast.*;
 import kafkasql.lang.syntax.ast.decl.*;
 import kafkasql.lang.syntax.ast.expr.*;
 import kafkasql.lang.syntax.ast.fragment.CheckNode;
+import kafkasql.lang.syntax.ast.fragment.ConstraintNode;
+import kafkasql.lang.syntax.ast.fragment.DeclFragment;
+import kafkasql.lang.syntax.ast.fragment.DefaultNode;
+import kafkasql.lang.syntax.ast.fragment.DistributeDecl;
 import kafkasql.lang.syntax.ast.fragment.DocNode;
 import kafkasql.lang.syntax.ast.fragment.ProjectionExprNode;
 import kafkasql.lang.syntax.ast.fragment.ProjectionNode;
+import kafkasql.lang.syntax.ast.fragment.TimestampDecl;
 import kafkasql.lang.syntax.ast.fragment.WhereNode;
 import kafkasql.lang.syntax.ast.literal.*;
 import kafkasql.lang.syntax.ast.misc.*;
@@ -42,9 +45,9 @@ public final class AstPrinter extends Printer {
         branch("source", 0, false);
         write(script.range().source());
         branch("includes", 0, false);
-        forEach(script.includes(), "include", this::writeInclude, 1);
+        forEach(script.includes(), "include", this::writeInclude, 1, Include.class);
         branch("stmts", 0, true);
-        forEach(script.statements(), "stmt", this::writeStmt, 1);
+        forEach(script.statements(), "stmt", this::writeStmt, 1, Stmt.class);
         newLine();
     }
 
@@ -118,6 +121,78 @@ public final class AstPrinter extends Printer {
     }
 
     //============================================================
+    // DECLARATION FRAGMENTS
+    //============================================================
+
+    private void writeDeclaratonFragmentList(AstListNode<DeclFragment> fragments, int indent) throws IOException {
+        branch("fragments", indent, true);
+        forEach(fragments, "fragment", this::writeDeclaratonFragment, indent + 1, DeclFragment.class);
+    }
+
+    private void writeDeclaratonFragment(DeclFragment fragment, int indent) throws IOException {
+        switch (fragment) {
+            case DefaultNode def ->
+                writeDefaultFragment(def, indent);
+            case DocNode doc ->
+                writeCommentFragment(doc, indent);
+            case CheckNode check ->
+                writeCheckFragment(check, indent);
+            case ConstraintNode nc ->
+                writeNamedConstraintFragment(nc, indent);
+            case DistributeDecl dist ->
+                writeDistributeFragment(dist, indent);
+            case TimestampDecl ts ->
+                writeTimestampFragment(ts, indent);
+        }
+    }
+
+    private void writeNamedConstraintFragment(ConstraintNode c, int indent) throws IOException {
+        writeClass(c.getClass());
+        branch("name", indent, false);
+        write(c.name().name());
+        branch("constraint", indent, true);
+        writeDeclaratonFragment(c.fragment(), indent + 1);
+    }
+
+    private void writeCheckFragment(CheckNode c, int indent) throws IOException {
+        writeClass(c.getClass());
+        branch("expr", indent, true);
+        writeExpr(c.expr(), indent + 1);
+    }
+
+    private void writeDefaultFragment(DefaultNode d, int indent) throws IOException {
+        branch("default", indent, true);
+        writeLiteral(d.value(), indent);
+    }
+
+    private void writeCommentFragment(DocNode c, int indent) throws IOException {
+        branch("comment", indent, true);
+        writeClass(DocNode.class);
+        branch("lines", indent + 1, true);
+        var padding = "lines: ".length();
+        var lines = c.comment().lines().toList();
+        write(lines.get(0));
+        for (int i = 1; i < lines.size(); i++) {
+            newLine();
+            pipes(indent + 2);
+            spaces(padding);
+            write(lines.get(i));
+        }
+    }
+
+    private void writeDistributeFragment(DistributeDecl d, int indent) throws IOException {
+        writeClass(d.getClass());
+        branch("keys", indent, true);
+        forEach(d.keys(), "key", this::writeIdentifier, indent + 1, Identifier.class);
+    }
+
+    private void writeTimestampFragment(TimestampDecl t, int indent) throws IOException {
+        writeClass(t.getClass());
+        branch("field", indent, false);
+        writeIdentifier(t.field(), indent);
+    }
+
+    //============================================================
     // USE CONTEXT
     //============================================================
 
@@ -133,7 +208,7 @@ public final class AstPrinter extends Printer {
     private void writeCreateContext(ContextDecl c, int indent) throws IOException {
         writeClass(c.getClass());
         writeName(c.name(), indent, false);
-        writeCommentFragment(c.doc(), indent, true);
+        writeDeclaratonFragmentList(c.fragments(), indent);
     }
 
     //============================================================
@@ -141,11 +216,21 @@ public final class AstPrinter extends Printer {
     //============================================================
 
     private void writeTypeDecl(TypeDecl d, int indent) throws IOException {
-        switch (d) {
+        write(d.getClass().getSimpleName());
+        branch("name", indent, false);
+        writeIdentifier(d.name(), indent + 1);
+        branch("kind", indent, true);
+        writeTypeKindDecl(d.kind(), indent + 1);
+        writeDeclaratonFragmentList(d.fragments(), indent);
+    }
+
+    private void writeTypeKindDecl(TypeKindDecl k, int indent) throws IOException {
+        switch (k) {
             case ScalarDecl s -> writeScalarDecl(s, indent);
             case EnumDecl e   -> writeEnumDecl(e, indent);
             case StructDecl s -> writeStructDecl(s, indent);
             case UnionDecl u  -> writeUnionDecl(u, indent);
+            case DerivedTypeDecl d -> writeDerivedTypeDecl(d, indent);
         }
     }
 
@@ -154,16 +239,8 @@ public final class AstPrinter extends Printer {
     //============================================================
     private void writeScalarDecl(ScalarDecl s, int indent) throws IOException {
         writeClass(s.getClass());
-        writeName(s.name(), indent, false);
-        writeScalarBaseType(s.baseType(), indent, false);
-        writeDefaultValueFragment(s.defaultValue(), indent, false);
-        writeCheckFragmentOpt(s.check(), indent, false);
-        writeCommentFragment(s.doc(), indent, true);
-    }
-
-    private void writeScalarBaseType(PrimitiveTypeNode p, int indent, boolean last) throws IOException {
-        branch("baseType", indent, last);
-        writeTypeNode(p, indent + 1, true);
+        branch("type", indent, false);
+        writeTypeNode(s.type(), indent + 1, true);
     }
 
     //============================================================
@@ -171,22 +248,17 @@ public final class AstPrinter extends Printer {
     //============================================================
     private void writeEnumDecl(EnumDecl e, int indent) throws IOException {
         writeClass(e.getClass());
-        writeName(e.name(), indent, false);
         writeEnumSymbols(e.symbols(), indent);
-        writeDefaultValueFragment(e.defaultValue(), indent, false);
-        writeCommentFragment(e.doc(), indent, true);
     }
 
-    private void writeEnumSymbols(TypedList<EnumSymbolDecl> symbols, int indent) throws IOException {
+    private void writeEnumSymbols(AstListNode<EnumSymbolDecl> symbols, int indent) throws IOException {
         branch("symbols", indent, false);
-        forEach(symbols, "symbol", this::writeEnumSymbolDecl, indent + 1);
+        forEach(symbols, "symbol", this::writeEnumSymbolDecl, indent + 1, EnumSymbolDecl.class);
     }
 
     private void writeEnumSymbolDecl(EnumSymbolDecl s, int indent) throws IOException {
         writeClass(s.getClass());
         writeName(s.name(), indent, false);
-        writeValue(s.value(), indent, false);
-        writeCommentFragment(s.doc(), indent, true);
     }
 
     //============================================================
@@ -194,15 +266,12 @@ public final class AstPrinter extends Printer {
     //============================================================
     private void writeStructDecl(StructDecl s, int indent) throws IOException {
         writeClass(s.getClass());
-        writeName(s.name(), indent, false);
         writeFields(s.fields(), indent, false);
-        writeCheckFragments(s.checks(), indent, false);
-        writeCommentFragment(s.doc(), indent, true);
     }
 
-    private void writeFields(TypedList<StructFieldDecl> fields, int indent, boolean last) throws IOException {
+    private void writeFields(AstListNode<StructFieldDecl> fields, int indent, boolean last) throws IOException {
         branch("fields", indent, last);
-        forEach(fields, "field", this::writeStructFieldDecl, indent + 1);
+        forEach(fields, "field", this::writeStructFieldDecl, indent + 1, StructFieldDecl.class);
     }
 
     private void writeStructFieldDecl(StructFieldDecl f, int indent) throws IOException {
@@ -210,13 +279,12 @@ public final class AstPrinter extends Printer {
         writeName(f.name(), indent, false);
         writeNullable(f.nullable(), indent, false);
         writeTypeNode(f.type(), indent, false);
-        writeDefaultValueFragment(f.defaultValue(), indent, false);
-        writeCommentFragment(f.doc(), indent, true);
+        writeDeclaratonFragmentList(f.fragments(), indent);
     }
 
-    private void writeNullable(Boolean nullable, int indent, boolean last) throws IOException {
+    private void writeNullable(AstOptionalNode<NullLiteralNode> nullable, int indent, boolean last) throws IOException {
         branch("nullable", indent, last);
-        write(nullable);
+        writeOptional(nullable, this::writeLiteral, indent);
     }
 
     //============================================================
@@ -224,21 +292,29 @@ public final class AstPrinter extends Printer {
     //============================================================
     private void writeUnionDecl(UnionDecl u, int indent) throws IOException {
         writeClass(u.getClass());
-        writeName(u.name(), indent, false);
         writeUnionMemberDecls(u.members(), indent, false);
-        writeCommentFragment(u.doc(), indent, true);
     }
 
-    private void writeUnionMemberDecls(TypedList<UnionMemberDecl> members, int indent, boolean last) throws IOException {
+    private void writeUnionMemberDecls(AstListNode<UnionMemberDecl> members, int indent, boolean last) throws IOException {
         branch("members", indent, last);
-        forEach(members, "member", this::writeUnionMemberDecl, indent + 1);
+        forEach(members, "member", this::writeUnionMemberDecl, indent + 1, UnionMemberDecl.class);
     }
 
     private void writeUnionMemberDecl(UnionMemberDecl m, int indent) throws IOException {
         writeClass(m.getClass());
         writeName(m.name(), indent, false);
         writeTypeNode(m.type(), indent, false);
-        writeCommentFragment(m.doc(), indent, true);
+        writeDeclaratonFragmentList(m.fragments(), indent);
+    }
+
+    //============================================================
+    // DERIVED TYPE DECL
+    //============================================================
+
+    private void writeDerivedTypeDecl(DerivedTypeDecl d, int indent) throws IOException {
+        writeClass(d.getClass());
+        branch("baseType", indent, true);
+        writeQName(d.target().name(), indent + 1);
     }
 
     //============================================================
@@ -301,7 +377,7 @@ public final class AstPrinter extends Printer {
         branch("fqn", indent, false);
         writeIdentifier(s.name(), indent + 1);
         branch("streamTypes", indent, true);
-        forEach(s.streamTypes(), "streamType", this::writeStreamType, indent + 1);
+        forEach(s.streamTypes(), "streamType", this::writeStreamType, indent + 1, StreamMemberDecl.class);
     }
 
     private void writeStreamType(StreamMemberDecl m, int indent) throws IOException {
@@ -309,14 +385,7 @@ public final class AstPrinter extends Printer {
         branch("name", indent, false);
         writeIdentifier(m.name(), indent);
         branch("type", indent, true);
-        switch (m) {
-            case StreamMemberInlineDecl in -> {
-                forEach(in.fields(), "field", this::writeStructFieldDecl, indent + 1);
-            }
-            case StreamMemberRefDecl ref -> {
-                writeQName(ref.ref().name(), indent + 1);
-            }
-        }
+        writeTypeDecl(m.memberDecl(), indent);
     }
 
     //============================================================
@@ -329,7 +398,7 @@ public final class AstPrinter extends Printer {
         branch("type", indent, false);
         write(w.alias().name());
         branch("values", indent, true);
-        forEach(w.values(), "value", this::writeStructLiteral, indent + 1);
+        forEach(w.values(), "value", this::writeStructLiteral, indent + 1, StructLiteralNode.class);
     }
 
     //============================================================
@@ -340,7 +409,7 @@ public final class AstPrinter extends Printer {
         branch("fqn", indent, false);
         writeQName(r.stream(), indent + 1);
         branch("blocks", indent, true);
-        forEach(r.blocks(), "block", this::writeReadBlock, indent + 1);
+        forEach(r.blocks(), "block", this::writeReadBlock, indent + 1, ReadTypeBlock.class);
     }
 
     private void writeReadBlock(ReadTypeBlock b, int indent) throws IOException {
@@ -355,7 +424,7 @@ public final class AstPrinter extends Printer {
         if (p.items().isEmpty())
             write("*");
         else
-            forEach(p.items(), "expr", this::writeProjectionExpr, indent + 1);
+            forEach(p.items(), "expr", this::writeProjectionExpr, indent + 1, ProjectionExprNode.class);
     }
 
     private void writeProjectionExpr(ProjectionExprNode p, int indent) throws IOException {
@@ -508,11 +577,11 @@ public final class AstPrinter extends Printer {
     }
 
     private void writeListLiteral(ListLiteralNode list, int indent) throws IOException {
-        forEach(list.elements(), "item", this::writeLiteral, indent);
+        forEach(list.elements(), "item", this::writeLiteral, indent, LiteralNode.class);
     }
 
     private void writeMapLiteral(MapLiteralNode map, int indent) throws IOException {
-        forEach(map.entries(), "entry", this::writeMapEntry, indent);
+        forEach(map.entries(), "entry", this::writeMapEntry, indent, MapEntryLiteralNode.class);
     }
 
     private void writeMapEntry(MapEntryLiteralNode e, int indent) throws IOException {
@@ -540,7 +609,7 @@ public final class AstPrinter extends Printer {
     }
 
     private void writeStructLiteral(StructLiteralNode s, int indent) throws IOException {
-        forEach(s.fields(), "field", this::writeStructFieldLiteral, indent);
+        forEach(s.fields(), "field", this::writeStructFieldLiteral, indent, StructFieldLiteralNode.class);
     }
 
     private void writeStructFieldLiteral(StructFieldLiteralNode f, int indent) throws IOException {
@@ -576,51 +645,6 @@ public final class AstPrinter extends Printer {
         writeIdentifier(id, indent + 1);
     }
 
-    private void writeValue(LiteralNode v, int indent, boolean last) throws IOException {
-        branch("value", indent, last);
-        writeLiteral(v, indent + 1);
-    }
-
-    private void writeCheckFragments(TypedList<CheckNode> checks, int indent, boolean last) throws IOException {
-        branch("checks", indent, last);
-        forEach(checks, "check", this::writeCheckClause, indent + 1);
-    }
-
-    private void writeCheckFragmentOpt(TypedOptional<CheckNode> c, int indent, boolean last) throws IOException {
-        branch("check", indent, last);
-        writeOptional(c, this::writeCheckClause, indent);
-    }
-
-    private void writeCheckClause(CheckNode c, int indent) throws IOException {
-        writeClass(c.getClass());
-        branch("expr", indent, true);
-        writeExpr(c.expr(), indent + 1);
-    }
-
-    private <T extends LiteralNode> void writeDefaultValueFragment(TypedOptional<T> d, int indent, boolean last) throws IOException {
-        branch("defaultValue", indent, last);
-        writeOptional(d, this::writeLiteral, indent);
-    }
-
-    private void writeCommentFragment(TypedOptional<DocNode> c, int indent, boolean last) throws IOException {
-        branch("comment", indent, last);
-        writeClass(c.type());
-        branch("lines", indent + 1, true);
-        if (c.isPresent()) {
-            var padding = "lines: ".length();
-            var lines = c.get().comment().lines().toList();
-            write(lines.get(0));
-            for (int i = 1; i < lines.size(); i++) {
-                newLine();
-                pipes(indent + 2);
-                spaces(padding);
-                write(lines.get(i));
-            }
-        } else {
-            nil();
-        }
-    }
-
     //============================================================
     // HELPERS
     //============================================================
@@ -634,8 +658,8 @@ public final class AstPrinter extends Printer {
 
     }
 
-    private <T extends AstNode> void forEach(TypedList<T> xs, String name, ForEach<T> fn, int indent) throws IOException {
-        writeClass(xs.getItemType());
+    private <T extends AstNode> void forEach(AstListNode<T> xs, String name, ForEach<T> fn, int indent, Class<T> clazz) throws IOException {
+        writeClass(clazz.getClass());
         int size = xs.size();
         int last = size - 1;
         write("[" + size + "]");
@@ -645,7 +669,7 @@ public final class AstPrinter extends Printer {
         }
     }
 
-    private <T extends AstNode> void writeOptional(TypedOptional<T> optional, IfPresent<T> ifPresent, int indent) throws IOException {
+    private <T extends AstNode> void writeOptional(AstOptionalNode<T> optional, IfPresent<T> ifPresent, int indent) throws IOException {
         if (optional.isPresent()) {
             ifPresent.value(optional.get(), indent + 1);
         } else {

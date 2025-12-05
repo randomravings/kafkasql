@@ -2,20 +2,19 @@ package kafkasql.lang.semantic.bind;
 
 import kafkasql.runtime.*;
 import kafkasql.runtime.type.*;
-import kafkasql.lang.TypedOptional;
 import kafkasql.lang.diagnostics.DiagnosticCode;
 import kafkasql.lang.diagnostics.DiagnosticKind;
 import kafkasql.lang.diagnostics.Diagnostics;
 import kafkasql.lang.semantic.BindingEnv;
-import kafkasql.lang.semantic.factory.ComplexTypeFactory;
 import kafkasql.lang.semantic.symbol.SymbolTable;
+import kafkasql.lang.semantic.util.FragmentUtils;
 import kafkasql.lang.syntax.ast.Script;
 import kafkasql.lang.syntax.ast.decl.StreamDecl;
 import kafkasql.lang.syntax.ast.decl.StreamMemberDecl;
-import kafkasql.lang.syntax.ast.decl.StreamMemberInlineDecl;
-import kafkasql.lang.syntax.ast.decl.StreamMemberRefDecl;
+import kafkasql.lang.syntax.ast.decl.DerivedTypeDecl;
 import kafkasql.lang.syntax.ast.decl.StructDecl;
 import kafkasql.lang.syntax.ast.decl.StructFieldDecl;
+import kafkasql.lang.syntax.ast.decl.TypeDecl;
 import kafkasql.lang.syntax.ast.expr.Expr;
 import kafkasql.lang.syntax.ast.fragment.*;
 import kafkasql.lang.syntax.ast.literal.StructFieldLiteralNode;
@@ -23,7 +22,6 @@ import kafkasql.lang.syntax.ast.literal.StructLiteralNode;
 import kafkasql.lang.syntax.ast.misc.Identifier;
 import kafkasql.lang.syntax.ast.misc.QName;
 import kafkasql.lang.syntax.ast.stmt.*;
-import kafkasql.lang.syntax.ast.type.ComplexTypeNode;
 
 import java.util.*;
 
@@ -142,8 +140,8 @@ public final class StatementBinder {
         // -----------------------------
         // WHERE clause
         // -----------------------------
-        block.where().ifPresent(where -> {
-            Expr expr = where.expr();
+        if (block.where().isPresent()) {
+            Expr expr = block.where().get().expr();
             AnyType t = exprBinder.bind(expr);
 
             if (!(t instanceof PrimitiveType pt) || pt.kind() != PrimitiveKind.BOOL) {
@@ -154,8 +152,8 @@ public final class StatementBinder {
                     "WHERE clause must be BOOLEAN, got: " + debugType(t)
                 );
             }
-            bindings.put(where, t);
-        });
+            bindings.put(block.where().get(), t);
+        }
     }
 
     private static StreamMemberDecl findStreamMember(
@@ -185,15 +183,17 @@ public final class StatementBinder {
         Diagnostics diags,
         BindingEnv bindings
     ) {
-        // INLINE STRUCT
-        if (member instanceof StreamMemberInlineDecl inline) {
+        TypeDecl typeDecl = member.memberDecl();
+        
+        // Check if it's an inline STRUCT definition
+        if (typeDecl.kind() instanceof StructDecl structDecl) {
             // Create a synthetic Name for inline struct: stream.member
             String streamFqn = streamDecl.name().name();
-            String memberName = inline.name().name();
+            String memberName = member.name().name();
             Name inlineFqn = Name.of(streamFqn, memberName);
             LinkedHashMap<String, StructTypeField> fields = new LinkedHashMap<>();
 
-            for (StructFieldDecl f : inline.fields()) {
+            for (StructFieldDecl f : structDecl.fields()) {
                 String fieldName = f.name().name();
                 
                 // Use TypeBuilder to resolve complex type references
@@ -204,15 +204,11 @@ public final class StatementBinder {
                     diags
                 );
                 
-                boolean nullable = f.nullable();
+                boolean nullable = f.nullable().isPresent();
 
-                Optional<Object> defaultValue = f.defaultValue()
-                    .map(lit -> Optional.of(
-                        LiteralBinder.bindLiteralAsType(lit, type, diags, bindings)
-                    ))
-                    .orElse(Optional.empty());
+                Optional<Object> defaultValue = FragmentUtils.extractDefault(f.fragments(), diags);
 
-                Optional<String> doc = extractDoc(f.doc());
+                Optional<String> doc = FragmentUtils.extractDoc(f.fragments(), diags);
 
                 fields.put(fieldName,
                     new StructTypeField(
@@ -226,47 +222,71 @@ public final class StatementBinder {
             }
 
             StructType rowType =
-                new StructType(inlineFqn, fields, Optional.empty());
+                new StructType(inlineFqn, fields, List.of(), Optional.empty());
 
-            bindings.put(inline, rowType);
+            bindings.put(structDecl, rowType);
             return rowType;
         }
 
-        // REF STRUCT
-        if (member instanceof StreamMemberRefDecl refDecl) {
-            Object resolved = bindings.get(refDecl.ref());
-
-            if (!(resolved instanceof StructDecl structDecl)) {
-                diags.error(
-                    refDecl.ref().range(),
-                    DiagnosticKind.TYPE,
-                    DiagnosticCode.INVALID_TYPE_REF,
-                    "TypeRefNode not bound to StructDecl"
-                );
-                return null;
-            }
-
-            // Get the pre-built runtime type from TypeBuilder
-            StructType rowType = bindings.getOrNull(structDecl, StructType.class);
-            if (rowType == null) {
-                // Fallback if TypeBuilder didn't run (shouldn't happen)
-                // Get the Name from symbols
-                Name structName = symbols.nameOf(structDecl).orElseThrow(() ->
-                    new IllegalStateException("StructDecl not in symbol table")
-                );
-                rowType = ComplexTypeFactory.fromStructDecl(structDecl, structName, diags);
+        // Handle DerivedTypeDecl - resolve to the actual referenced type
+        if (typeDecl.kind() instanceof DerivedTypeDecl derivedType) {
+            // Get the referenced TypeDecl from bindings (set by TypeResolver)
+            Object resolved = bindings.get(derivedType.target());
+            if (resolved instanceof TypeDecl referencedTypeDecl) {
+                // Get the runtime type for the referenced declaration
+                StructType baseRowType = bindings.getOrNull(referencedTypeDecl, StructType.class);
+                if (baseRowType != null && referencedTypeDecl.kind() instanceof StructDecl refStructDecl) {
+                    // Need to rebuild StructType with defaults from DefaultBinder
+                    // The defaults are stored in bindings keyed by StructFieldDecl
+                    LinkedHashMap<String, StructTypeField> fieldsWithDefaults = new LinkedHashMap<>();
+                    
+                    for (StructFieldDecl fieldDecl : refStructDecl.fields()) {
+                        String fieldName = fieldDecl.name().name();
+                        StructTypeField baseField = baseRowType.fields().get(fieldName);
+                        
+                        if (baseField != null) {
+                            // Check if DefaultBinder stored a default for this field
+                            Object defaultValue = bindings.getOrNull(fieldDecl, Object.class);
+                            
+                            StructTypeField fieldWithDefault = new StructTypeField(
+                                baseField.name(),
+                                baseField.type(),
+                                baseField.nullable(),
+                                defaultValue != null ? Optional.of(defaultValue) : baseField.defaultValue(),
+                                baseField.doc()
+                            );
+                            
+                            fieldsWithDefaults.put(fieldName, fieldWithDefault);
+                        }
+                    }
+                    
+                    StructType rowType = new StructType(
+                        baseRowType.fqn(),
+                        fieldsWithDefaults,
+                        baseRowType.constraints(),
+                        baseRowType.doc()
+                    );
+                    
+                    bindings.put(typeDecl, rowType);
+                    return rowType;
+                }
             }
             
-            bindings.put(refDecl, rowType);
-            return rowType;
+            diags.error(
+                member.range(),
+                DiagnosticKind.SEMANTIC,
+                DiagnosticCode.INTERNAL_ERROR,
+                "Could not resolve derived type reference: " + derivedType.target()
+            );
+            return null;
         }
 
         diags.error(
             member.range(),
             DiagnosticKind.SEMANTIC,
             DiagnosticCode.INTERNAL_ERROR,
-            "Unsupported stream member type: " +
-                member.getClass().getSimpleName()
+            "Stream member type must be a STRUCT or reference to STRUCT, got: " +
+                typeDecl.kind().getClass().getSimpleName()
         );
         return null;
     }
@@ -373,29 +393,44 @@ public final class StatementBinder {
         StreamDecl streamDecl,
         SymbolTable symbols
     ) {
+        TypeDecl typeDecl = member.memberDecl();
+        
         // For inline structs, check the inline field declarations
-        if (member instanceof StreamMemberInlineDecl inline) {
-            for (StructFieldDecl f : inline.fields()) {
+        if (typeDecl.kind() instanceof StructDecl structDecl) {
+            for (StructFieldDecl f : structDecl.fields()) {
                 if (f.name().name().equals(fieldName)) {
-                    return f.defaultValue().isPresent();
+                    return f.fragments().stream().anyMatch(frag -> frag instanceof DefaultNode);
                 }
             }
             return false;
         }
         
-        // For ref structs, need to find the StructDecl
-        if (member instanceof StreamMemberRefDecl refDecl) {
-            ComplexTypeNode typeRef = refDecl.ref();
-            QName qname = typeRef.name();
-            Name typeName = Name.of(qname.context(), qname.name());
-            Optional<StructDecl> opt = symbols.lookupStruct(typeName);
-            
-            if (opt.isPresent()) {
-                StructDecl structDecl = opt.get();
+        // For derived types, resolve to the actual referenced type
+        if (typeDecl.kind() instanceof DerivedTypeDecl derivedType) {
+            // Look up the referenced type
+            Optional<TypeDecl> refTypeOpt = symbols.lookupType(toName(derivedType.target().name()));
+            if (refTypeOpt.isPresent() && refTypeOpt.get().kind() instanceof StructDecl structDecl) {
                 for (StructFieldDecl f : structDecl.fields()) {
                     if (f.name().name().equals(fieldName)) {
-                        return f.defaultValue().isPresent();
+                        return f.fragments().stream().anyMatch(frag -> frag instanceof DefaultNode);
                     }
+                }
+            }
+            return false;
+        }
+        
+        // Fallback: try to look up in symbols using stream.member name
+        // (This path might not be needed anymore with proper DerivedTypeDecl handling)
+        String streamFqn = streamDecl.name().name();
+        String memberName = member.name().name();
+        Name lookupName = Name.of(streamFqn, memberName);
+        
+        Optional<StructDecl> opt = symbols.lookupStruct(lookupName);
+        if (opt.isPresent()) {
+            StructDecl structDecl = opt.get();
+            for (StructFieldDecl f : structDecl.fields()) {
+                if (f.name().name().equals(fieldName)) {
+                    return f.fragments().stream().anyMatch(frag -> frag instanceof DefaultNode);
                 }
             }
         }
@@ -411,14 +446,6 @@ public final class StatementBinder {
         if (t == null) return "<null>";
         if (t instanceof ComplexType ct) return ct.fqn().toString();
         return t.getClass().getSimpleName();
-    }
-
-    private static Optional<String> extractDoc(TypedOptional<DocNode> docNode) {
-        if (docNode.isEmpty()) {
-            return Optional.empty();
-        } else {
-            return Optional.of(docNode.get().comment());
-        }
     }
 
     private static Name toName(QName q) {

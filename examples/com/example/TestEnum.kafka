@@ -2,15 +2,15 @@ INCLUDE 'com/example.kafka';
 
 USE CONTEXT com.example;
 
-CREATE ENUM TestEnum (
-    A: 1
+CREATE TYPE TestEnum AS ENUM (
+    A = 1
     COMMENT 'Test comment for enum symbol C',
 
-    B: 2
+    B = 2
     COMMENT 'Test comment for enum symbol B',
 
-    C: 3
+    C = 3
     COMMENT 'Test comment for enum symbol C'
 )
-DEFAULT (TestEnum::A)
+DEFAULT TestEnum::A
 COMMENT 'Test comment for enum';

@@ -1,15 +1,16 @@
 package kafkasql.lang.semantic.bind;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Optional;
 
-import kafkasql.lang.TypedOptional;
 import kafkasql.lang.diagnostics.Diagnostics;
 import kafkasql.lang.semantic.BindingEnv;
 import kafkasql.lang.semantic.factory.ComplexTypeFactory;
 import kafkasql.lang.semantic.factory.TypeFactory;
 import kafkasql.lang.semantic.symbol.SymbolTable;
 import kafkasql.lang.syntax.ast.Script;
+import kafkasql.lang.syntax.ast.decl.DerivedTypeDecl;
 import kafkasql.lang.syntax.ast.decl.EnumDecl;
 import kafkasql.lang.syntax.ast.decl.ScalarDecl;
 import kafkasql.lang.syntax.ast.decl.StructDecl;
@@ -17,8 +18,8 @@ import kafkasql.lang.syntax.ast.decl.StructFieldDecl;
 import kafkasql.lang.syntax.ast.decl.TypeDecl;
 import kafkasql.lang.syntax.ast.decl.UnionDecl;
 import kafkasql.lang.syntax.ast.decl.UnionMemberDecl;
-import kafkasql.lang.syntax.ast.fragment.DocNode;
 import kafkasql.lang.syntax.ast.stmt.CreateStmt;
+import kafkasql.lang.semantic.util.FragmentUtils;
 import kafkasql.lang.syntax.ast.stmt.Stmt;
 import kafkasql.lang.syntax.ast.type.ComplexTypeNode;
 import kafkasql.lang.syntax.ast.type.ListTypeNode;
@@ -116,11 +117,20 @@ public final class TypeBuilder {
             );
 
             // Build the runtime type
-            AnyType runtimeType = switch (decl) {
-                case StructDecl s -> buildStructType(s, declName);
-                case EnumDecl e -> ComplexTypeFactory.fromEnumDecl(e, declName, diags);
-                case ScalarDecl sc -> ComplexTypeFactory.fromScalarDecl(sc, declName);
-                case UnionDecl u -> buildUnionType(u, declName);
+            AnyType runtimeType = switch (decl.kind()) {
+                case StructDecl s -> buildStructType(decl, s, declName);
+                case EnumDecl e -> ComplexTypeFactory.fromEnumDecl(declName, e, decl.fragments(), diags);
+                case ScalarDecl sc -> buildScalarType(decl, sc, declName);
+                case UnionDecl u -> buildUnionType(decl, u, declName);
+                case DerivedTypeDecl d -> {
+                    // For derived types, resolve the target reference
+                    Object resolved = bindings.get(d.target());
+                    if (resolved instanceof TypeDecl targetDecl) {
+                        // Recursively build the target type
+                        yield buildRuntimeType(targetDecl);
+                    }
+                    throw new IllegalStateException("DerivedType target not resolved: " + d.target());
+                }
             };
 
             // Cache it in bindings
@@ -132,7 +142,7 @@ public final class TypeBuilder {
         /**
          * Build a StructType, recursively building field types.
          */
-        private StructType buildStructType(StructDecl decl, Name declName) {
+        private StructType buildStructType(TypeDecl typeDecl, StructDecl decl, Name declName) {
             
             LinkedHashMap<String, StructTypeField> fields = new LinkedHashMap<>();
             
@@ -145,25 +155,82 @@ public final class TypeBuilder {
                 StructTypeField field = new StructTypeField(
                     f.name().name(),
                     fieldType,
-                    f.nullable(),
+                    f.nullable().isPresent(),
                     Optional.empty(),  // No default yet
-                    extractDoc(f.doc())
+                    FragmentUtils.extractDoc(f.fragments(), diags)
                 );
                 
                 fields.put(field.name(), field);
             }
             
+            // Build temporary struct without constraints for field resolution
+            StructType tempStruct = new StructType(
+                declName,
+                fields,
+                List.of(),
+                FragmentUtils.extractDoc(typeDecl.fragments(), diags)
+            );
+            
+            // Now bind constraints with full field context
+            List<kafkasql.runtime.type.CheckConstraint> constraints = 
+                ConstraintBinder.bindStructChecks(
+                    typeDecl,
+                    decl,
+                    tempStruct,
+                    symbols,
+                    bindings,
+                    diags
+                );
+            
             return new StructType(
                 declName,
                 fields,
-                extractDoc(decl.doc())
+                constraints,
+                FragmentUtils.extractDoc(typeDecl.fragments(), diags)
+            );
+        }
+        
+        /**
+         * Build a ScalarType with CHECK constraint.
+         */
+        private ScalarType buildScalarType(TypeDecl typeDecl, ScalarDecl decl, Name declName) {
+            
+            // Get the base primitive type
+            PrimitiveType primitiveType = ComplexTypeFactory.fromScalarDecl(
+                declName, 
+                decl, 
+                typeDecl.fragments(), 
+                diags
+            ).primitive();
+            
+            // Extract doc and default
+            Optional<String> doc = FragmentUtils.extractDoc(typeDecl.fragments(), diags);
+            Optional<Object> defaultValue = FragmentUtils.extractDefault(typeDecl.fragments(), diags);
+            
+            // Bind CHECK constraint
+            Optional<kafkasql.runtime.type.CheckConstraint> checkConstraint = 
+                ConstraintBinder.bindScalarCheck(
+                    typeDecl,
+                    decl,
+                    primitiveType,
+                    symbols,
+                    bindings,
+                    diags
+                );
+            
+            return new ScalarType(
+                declName,
+                primitiveType,
+                defaultValue,
+                checkConstraint,
+                doc
             );
         }
 
         /**
          * Build a UnionType, recursively building member types.
          */
-        private UnionType buildUnionType(UnionDecl decl, Name declName) {
+        private UnionType buildUnionType(TypeDecl typeDecl, UnionDecl decl, Name declName) {
             
             LinkedHashMap<String, UnionTypeMember> members = new LinkedHashMap<>();
             
@@ -173,7 +240,7 @@ public final class TypeBuilder {
                 UnionTypeMember member = new UnionTypeMember(
                     m.name().name(),
                     memberType,
-                    extractDoc(m.doc())
+                    FragmentUtils.extractDoc(m.fragments(), diags)
                 );
                 
                 members.put(member.name(), member);
@@ -182,7 +249,7 @@ public final class TypeBuilder {
             return new UnionType(
                 declName,
                 members,
-                extractDoc(decl.doc())
+                FragmentUtils.extractDoc(typeDecl.fragments(), diags)
             );
         }
 
@@ -244,14 +311,6 @@ public final class TypeBuilder {
             
             // Primitive type - use TypeFactory
             return TypeFactory.fromAst(typeNode);
-        }
-
-        private static Optional<String> extractDoc(TypedOptional<DocNode> docNode) {
-            if (docNode.isEmpty()) {
-                return Optional.empty();
-            } else {
-                return Optional.of(docNode.get().comment());
-            }
         }
     }
 }

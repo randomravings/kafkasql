@@ -1,0 +1,2 @@
+CREATE SCALAR TestScalar
+TYPE INT32;

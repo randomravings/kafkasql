@@ -2,45 +2,29 @@ package kafkasql.lang.syntax;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.function.Function;
 
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.tree.TerminalNode;
 
-import kafkasql.lang.TypedList;
-import kafkasql.lang.TypedOptional;
+import groovyjarjarantlr4.v4.runtime.Token;
+import kafkasql.lang.diagnostics.DiagnosticCode;
+import kafkasql.lang.diagnostics.DiagnosticKind;
+import kafkasql.lang.diagnostics.Diagnostics;
 import kafkasql.lang.diagnostics.Pos;
 import kafkasql.lang.diagnostics.Range;
+import kafkasql.lang.lex.SqlStreamLexer;
 import kafkasql.lang.parse.SqlStreamParser;
 import kafkasql.lang.parse.SqlStreamParserBaseVisitor;
-import kafkasql.lang.parse.SqlStreamParser.IncludePragmaContext;
 import kafkasql.lang.syntax.ast.*;
-import kafkasql.lang.syntax.ast.decl.ContextDecl;
-import kafkasql.lang.syntax.ast.decl.Decl;
-import kafkasql.lang.syntax.ast.decl.EnumDecl;
-import kafkasql.lang.syntax.ast.decl.EnumSymbolDecl;
-import kafkasql.lang.syntax.ast.decl.ScalarDecl;
-import kafkasql.lang.syntax.ast.decl.StreamDecl;
-import kafkasql.lang.syntax.ast.decl.StreamMemberDecl;
-import kafkasql.lang.syntax.ast.decl.StreamMemberInlineDecl;
-import kafkasql.lang.syntax.ast.decl.StreamMemberRefDecl;
-import kafkasql.lang.syntax.ast.decl.StructDecl;
-import kafkasql.lang.syntax.ast.decl.StructFieldDecl;
-import kafkasql.lang.syntax.ast.decl.TypeDecl;
-import kafkasql.lang.syntax.ast.decl.UnionDecl;
-import kafkasql.lang.syntax.ast.decl.UnionMemberDecl;
+import kafkasql.lang.syntax.ast.constExpr.*;
+import kafkasql.lang.syntax.ast.decl.*;
 import kafkasql.lang.syntax.ast.expr.*;
-import kafkasql.lang.syntax.ast.fragment.CheckNode;
-import kafkasql.lang.syntax.ast.fragment.DistributeNode;
-import kafkasql.lang.syntax.ast.fragment.DocNode;
-import kafkasql.lang.syntax.ast.fragment.ProjectionExprNode;
-import kafkasql.lang.syntax.ast.fragment.ProjectionNode;
-import kafkasql.lang.syntax.ast.fragment.WhereNode;
+import kafkasql.lang.syntax.ast.fragment.*;
 import kafkasql.lang.syntax.ast.literal.*;
 import kafkasql.lang.syntax.ast.misc.*;
 import kafkasql.lang.syntax.ast.stmt.*;
 import kafkasql.lang.syntax.ast.type.*;
-import kafkasql.lang.syntax.ast.use.ContextUse;
+import kafkasql.lang.syntax.ast.use.*;
 
 /**
  * AstBuilder
@@ -64,7 +48,7 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         parser.setTrace(args.trace());
 
         SqlStreamParser.ScriptContext script = parser.script();
-        AstBuilder builder = new AstBuilder(args.source());
+        AstBuilder builder = new AstBuilder(args.source(), args.diags());
         return builder.visitScript(script);
     }
 
@@ -82,7 +66,7 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         parser.setTrace(args.trace());
 
         SqlStreamParser.ScriptContext script = parser.script();
-        AstBuilder builder = new AstBuilder(args.source());
+        AstBuilder builder = new AstBuilder(args.source(), args.diags());
         if (script.includeSection() != null) {
             for (SqlStreamParser.IncludePragmaContext ic : script.includeSection().includePragma()) {
                 Include include = builder.visitIncludePragma(ic);
@@ -94,8 +78,11 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
     private static class AstBuilder extends SqlStreamParserBaseVisitor<AstNode> {
         private final String _source;
-        public AstBuilder(String source) {
+        private final Diagnostics _diags;
+        
+        public AstBuilder(String source, Diagnostics diags) {
             this._source = source;
+            this._diags = diags;
         }
 
         // ========================================================================
@@ -104,15 +91,19 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         @Override
         public Script visitScript(SqlStreamParser.ScriptContext ctx) {
-            TypedList<Include> includes = new TypedList<>(Include.class);
-            TypedList<Stmt> stmts = new TypedList<>(Stmt.class);
-            if (ctx.includeSection() != null)
-                for (IncludePragmaContext inc : ctx.includeSection().includePragma())
-                    includes.add(visitIncludePragma(inc));
-            for (SqlStreamParser.StatementContext sc : ctx.statement()) {
-                stmts.add(visitStatement(sc));
-            }
+            AstListNode<Include> includes = visitIncludeSection(ctx.includeSection());
+            AstListNode<Stmt> stmts = visitStatementList(ctx.statementList());
             return new Script(range(ctx), includes, stmts);
+        }
+
+        @Override
+        public AstListNode<Include> visitIncludeSection(SqlStreamParser.IncludeSectionContext ctx) {
+            AstListNode<Include> includes = new AstListNode<>(Include.class);
+            if (ctx == null)
+                return includes;
+            for (SqlStreamParser.IncludePragmaContext ic : ctx.includePragma())
+                includes.add(visitIncludePragma(ic));
+            return includes;
         }
 
         @Override
@@ -120,6 +111,16 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             Range range = range(ctx);
             String path = unquote(ctx.STRING_LIT().getText());
             return new Include(range, path);
+        }
+
+        @Override
+        public AstListNode<Stmt> visitStatementList(SqlStreamParser.StatementListContext ctx) {
+            AstListNode<Stmt> stmts = new AstListNode<>(Stmt.class);
+            if (ctx == null)
+                return stmts;
+            for (SqlStreamParser.StatementContext sc : ctx.statement())
+                stmts.add(visitStatement(sc));
+            return stmts;
         }
 
         @Override
@@ -132,7 +133,13 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
                 return visitWriteStmt(ctx.writeStmt());
             if (ctx.createStmt() != null)
                 return visitCreateStmt(ctx.createStmt());
-            throw new IllegalStateException("Unknown statement kind: " + ctx.getText());
+            
+            // Syntax error - report and return placeholder
+            Range range = range(ctx);
+            reportSyntaxError(range, "Expected USE, READ, WRITE, or CREATE statement");
+            Identifier errorId = new Identifier(range, "<error>");
+            QName errorQName = QName.of(errorId);
+            return new UseStmt(range, new ContextUse(range, errorQName));
         }
 
         // ========================================================================
@@ -140,7 +147,7 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         // ========================================================================
 
         @Override
-        public DocNode visitCommentClause(SqlStreamParser.CommentClauseContext ctx) {
+        public DocNode visitCommentFragment(SqlStreamParser.CommentFragmentContext ctx) {
             Range range = range(ctx);
             String raw = ctx.STRING_LIT().getText();
             int closingIndent = ctx.COMMENT().getSymbol().getCharPositionInLine();
@@ -149,13 +156,11 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             return new DocNode(range, norm);
         }
 
-        private <C extends ParserRuleContext, T extends AstNode> TypedOptional<T> opt(
-                C ctx,
-                Function<C, T> fn,
-                Class<T> clazz) {
-            if (ctx == null)
-                return TypedOptional.empty(clazz);
-            return TypedOptional.of(fn.apply(ctx), clazz);
+        @Override
+        public DefaultNode visitDefaultFragment(SqlStreamParser.DefaultFragmentContext ctx) {
+            Range range = range(ctx);
+            LiteralNode value = visitLiteral(ctx.literal());
+            return new DefaultNode(range, value);
         }
 
         // ========================================================================
@@ -193,25 +198,20 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
                 return visitTypeDecl(ctx.typeDecl());
             if (ctx.streamDecl() != null)
                 return visitStreamDecl(ctx.streamDecl());
-            throw new IllegalStateException("Unknown decl: " + ctx.getText());
+            
+            // Syntax error - report and return placeholder
+            Range range = range(ctx);
+            reportSyntaxError(range, "Expected CONTEXT, TYPE, or STREAM declaration");
+            Identifier errorName = new Identifier(range, "<error>");
+            return new ContextDecl(range, errorName, new AstListNode<>(DeclFragment.class));
         }
 
         @Override
         public ContextDecl visitContextDecl(SqlStreamParser.ContextDeclContext ctx) {
             Range range = range(ctx);
             Identifier name = visitContextName(ctx.contextName());
-            TypedOptional<DocNode> doc = TypedOptional.empty(DocNode.class);
-            for (SqlStreamParser.ContextTailContext tc : ctx.contextTail()) {
-                if (tc.commentClause() != null) {
-                    if (doc.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple COMMENT clauses in context: " + name.name());
-                    }
-                    var value = visitCommentClause(tc.commentClause());
-                    doc = TypedOptional.of(value, DocNode.class);
-                }
-            }
-            return new ContextDecl(range, name, doc);
+            AstListNode<DeclFragment> fragments = visitDeclTailFragments(ctx.declTailFragments());
+            return new ContextDecl(range, name, fragments);
         }
 
         @Override
@@ -221,6 +221,20 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         @Override
         public TypeDecl visitTypeDecl(SqlStreamParser.TypeDeclContext ctx) {
+            Range range = range(ctx);
+            Identifier name = visitTypeName(ctx.typeName());
+            TypeKindDecl typeKindDecl = visitTypeKindDecl(ctx.typeKindDecl());
+            AstListNode<DeclFragment> fragments = visitDeclTailFragments(ctx.declTailFragments());
+            return new TypeDecl(range, name, typeKindDecl, fragments);
+        }
+
+        @Override
+        public Identifier visitTypeName(SqlStreamParser.TypeNameContext ctx) {
+            return visitIdentifier(ctx.identifier());
+        }
+
+        @Override
+        public TypeKindDecl visitTypeKindDecl(SqlStreamParser.TypeKindDeclContext ctx) {
             if (ctx.scalarDecl() != null)
                 return visitScalarDecl(ctx.scalarDecl());
             if (ctx.enumDecl() != null)
@@ -229,7 +243,16 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
                 return visitStructDecl(ctx.structDecl());
             if (ctx.unionDecl() != null)
                 return visitUnionDecl(ctx.unionDecl());
-            throw new IllegalStateException("Unknown typeDecl: " + ctx.getText());
+            if (ctx.derivedType() != null)
+                return visitDerivedType(ctx.derivedType());
+            
+            // Syntax error - report and return placeholder
+            Range range = range(ctx);
+            reportSyntaxError(range, "Expected SCALAR, ENUM, STRUCT, UNION, or type reference");
+            Identifier errorId = new Identifier(range, "<error>");
+            QName errorQName = QName.of(errorId);
+            ComplexTypeNode errorType = new ComplexTypeNode(range, errorQName);
+            return new DerivedTypeDecl(range, errorType);
         }
 
         // ========================================================================
@@ -239,10 +262,9 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         @Override
         public QName visitQname(SqlStreamParser.QnameContext ctx) {
             Range range = range(ctx);
-            TypedList<Identifier> parts = new TypedList<>(Identifier.class);
-            for (SqlStreamParser.IdentifierContext ic : ctx.identifier()) {
+            AstListNode<Identifier> parts = new AstListNode<>(Identifier.class);
+            for (SqlStreamParser.IdentifierContext ic : ctx.identifier())
                 parts.add(visitIdentifier(ic));
-            }
             return new QName(range, parts);
         }
 
@@ -258,6 +280,60 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         }
 
         // ========================================================================
+        // DECLARATION TAIL FRAGMENTS
+        // ========================================================================
+
+        @Override
+        public AstListNode<DeclFragment> visitDeclTailFragments(SqlStreamParser.DeclTailFragmentsContext ctx) {
+            AstListNode<DeclFragment> fragments = new AstListNode<>(DeclFragment.class);
+            if (ctx == null)
+                return fragments;
+            for (SqlStreamParser.DeclTailFragmentContext dtfc : ctx.declTailFragment())
+                fragments.add(visitDeclTailFragment(dtfc));
+            return fragments;
+        }
+
+        @Override
+        public DeclFragment visitDeclTailFragment(SqlStreamParser.DeclTailFragmentContext ctx) {
+            if (ctx.commentFragment() != null)
+                return visitCommentFragment(ctx.commentFragment());
+            if (ctx.constraintFragment() != null)
+                return visitConstraintFragment(ctx.constraintFragment());
+            if (ctx.namedConstraintFragment() != null)
+                return visitNamedConstraintFragment(ctx.namedConstraintFragment());
+            if (ctx.distributeFragment() != null)
+                return visitDistributeFragment(ctx.distributeFragment());
+            if (ctx.timestampFragment() != null)
+                return visitTimestampFragment(ctx.timestampFragment());
+            
+            // Syntax error - report and return placeholder
+            Range range = range(ctx);
+            reportSyntaxError(range, "Invalid declaration fragment");
+            return new DocNode(range, "");
+        }
+
+        @Override
+        public DeclFragment visitConstraintFragment(SqlStreamParser.ConstraintFragmentContext ctx) {
+            if (ctx.defaultFragment() != null)
+                return visitDefaultFragment(ctx.defaultFragment());
+            if (ctx.checkFragment() != null)
+                return visitCheckFragment(ctx.checkFragment());
+            
+            // Syntax error - report and return placeholder
+            Range range = range(ctx);
+            reportSyntaxError(range, "Expected DEFAULT or CHECK constraint");
+            return new DocNode(range, "");
+        }
+
+        @Override
+        public ConstraintNode visitNamedConstraintFragment(SqlStreamParser.NamedConstraintFragmentContext ctx) {
+            Range range = range(ctx);
+            Identifier name = visitIdentifier(ctx.identifier());
+            DeclFragment fragment = visitConstraintFragment(ctx.constraintFragment());
+            return new ConstraintNode(range, name, fragment);
+        }
+
+        // ========================================================================
         // TYPES
         // ========================================================================
 
@@ -269,7 +345,12 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
                 return visitCompositeType(ctx.compositeType());
             if (ctx.typeReference() != null)
                 return visitTypeReference(ctx.typeReference());
-            throw new IllegalStateException("Unknown type: " + ctx.getText());
+            
+            // Syntax error - report and return placeholder type reference
+            Range range = range(ctx);
+            reportSyntaxError(range, "Expected primitive, composite, or named type");
+            Identifier errorId = new Identifier(range, "<error>");
+            return new ComplexTypeNode(range, QName.of(errorId));
         }
 
         @Override
@@ -304,7 +385,11 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
                 return visitTimestampType(ctx.timestampType());
             if (ctx.timestampTzType() != null)
                 return visitTimestampTzType(ctx.timestampTzType());
-            throw new IllegalStateException("Unknown primitiveType: " + ctx.getText());
+            
+            // Syntax error - report and return placeholder string type
+            Range range = range(ctx);
+            reportSyntaxError(range, "Unknown primitive type");
+            return PrimitiveTypeNode.string(range, 0L);
         }
 
         @Override
@@ -413,7 +498,13 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
                 return visitListType(ctx.listType());
             if (ctx.mapType() != null)
                 return visitMapType(ctx.mapType());
-            throw new IllegalStateException("Unknown compositeType: " + ctx.getText());
+            
+            // Syntax error - report and return placeholder list type
+            Range range = range(ctx);
+            reportSyntaxError(range, "Expected LIST or MAP composite type");
+            Identifier errorId = new Identifier(range, "<error>");
+            TypeNode errorElementType = new ComplexTypeNode(range, QName.of(errorId));
+            return new ListTypeNode(range, errorElementType);
         }
 
         @Override
@@ -440,67 +531,15 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         @Override
         public ScalarDecl visitScalarDecl(SqlStreamParser.ScalarDeclContext ctx) {
             Range range = range(ctx);
-            Identifier name = visitScalarName(ctx.scalarName());
-            PrimitiveTypeNode base = visitPrimitiveType(ctx.primitiveType());
-            TypedOptional<LiteralNode> defaultValue = TypedOptional.empty(LiteralNode.class);
-            TypedOptional<CheckNode> check = TypedOptional.empty(CheckNode.class);
-            TypedOptional<DocNode> doc = TypedOptional.empty(DocNode.class);
-
-            for (SqlStreamParser.ScalarTailContext tc : ctx.scalarTail()) {
-                if (tc.scalarDefault() != null) {
-                    if (defaultValue.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple DEFAULT clauses in scalar: " + name.name());
-                    }
-                    var value = visitScalarDefault(tc.scalarDefault());
-                    defaultValue = TypedOptional.of(value, LiteralNode.class);
-                    continue;
-                }
-                if (tc.scalarCheck() != null) {
-                    if (check.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple CHECK clauses in scalar: " + name.name());
-                    }
-                    var value = visitScalarCheck(tc.scalarCheck());
-                    check = TypedOptional.of(value, CheckNode.class);
-                    continue;
-                }
-                if (tc.commentClause() != null) {
-                    if (doc.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple COMMENT clauses in scalar: " + name.name());
-                    }
-                    var value = visitCommentClause(tc.commentClause());
-                    doc = TypedOptional.of(value, DocNode.class);
-                    continue;
-                }
-            }
-
-            return new ScalarDecl(range, name, base, defaultValue, check, doc);
+            TypeNode type = visitType(ctx.type());
+            return new ScalarDecl(range, type);
         }
 
         @Override
-        public Identifier visitScalarName(SqlStreamParser.ScalarNameContext ctx) {
-            return visitIdentifier(ctx.identifier());
-        }
-
-        @Override
-        public LiteralNode visitScalarDefault(SqlStreamParser.ScalarDefaultContext ctx) {
-            return visitLiteralValue(ctx.literalValue());
-        }
-
-        @Override
-        public CheckNode visitScalarCheck(SqlStreamParser.ScalarCheckContext ctx) {
+        public CheckNode visitCheckFragment(SqlStreamParser.CheckFragmentContext ctx) {
+            Range range = range(ctx);
             Expr expr = visitExpr(ctx.expr());
-
-            Identifier name = new Identifier(
-                    range(ctx),
-                    "scalar_check");
-
-            return new CheckNode(
-                    range(ctx),
-                    name,
-                    expr);
+            return new CheckNode(range, expr);
         }
 
         // ========================================================================
@@ -510,104 +549,123 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         @Override
         public EnumDecl visitEnumDecl(SqlStreamParser.EnumDeclContext ctx) {
             Range range = range(ctx);
-            Identifier name = visitEnumName(ctx.enumName());
-
-            TypedOptional<PrimitiveTypeNode> baseType = opt(
-                    ctx.enumBaseType(),
-                    this::visitEnumBaseType,
-                    PrimitiveTypeNode.class);
-
-            TypedList<EnumSymbolDecl> symbols = buildEnumSymbolList(ctx.enumSymbolList());
-
-            TypedOptional<EnumLiteralNode> defaultValue = TypedOptional.empty(EnumLiteralNode.class);
-            TypedOptional<DocNode> doc = TypedOptional.empty(DocNode.class);
-
-            // enumTail* -> { enumDefault | commentClause }
-            for (SqlStreamParser.EnumTailContext tc : ctx.enumTail()) {
-                if (tc.enumDefault() != null) {
-                    if (defaultValue.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple DEFAULT clauses in enum: " + name.name());
-                    }
-                    defaultValue = opt(
-                            tc.enumDefault(),
-                            this::visitEnumDefault,
-                            EnumLiteralNode.class);
-                } else if (tc.commentClause() != null) {
-                    if (doc.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple COMMENT clauses in enum: " + name.name());
-                    }
-                    doc = opt(
-                            tc.commentClause(),
-                            this::visitCommentClause,
-                            DocNode.class);
-                }
-            }
-
+            AstOptionalNode<TypeNode> base = visitEnumType(ctx.enumType());
+            AstListNode<EnumSymbolDecl> symbols = visitEnumSymbolList(ctx.enumSymbolList());
             return new EnumDecl(
-                    range,
-                    name,
-                    baseType,
-                    symbols,
-                    defaultValue,
-                    doc);
+                range,
+                base,
+                symbols
+            );
         }
 
         @Override
-        public Identifier visitEnumName(SqlStreamParser.EnumNameContext ctx) {
-            return visitIdentifier(ctx.identifier());
+        public AstOptionalNode<TypeNode> visitEnumType(SqlStreamParser.EnumTypeContext ctx) {
+            if (ctx.type() == null)
+                return AstOptionalNode.empty(TypeNode.class);
+            TypeNode type = visitType(ctx.type());
+            return AstOptionalNode.of(type, TypeNode.class);
         }
 
         @Override
-        public PrimitiveTypeNode visitEnumBaseType(SqlStreamParser.EnumBaseTypeContext ctx) {
-            Range range = range(ctx);
-            if (ctx.INT8() != null)
-                return PrimitiveTypeNode.int8(range);
-            if (ctx.INT16() != null)
-                return PrimitiveTypeNode.int16(range);
-            if (ctx.INT32() != null)
-                return PrimitiveTypeNode.int32(range);
-            if (ctx.INT64() != null)
-                return PrimitiveTypeNode.int64(range);
-            throw new IllegalStateException("Unknown enumBaseType: " + ctx.getText());
-        }
-
-        private TypedList<EnumSymbolDecl> buildEnumSymbolList(SqlStreamParser.EnumSymbolListContext ctx) {
-            TypedList<EnumSymbolDecl> list = new TypedList<>(EnumSymbolDecl.class);
-            for (SqlStreamParser.EnumSymbolContext ec : ctx.enumSymbol()) {
-                list.add(visitEnumSymbol(ec));
-            }
-            return list;
+        public AstListNode<EnumSymbolDecl> visitEnumSymbolList(SqlStreamParser.EnumSymbolListContext ctx) {
+            AstListNode<EnumSymbolDecl> symbols = new AstListNode<>(EnumSymbolDecl.class);
+            for (SqlStreamParser.EnumSymbolContext esc : ctx.enumSymbol())
+                symbols.add(visitEnumSymbol(esc));
+            return symbols;
         }
 
         @Override
         public EnumSymbolDecl visitEnumSymbol(SqlStreamParser.EnumSymbolContext ctx) {
             Range range = range(ctx);
-            TypedOptional<DocNode> doc = TypedOptional.empty(DocNode.class);
             Identifier name = visitIdentifier(ctx.identifier());
-            NumberLiteralNode value = new NumberLiteralNode(range, ctx.NUMBER_LIT().getText());
+            ConstExpr value = visitConstExpr(ctx.constExpr());
+            AstListNode<DeclFragment> fragments = visitDeclTailFragments(ctx.declTailFragments());
+            return new EnumSymbolDecl(range, name, value, fragments);
+        }
 
-            for (SqlStreamParser.EnumSymbolTailContext tc : ctx.enumSymbolTail()) {
-                if (tc.commentClause() != null) {
-                    if (doc.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple COMMENT clauses in enum symbol: " + name.name());
-                    }
-                    doc = opt(
-                            tc.commentClause(),
-                            this::visitCommentClause,
-                            DocNode.class);
-                }
+        // ========================================================================
+        // CONST EXPRESSIONS
+        // ========================================================================
+
+        @Override
+        public ConstExpr visitConstTerm(SqlStreamParser.ConstTermContext ctx) {
+
+            if (ctx.NUMBER_LIT() != null) {
+                return new ConstLiteralExpr(
+                    range(ctx),
+                    ctx.NUMBER_LIT().getText()
+                );
             }
 
-            return new EnumSymbolDecl(range, name, value, doc);
+            if (ctx.constSymbolRef() != null) {
+                return visitConstSymbolRef(ctx.constSymbolRef());
+            }
+
+            if (ctx.constExpr() != null) {
+                // Parenthesized expression
+                ConstExpr inner = visitConstExpr(ctx.constExpr());
+                return new ConstParenExpr(range(ctx), inner);
+            }
+
+            // Syntax error - report and return placeholder literal
+            Range range = range(ctx);
+            reportSyntaxError(range, "Expected constant literal, symbol reference, or parenthesized expression");
+            return new ConstLiteralExpr(range, "0");
         }
 
-        public EnumLiteralNode visitEnumDefault(SqlStreamParser.EnumDefaultContext ctx) {
-            return visitEnumLiteral(ctx.enumLiteral());
+        @Override
+        public ConstExpr visitConstSymbolRef(SqlStreamParser.ConstSymbolRefContext ctx) {
+            Identifier id = new Identifier(range(ctx), ctx.identifier().getText());
+            return new ConstSymbolRefExpr(range(ctx), id);
         }
 
+        @Override
+        public ConstExpr visitConstExpr(SqlStreamParser.ConstExprContext ctx) {
+
+            ConstExpr left = visitConstTerm(ctx.constTerm(0));
+
+            int opCount = ctx.getChildCount() - 1;
+            if (opCount <= 0)
+                return left;
+
+            int termIndex = 1;
+            for (int i = 1; i < ctx.getChildCount(); i += 2) {
+                Token tok = (Token) ctx.getChild(i).getPayload();
+                ConstBinaryOp op = toConstOp(tok);
+
+                ConstExpr right = visitConstTerm(ctx.constTerm(termIndex++));
+                left = new ConstBinaryExpr(range(ctx), left, right, op);
+            }
+
+            return left;
+        }
+
+        private ConstBinaryOp toConstOp(Token tok) {
+            return switch (tok.getType()) {
+
+                case SqlStreamLexer.PLUS      -> ConstBinaryOp.ADD;
+                case SqlStreamLexer.MINUS     -> ConstBinaryOp.SUB;
+                case SqlStreamLexer.STAR      -> ConstBinaryOp.MUL;
+                case SqlStreamLexer.SLASH     -> ConstBinaryOp.DIV;
+                case SqlStreamLexer.PERCENT   -> ConstBinaryOp.MOD;
+                case SqlStreamLexer.SHL       -> ConstBinaryOp.SHL;
+                case SqlStreamLexer.SHR       -> ConstBinaryOp.SHR;
+                case SqlStreamLexer.AMP       -> ConstBinaryOp.BITAND;
+                case SqlStreamLexer.PIPE      -> ConstBinaryOp.BITOR;
+                case SqlStreamLexer.XOR       -> ConstBinaryOp.BITXOR;
+                // Syntax error - report and return placeholder operator
+                default -> {
+                    Range tokRange = new Range(
+                        _source,
+                        new Pos(tok.getLine(), tok.getCharPositionInLine()),
+                        new Pos(tok.getLine(), tok.getCharPositionInLine() + tok.getText().length())
+                    );
+                    reportSyntaxError(tokRange, "Unknown operator: " + tok.getText());
+                    yield ConstBinaryOp.ADD;
+                }
+            };
+        }
+        
         // ========================================================================
         // StructDecl
         // ========================================================================
@@ -615,44 +673,16 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         @Override
         public StructDecl visitStructDecl(SqlStreamParser.StructDeclContext ctx) {
             Range range = range(ctx);
-            Identifier name = visitStructName(ctx.structName());
-            TypedList<StructFieldDecl> fields = buildFieldList(ctx.fieldList());
-            TypedList<CheckNode> checks = new TypedList<>(CheckNode.class);
-            TypedOptional<DocNode> doc = TypedOptional.empty(DocNode.class);
-
-            for (SqlStreamParser.StructTailContext tc : ctx.structTail()) {
-                if (tc.structCheck() != null) {
-                    var value = visitStructCheck(tc.structCheck());
-                    if (checks.stream().anyMatch(c -> c.name().name().equals(value.name().name()))) {
-                        throw new IllegalStateException(
-                                "Multiple CHECK clauses with same name in struct: " + name.name());
-                    }
-                } else if (tc.commentClause() != null) {
-                    if (doc != null && doc.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple COMMENT clauses in struct: " + name.name());
-                    }
-                    doc = opt(
-                            tc.commentClause(),
-                            this::visitCommentClause,
-                            DocNode.class);
-                }
-            }
-
-            return new StructDecl(range, name, fields, checks, doc);
-        }
-
-        private TypedList<StructFieldDecl> buildFieldList(SqlStreamParser.FieldListContext ctx) {
-            TypedList<StructFieldDecl> result = new TypedList<>(StructFieldDecl.class);
-            for (SqlStreamParser.FieldDeclContext fc : ctx.fieldDecl()) {
-                result.add(visitFieldDecl(fc));
-            }
-            return result;
+            AstListNode<StructFieldDecl> fields = visitFieldList(ctx.fieldList());
+            return new StructDecl(range, fields);
         }
 
         @Override
-        public Identifier visitStructName(SqlStreamParser.StructNameContext ctx) {
-            return visitIdentifier(ctx.identifier());
+        public AstListNode<StructFieldDecl> visitFieldList(SqlStreamParser.FieldListContext ctx) {
+            AstListNode<StructFieldDecl> fields = new AstListNode<>(StructFieldDecl.class);
+            for (SqlStreamParser.FieldDeclContext fdc : ctx.fieldDecl())
+                fields.add(visitFieldDecl(fdc));
+            return fields;
         }
 
         @Override
@@ -660,57 +690,18 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             Range range = range(ctx);
             Identifier name = visitIdentifier(ctx.identifier());
             TypeNode type = visitType(ctx.type());
-            Boolean nullable = null;
-            TypedOptional<DocNode> doc = TypedOptional.empty(DocNode.class);
-            TypedOptional<LiteralNode> defaultValue = TypedOptional.empty(LiteralNode.class);
+            AstOptionalNode<NullLiteralNode> nullable = visitNullableMarker(ctx.nullableMarker());
+            AstListNode<DeclFragment> fragments = visitDeclTailFragments(ctx.declTailFragments());
 
-            for (SqlStreamParser.FieldTailContext tc : ctx.fieldTail()) {
-                if (tc.fieldNullable() != null) {
-                    if (nullable != null) {
-                        throw new IllegalStateException(
-                                "Multiple NULLABLE / NOT NULLABLE clauses in field: " + name.name());
-                    }
-                    nullable = true;
-                } else if (tc.fieldDefault() != null) {
-                    if (defaultValue.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple DEFAULT clauses in field: " + name.name());
-                    }
-                    var value = visitFieldDefault(tc.fieldDefault());
-                    defaultValue = TypedOptional.of(value, LiteralNode.class);
-                } else if (tc.commentClause() != null) {
-                    if (doc.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple COMMENT clauses in field: " + name.name());
-                    }
-                    var value = visitCommentClause(tc.commentClause());
-                    doc = TypedOptional.of(value, DocNode.class);
-                }
-            }
-
-            if (nullable == null) {
-                nullable = false;
-            }
-
-            return new StructFieldDecl(range, name, type, nullable, defaultValue, doc);
-        }
-
-        public LiteralNode visitFieldDefault(SqlStreamParser.FieldDefaultContext ctx) {
-            return visitLiteral(ctx.literal());
+            return new StructFieldDecl(range, name, type, nullable, fragments);
         }
 
         @Override
-        public CheckNode visitStructCheck(SqlStreamParser.StructCheckContext ctx) {
-            Expr expr = visitExpr(ctx.expr());
-
-            Identifier name = new Identifier(
-                    range(ctx),
-                    "struct_check");
-
-            return new CheckNode(
-                    range(ctx),
-                    name,
-                    expr);
+        public AstOptionalNode<NullLiteralNode> visitNullableMarker(SqlStreamParser.NullableMarkerContext ctx) {
+            if (ctx == null)
+                return AstOptionalNode.empty(NullLiteralNode.class);
+            NullLiteralNode value = new NullLiteralNode(range(ctx));
+            return AstOptionalNode.of(value, NullLiteralNode.class);
         }
 
         // ========================================================================
@@ -720,47 +711,16 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         @Override
         public UnionDecl visitUnionDecl(SqlStreamParser.UnionDeclContext ctx) {
             Range range = range(ctx);
-            Identifier name = visitUnionName(ctx.unionName());
-            TypedList<UnionMemberDecl> members = buildUnionMemberList(ctx.unionMemberList());
-            TypedOptional<UnionLiteralNode> defaultValue = TypedOptional.empty(UnionLiteralNode.class);
-            TypedOptional<DocNode> doc = TypedOptional.empty(DocNode.class);
-
-            for (SqlStreamParser.UnionTailContext tc : ctx.unionTail()) {
-                if (tc.unionDefault() != null) {
-                    if (defaultValue.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple DEFAULT clauses in union: " + name.name());
-                    }
-                    defaultValue = opt(
-                            tc.unionDefault(),
-                            this::visitUnionDefault,
-                            UnionLiteralNode.class);
-                } else if (tc.commentClause() != null) {
-                    if (doc.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple COMMENT clauses in union: " + name.name());
-                    }
-                    doc = opt(
-                            tc.commentClause(),
-                            this::visitCommentClause,
-                            DocNode.class);
-                }
-            }
-
-            return new UnionDecl(range, name, members, defaultValue, doc);
+            AstListNode<UnionMemberDecl> members = visitUnionMemberList(ctx.unionMemberList());
+            return new UnionDecl(range, members);
         }
 
         @Override
-        public Identifier visitUnionName(SqlStreamParser.UnionNameContext ctx) {
-            return visitIdentifier(ctx.identifier());
-        }
-
-        private TypedList<UnionMemberDecl> buildUnionMemberList(SqlStreamParser.UnionMemberListContext ctx) {
-            TypedList<UnionMemberDecl> result = new TypedList<>(UnionMemberDecl.class);
-            for (SqlStreamParser.UnionMemberDeclContext uc : ctx.unionMemberDecl()) {
-                result.add(visitUnionMemberDecl(uc));
-            }
-            return result;
+        public AstListNode<UnionMemberDecl> visitUnionMemberList(SqlStreamParser.UnionMemberListContext ctx) {
+            AstListNode<UnionMemberDecl> members = new AstListNode<>(UnionMemberDecl.class);
+            for (SqlStreamParser.UnionMemberDeclContext umdc : ctx.unionMemberDecl())
+                members.add(visitUnionMemberDecl(umdc));
+            return members;
         }
 
         @Override
@@ -768,11 +728,19 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             Range range = range(ctx);
             Identifier name = visitIdentifier(ctx.identifier());
             TypeNode type = visitType(ctx.type());
-            return new UnionMemberDecl(range, name, type, TypedOptional.empty(DocNode.class));
+            AstListNode<DeclFragment> fragments = visitDeclTailFragments(ctx.declTailFragments());
+            return new UnionMemberDecl(range, name, type, fragments);
         }
 
-        public UnionLiteralNode visitUnionDefault(SqlStreamParser.UnionDefaultContext ctx) {
-            return visitUnionLiteral(ctx.unionLiteral());
+        // ========================================================================
+        // TYPE ALIAS
+        // ========================================================================
+
+        @Override
+        public DerivedTypeDecl visitDerivedType(SqlStreamParser.DerivedTypeContext ctx) {
+            Range range = range(ctx);
+            ComplexTypeNode targetName = visitTypeReference(ctx.typeReference());
+            return new DerivedTypeDecl(range, targetName);
         }
 
         // ========================================================================
@@ -783,23 +751,9 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         public StreamDecl visitStreamDecl(SqlStreamParser.StreamDeclContext ctx) {
             Range range = range(ctx);
             Identifier name = visitStreamName(ctx.streamName());
-            TypedList<StreamMemberDecl> members = buildStreamTypeDeclList(ctx.streamTypeDeclList());
-            TypedOptional<DocNode> doc = TypedOptional.empty(DocNode.class);
-
-            for (SqlStreamParser.StreamTailContext tc : ctx.streamTail()) {
-                if (tc.commentClause() != null) {
-                    if (doc.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple COMMENT clauses in stream: " + name.name());
-                    }
-                    doc = opt(
-                            tc.commentClause(),
-                            this::visitCommentClause,
-                            DocNode.class);
-                }
-            }
-
-            return new StreamDecl(range, name, members, doc);
+            AstListNode<StreamMemberDecl> members = visitStreamTypeDeclList(ctx.streamTypeDeclList());
+            AstListNode<DeclFragment> fragments = visitDeclTailFragments(ctx.declTailFragments());
+            return new StreamDecl(range, name, members, fragments);
         }
 
         @Override
@@ -807,90 +761,41 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             return visitIdentifier(ctx.identifier());
         }
 
-        private TypedList<StreamMemberDecl> buildStreamTypeDeclList(SqlStreamParser.StreamTypeDeclListContext ctx) {
-            TypedList<StreamMemberDecl> result = new TypedList<>(StreamMemberDecl.class);
-            for (SqlStreamParser.StreamTypeDeclContext sc : ctx.streamTypeDecl()) {
-                result.add(visitStreamTypeDecl(sc));
-            }
-            return result;
+        @Override
+        public AstListNode<StreamMemberDecl> visitStreamTypeDeclList(SqlStreamParser.StreamTypeDeclListContext ctx) {
+            AstListNode<StreamMemberDecl> members = new AstListNode<>(StreamMemberDecl.class);
+            for (SqlStreamParser.StreamTypeDeclContext stdc : ctx.streamTypeDecl())
+                members.add(visitStreamTypeDecl(stdc));
+            return members;
         }
 
         @Override
         public StreamMemberDecl visitStreamTypeDecl(SqlStreamParser.StreamTypeDeclContext ctx) {
             Range range = range(ctx);
-            Identifier name = visitStreamTypeName(ctx.streamTypeName());
-            TypedOptional<DocNode> doc = TypedOptional.empty(DocNode.class);
-            TypedOptional<DistributeNode> distribute = TypedOptional.empty(DistributeNode.class);
-            TypedOptional<Identifier> timestampField = TypedOptional.empty(Identifier.class);
-            TypedList<CheckNode> checks = new TypedList<>(CheckNode.class);
-
-            for (SqlStreamParser.StreamTypeTailContext tc : ctx.streamTypeTail()) {
-                if (tc.distributeClause() != null) {
-                    if (distribute.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple DISTRIBUTE clauses in stream member: " + name.name());
-                    }
-                    var value = visitDistributeClause(tc.distributeClause());
-                    distribute = TypedOptional.of(value, DistributeNode.class);
-                } else if (tc.timestampClause() != null) {
-                    if (timestampField.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple TIMESTAMP clauses in stream member: " + name.name());
-                    }
-                    var value = visitTimestampClause(tc.timestampClause());
-                    timestampField = TypedOptional.of(value, Identifier.class);
-                } else if (tc.commentClause() != null) {
-                    if (doc.isPresent()) {
-                        throw new IllegalStateException(
-                                "Multiple COMMENT clauses in stream member: " + name.name());
-                    }
-                    var value = visitCommentClause(tc.commentClause());
-                    doc = TypedOptional.of(value, DocNode.class);
-                }
-            }
-
-            if (ctx.streamTypeRef() != null) {
-                ComplexTypeNode ref = visitStreamTypeRef(ctx.streamTypeRef());
-                if (checks.size() > 0) {
-                    throw new IllegalStateException(
-                            "CHECK clauses are not allowed in stream member ref: " + name.name());
-                }
-                return new StreamMemberRefDecl(range, name, ref, distribute, timestampField, checks, doc);
-            }
-
-            if (ctx.streamTypeInline() != null) {
-                TypedList<StructFieldDecl> fields = buildStreamTypeInline(ctx.streamTypeInline());
-                return new StreamMemberInlineDecl(range, name, fields, distribute, timestampField, checks, doc);
-            }
-
-            throw new IllegalStateException("Unknown streamTypeDecl: " + ctx.getText());
-        }
-
-        public Identifier visitStreamTypeName(SqlStreamParser.StreamTypeNameContext ctx) {
-            return visitIdentifier(ctx.identifier());
+            TypeDecl memberDecl = visitTypeDecl(ctx.typeDecl());
+            AstListNode<DeclFragment> fragments = visitDeclTailFragments(ctx.declTailFragments());
+            
+            return new StreamMemberDecl(
+                range,
+                memberDecl,
+                fragments
+            );
         }
 
         @Override
-        public DistributeNode visitDistributeClause(SqlStreamParser.DistributeClauseContext ctx) {
+        public DistributeDecl visitDistributeFragment(SqlStreamParser.DistributeFragmentContext ctx) {
             Range range = range(ctx);
-            TypedList<Identifier> keys = new TypedList<>(Identifier.class);
-            for (SqlStreamParser.IdentifierContext ic : ctx.identifier()) {
-                keys.add(visitIdentifier(ic));
-            }
-            return new DistributeNode(range, keys);
+            AstListNode<Identifier> fields = new AstListNode<>(Identifier.class);
+            for (SqlStreamParser.IdentifierContext ic : ctx.identifier())
+                fields.add(visitIdentifier(ic));
+            return new DistributeDecl(range, fields);
         }
 
         @Override
-        public Identifier visitTimestampClause(SqlStreamParser.TimestampClauseContext ctx) {
-            return visitIdentifier(ctx.identifier());
-        }
-
-        public ComplexTypeNode visitStreamTypeRef(SqlStreamParser.StreamTypeRefContext ctx) {
-            return visitTypeReference(ctx.typeReference());
-        }
-
-        private TypedList<StructFieldDecl> buildStreamTypeInline(SqlStreamParser.StreamTypeInlineContext ctx) {
-            return buildFieldList(ctx.fieldList());
+        public TimestampDecl visitTimestampFragment(SqlStreamParser.TimestampFragmentContext ctx) {
+            Range range = range(ctx);
+            Identifier field = visitIdentifier(ctx.identifier());
+            return new TimestampDecl(range, field);
         }
 
         // ========================================================================
@@ -901,94 +806,79 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         public ReadStmt visitReadStmt(SqlStreamParser.ReadStmtContext ctx) {
             Range range = range(ctx);
             QName stream = visitQname(ctx.qname());
-            TypedList<ReadTypeBlock> blocks = buildReadBlockList(ctx.readBlockList());
+            AstListNode<ReadTypeBlock> blocks = visitReadBlockList(ctx.readBlockList());
             return new ReadStmt(range, stream, blocks);
         }
 
-        private TypedList<ReadTypeBlock> buildReadBlockList(SqlStreamParser.ReadBlockListContext ctx) {
-            TypedList<ReadTypeBlock> result = new TypedList<>(ReadTypeBlock.class);
-            for (SqlStreamParser.ReadBlockContext bc : ctx.readBlock()) {
-                result.add(buildReadBlock(bc));
-            }
-            return result;
+        @Override
+        public AstListNode<ReadTypeBlock> visitReadBlockList(SqlStreamParser.ReadBlockListContext ctx) {
+            AstListNode<ReadTypeBlock> blocks = new AstListNode<>(ReadTypeBlock.class);
+            for (SqlStreamParser.ReadBlockContext rbc : ctx.readBlock())
+                blocks.add(visitReadBlock(rbc));
+            return blocks;
         }
 
-        private ReadTypeBlock buildReadBlock(SqlStreamParser.ReadBlockContext ctx) {
+        @Override
+        public ReadTypeBlock visitReadBlock(SqlStreamParser.ReadBlockContext ctx) {
             Range range = range(ctx);
-            Identifier alias = visitStreamTypeName(ctx.streamTypeName());
+            Identifier alias = visitTypeName(ctx.typeName());
             ProjectionNode proj = visitReadProjection(ctx.readProjection());
-
-            TypedOptional<WhereNode> where = opt(
-                    ctx.whereClause(),
-                    this::visitWhereClause,
-                    WhereNode.class);
-
+            AstOptionalNode<WhereNode> where = visitWhereClause(ctx.whereClause());
             return new ReadTypeBlock(range, alias, proj, where);
         }
 
         public ProjectionNode visitReadProjection(SqlStreamParser.ReadProjectionContext ctx) {
             Range range = range(ctx);
-            TypedList<ProjectionExprNode> items = new TypedList<>(ProjectionExprNode.class);
-
+            AstListNode<ProjectionExprNode> items = new AstListNode<>(ProjectionExprNode.class);
             if (ctx.STAR() == null)
-                for (SqlStreamParser.ReadProjectionExprContext ec : ctx.readProjectionExpr())
-                    items.add(visitReadProjectionExpr(ec));
-
+                items = visitReadProjectionList(ctx.readProjectionList());
             return new ProjectionNode(range, items);
+        }
+
+        @Override
+        public AstListNode <ProjectionExprNode> visitReadProjectionList(SqlStreamParser.ReadProjectionListContext ctx) {
+            AstListNode<ProjectionExprNode> items = new AstListNode<>(ProjectionExprNode.class);
+            for (SqlStreamParser.ReadProjectionExprContext pex : ctx.readProjectionExpr())
+                items.add(visitReadProjectionExpr(pex));
+            return items;
         }
 
         public ProjectionExprNode visitReadProjectionExpr(SqlStreamParser.ReadProjectionExprContext ctx) {
             Range range = range(ctx);
             Expr e = visitExpr(ctx.expr());
-
-            TypedOptional<Identifier> alias = opt(
-                    ctx.fieldAlias(),
-                    this::visitFieldAlias,
-                    Identifier.class);
-
+            AstOptionalNode<Identifier> alias = visitFieldAlias(ctx.fieldAlias());
             return new ProjectionExprNode(range, e, alias);
         }
 
-        public Identifier visitFieldAlias(SqlStreamParser.FieldAliasContext ctx) {
-            return visitIdentifier(ctx.identifier());
+        public AstOptionalNode<Identifier> visitFieldAlias(SqlStreamParser.FieldAliasContext ctx) {
+            if (ctx == null)
+                return AstOptionalNode.empty(Identifier.class);
+            Identifier identifier = visitIdentifier(ctx.identifier());
+            return AstOptionalNode.of(identifier, Identifier.class);
         }
 
-        public WhereNode visitWhereClause(SqlStreamParser.WhereClauseContext ctx) {
-            return new WhereNode(range(ctx), visitExpr(ctx.expr()));
+        public AstOptionalNode<WhereNode> visitWhereClause(SqlStreamParser.WhereClauseContext ctx) {
+            if (ctx == null)
+                return AstOptionalNode.empty(WhereNode.class);
+            WhereNode node = new WhereNode(range(ctx), visitExpr(ctx.expr()));
+            return AstOptionalNode.of(node, WhereNode.class);
         }
 
         @Override
         public WriteStmt visitWriteStmt(SqlStreamParser.WriteStmtContext ctx) {
             Range range = range(ctx);
             QName stream = visitQname(ctx.qname());
-            Identifier alias = visitStreamTypeName(ctx.streamTypeName());
-            TypedList<StructLiteralNode> values = buildWriteValues(ctx.writeValues());
+            Identifier alias = visitTypeName(ctx.typeName());
+            AstListNode<StructLiteralNode> values = visitWriteValueList(ctx.writeValueList());
             return new WriteStmt(range, stream, alias, values);
         }
 
-        private TypedList<StructLiteralNode> buildWriteValues(SqlStreamParser.WriteValuesContext ctx) {
-            TypedList<StructLiteralNode> result = new TypedList<>(StructLiteralNode.class);
-            for (SqlStreamParser.StructLiteralContext sc : ctx.structLiteral()) {
-                result.add(visitStructLiteral(sc));
-            }
-            return result;
-        }
-
-        // ========================================================================
-        // CHECK
-        // ========================================================================
-
         @Override
-        public CheckNode visitCheckExpr(SqlStreamParser.CheckExprContext ctx) {
-            Range range = range(ctx);
-            Identifier name = visitCheckExprName(ctx.checkExprName());
-            Expr expr = visitExpr(ctx.expr());
-            return new CheckNode(range, name, expr);
-        }
-
-        @Override
-        public Identifier visitCheckExprName(SqlStreamParser.CheckExprNameContext ctx) {
-            return visitIdentifier(ctx.identifier());
+        public AstListNode<StructLiteralNode> visitWriteValueList(SqlStreamParser.WriteValueListContext ctx) {
+            AstListNode<StructLiteralNode> values = new AstListNode<>(StructLiteralNode.class);
+            for (SqlStreamParser.StructLiteralContext slc : ctx.structLiteral())
+                values.add(visitStructLiteral(slc));
+            return values;
         }
 
         // ========================================================================
@@ -1002,7 +892,7 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         @Override
         public Expr visitOrExpr(SqlStreamParser.OrExprContext ctx) {
-            TypedList<Expr> exprs = new TypedList<>(Expr.class);
+            AstListNode<Expr> exprs = new AstListNode<>(Expr.class);
             for (SqlStreamParser.AndExprContext ac : ctx.andExpr()) {
                 exprs.add(visitAndExpr(ac));
             }
@@ -1012,8 +902,19 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         }
 
         @Override
+        public Expr visitConcatExpr(SqlStreamParser.ConcatExprContext ctx) {
+            AstListNode<Expr> exprs = new AstListNode<>(Expr.class);
+            for (SqlStreamParser.ShiftExprContext sc : ctx.shiftExpr()) {
+                exprs.add(visitShiftExpr(sc));
+            }
+            if (exprs.size() == 1)
+                return exprs.getFirst();
+            return fold(exprs, InfixOp.CONCAT);
+        }
+
+        @Override
         public Expr visitAndExpr(SqlStreamParser.AndExprContext ctx) {
-            TypedList<Expr> exprs = new TypedList<>(Expr.class);
+            AstListNode<Expr> exprs = new AstListNode<>(Expr.class);
             for (SqlStreamParser.NotExprContext nc : ctx.notExpr()) {
                 exprs.add(visitNotExpr(nc));
             }
@@ -1034,8 +935,8 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         @Override
         public Expr visitCmpExpr(SqlStreamParser.CmpExprContext ctx) {
-            Expr result = visitShiftExpr(ctx.shiftExpr(0));
-            int shiftIndex = 1;
+            Expr result = visitConcatExpr(ctx.concatExpr(0));
+            int concatIndex = 1;
 
             for (int i = 1; i < ctx.getChildCount(); i++) {
                 var child = ctx.getChild(i);
@@ -1046,27 +947,27 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
                     switch (up) {
                         case "=" -> {
-                            Expr right = visitShiftExpr(ctx.shiftExpr(shiftIndex++));
+                            Expr right = visitConcatExpr(ctx.concatExpr(concatIndex++));
                             result = mkInfix(InfixOp.EQ, result, right);
                         }
                         case "<>" -> {
-                            Expr right = visitShiftExpr(ctx.shiftExpr(shiftIndex++));
+                            Expr right = visitConcatExpr(ctx.concatExpr(concatIndex++));
                             result = mkInfix(InfixOp.NEQ, result, right);
                         }
                         case "<" -> {
-                            Expr right = visitShiftExpr(ctx.shiftExpr(shiftIndex++));
+                            Expr right = visitConcatExpr(ctx.concatExpr(concatIndex++));
                             result = mkInfix(InfixOp.LT, result, right);
                         }
                         case "<=" -> {
-                            Expr right = visitShiftExpr(ctx.shiftExpr(shiftIndex++));
+                            Expr right = visitConcatExpr(ctx.concatExpr(concatIndex++));
                             result = mkInfix(InfixOp.LTE, result, right);
                         }
                         case ">" -> {
-                            Expr right = visitShiftExpr(ctx.shiftExpr(shiftIndex++));
+                            Expr right = visitConcatExpr(ctx.concatExpr(concatIndex++));
                             result = mkInfix(InfixOp.GT, result, right);
                         }
                         case ">=" -> {
-                            Expr right = visitShiftExpr(ctx.shiftExpr(shiftIndex++));
+                            Expr right = visitConcatExpr(ctx.concatExpr(concatIndex++));
                             result = mkInfix(InfixOp.GTE, result, right);
                         }
                         case "IS" -> {
@@ -1082,23 +983,25 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
                                     result = new PostfixExpr(range, PostfixOp.IS_NOT_NULL, result);
                                     i += 2;
                                 } else {
-                                    throw new IllegalStateException("Unsupported IS expression");
+                                    // Syntax error - skip unsupported IS expression
+                                    i += 1;
                                 }
                             }
                         }
                         case "BETWEEN" -> {
-                            Expr lower = visitShiftExpr(ctx.shiftExpr(shiftIndex++));
+                            Expr lower = visitConcatExpr(ctx.concatExpr(concatIndex++));
                             // skip AND
-                            Expr upper = visitShiftExpr(ctx.shiftExpr(shiftIndex++));
+                            Expr upper = visitConcatExpr(ctx.concatExpr(concatIndex++));
                             Range range = new Range(_source, result.range().from(), upper.range().to());
                             result = new TrifixExpr(range, TernaryOp.BETWEEN, result, lower, upper);
                         }
                         case "IN" -> {
                             List<SqlStreamParser.LiteralContext> lits = ctx.literal();
                             if (lits == null || lits.isEmpty()) {
-                                throw new IllegalStateException("IN without literals");
+                                // Syntax error - skip IN without literals
+                                continue;
                             }
-                            TypedList<LiteralNode> values = new TypedList<>(LiteralNode.class);
+                            AstListNode<LiteralNode> values = new AstListNode<>(LiteralNode.class);
                             for (SqlStreamParser.LiteralContext lc : lits) {
                                 values.add(visitLiteral(lc));
                             }
@@ -1122,7 +1025,7 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         @Override
         public Expr visitShiftExpr(SqlStreamParser.ShiftExprContext ctx) {
-            TypedList<Expr> parts = new TypedList<>(Expr.class);
+            AstListNode<Expr> parts = new AstListNode<>(Expr.class);
             for (SqlStreamParser.AddExprContext ac : ctx.addExpr()) {
                 parts.add(visitAddExpr(ac));
             }
@@ -1144,7 +1047,7 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         @Override
         public Expr visitAddExpr(SqlStreamParser.AddExprContext ctx) {
-            TypedList<Expr> parts = new TypedList<>(Expr.class);
+            AstListNode<Expr> parts = new AstListNode<>(Expr.class);
             for (SqlStreamParser.MulExprContext mc : ctx.mulExpr()) {
                 parts.add(visitMulExpr(mc));
             }
@@ -1166,7 +1069,7 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         @Override
         public Expr visitMulExpr(SqlStreamParser.MulExprContext ctx) {
-            TypedList<Expr> parts = new TypedList<>(Expr.class);
+            AstListNode<Expr> parts = new AstListNode<>(Expr.class);
             for (SqlStreamParser.UnaryExprContext uc : ctx.unaryExpr()) {
                 parts.add(visitUnaryExpr(uc));
             }
@@ -1257,7 +1160,10 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             if (ctx.identifier() != null) {
                 return new IdentifierExpr(range(ctx), visitIdentifier(ctx.identifier()));
             }
-            throw new IllegalStateException("Unknown primary: " + ctx.getText());
+            
+            // Syntax error - return placeholder identifier
+            Range range = range(ctx);
+            return new IdentifierExpr(range, new Identifier(range, "<error>"));
         }
 
         // ========================================================================
@@ -1280,7 +1186,11 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
                 return visitListLiteral(ctx.listLiteral());
             if (ctx.mapLiteral() != null)
                 return visitMapLiteral(ctx.mapLiteral());
-            throw new IllegalStateException("Unknown literal: " + ctx.getText());
+            
+            // Syntax error - report and return placeholder null literal
+            Range range = range(ctx);
+            reportSyntaxError(range, "Expected literal value (null, boolean, number, string, bytes, struct, enum, union, list, or map)");
+            return new NullLiteralNode(range);
         }
 
         @Override
@@ -1300,12 +1210,15 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             if (ctx.BYTES_LIT() != null) {
                 return new BytesLiteralNode(range, ctx.BYTES_LIT().getText());
             }
-            throw new IllegalStateException("Unknown literalValue: " + ctx.getText());
+            
+            // Syntax error - report and return placeholder string literal
+            reportSyntaxError(range, "Expected literal value (true, false, string, number, or bytes)");
+            return new StringLiteralNode(range, "");
         }
 
         @Override
         public ListLiteralNode visitListLiteral(SqlStreamParser.ListLiteralContext ctx) {
-            TypedList<LiteralNode> elems = new TypedList<>(LiteralNode.class);
+            AstListNode<LiteralNode> elems = new AstListNode<>(LiteralNode.class);
             for (SqlStreamParser.LiteralContext lc : ctx.literal()) {
                 elems.add(visitLiteral(lc));
             }
@@ -1314,7 +1227,7 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         @Override
         public MapLiteralNode visitMapLiteral(SqlStreamParser.MapLiteralContext ctx) {
-            TypedList<MapEntryLiteralNode> entries = new TypedList<>(MapEntryLiteralNode.class);
+            AstListNode<MapEntryLiteralNode> entries = new AstListNode<>(MapEntryLiteralNode.class);
             for (SqlStreamParser.MapEntryContext mc : ctx.mapEntry()) {
                 entries.add(visitMapEntry(mc));
             }
@@ -1331,7 +1244,7 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         @Override
         public StructLiteralNode visitStructLiteral(SqlStreamParser.StructLiteralContext ctx) {
-            TypedList<StructFieldLiteralNode> fields = new TypedList<>(StructFieldLiteralNode.class);
+            AstListNode<StructFieldLiteralNode> fields = new AstListNode<>(StructFieldLiteralNode.class);
             for (SqlStreamParser.StructEntryContext sc : ctx.structEntry()) {
                 fields.add(visitStructEntry(sc));
             }
@@ -1386,7 +1299,11 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             return new Pos(e.getLine(), e.getCharPositionInLine() + e.getText().length());
         }
 
-        private Expr fold(TypedList<Expr> xs, InfixOp op) {
+        private void reportSyntaxError(Range range, String message) {
+            _diags.error(range, DiagnosticKind.PARSER, DiagnosticCode.SYNTAX_ERROR, message);
+        }
+
+        private Expr fold(AstListNode<Expr> xs, InfixOp op) {
             if (xs.isEmpty()) {
                 throw new IllegalArgumentException("fold requires non-empty list");
             }

@@ -45,7 +45,7 @@ public final class SemanticModel {
         return bindings;
     }
 
-    public Diagnostics diagnostics() {
+    public Diagnostics diags() {
         return diagnostics;
     }
 

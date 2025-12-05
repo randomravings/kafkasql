@@ -2,11 +2,13 @@ package kafkasql.lsp;
 
 import java.nio.file.*;
 
+import kafkasql.lang.IncludeResolver;
 import kafkasql.lang.KafkaSqlArgs;
 import kafkasql.lang.KafkaSqlParser;
-import kafkasql.lang.ParseResult;
 import kafkasql.lang.diagnostics.Diagnostics;
+import kafkasql.lang.input.Input;
 import kafkasql.lang.input.StringInput;
+import kafkasql.lang.semantic.SemanticModel;
 
 import org.eclipse.lsp4j.*;
 import org.eclipse.lsp4j.services.*;
@@ -76,11 +78,28 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
 
     System.err.println("[kafkasql-lsp] parseAndPublishDiagnostics for " + uri);
 
-    KafkaSqlArgs args = new KafkaSqlArgs(Path.of(this.workspaceRoot), true, false);
-    List<kafkasql.lang.input.Input> inputs = List.of(new StringInput(uri, text));
-    ParseResult pr = KafkaSqlParser.parse(inputs, args);
-    if (pr.diags().hasError()) {
-      sendDiagnostics(uri, pr.diags());
+    // Resolve includes first
+    Path workingDir = Path.of(this.workspaceRoot);
+    Diagnostics diags = new Diagnostics();
+    
+    // Start with the current file as StringInput
+    Input currentInput = new StringInput(uri, text);
+    List<Input> inputs = IncludeResolver.buildIncludeOrder(
+        List.of(currentInput), 
+        workingDir, 
+        diags
+    );
+    
+    if (diags.hasError()) {
+      sendDiagnostics(uri, diags);
+      return;
+    }
+
+    // Now compile with all resolved includes
+    KafkaSqlArgs args = new KafkaSqlArgs(workingDir, true, false);
+    SemanticModel model = KafkaSqlParser.compile(inputs, args);
+    if (model.diags().hasError()) {
+      sendDiagnostics(uri, model.diags());
       return;
     }
 

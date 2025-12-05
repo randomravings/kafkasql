@@ -3,14 +3,16 @@ package kafkasql.util;
 import kafkasql.lang.KafkaSqlArgs;
 import kafkasql.lang.KafkaSqlParser;
 import kafkasql.lang.ParseResult;
-import kafkasql.lang.TypedOptional;
 import kafkasql.lang.diagnostics.Diagnostics;
 import kafkasql.lang.input.StringInput;
 import kafkasql.lang.syntax.ast.*;
 import kafkasql.lang.syntax.ast.decl.Decl;
-import kafkasql.lang.syntax.ast.fragment.DocNode;
-import kafkasql.lang.syntax.ast.stmt.CreateStmt;
+import kafkasql.lang.syntax.ast.decl.TypeKindDecl;
+import kafkasql.lang.syntax.ast.fragment.DeclFragment;
 import kafkasql.lang.syntax.ast.stmt.Stmt;
+import kafkasql.lang.syntax.ast.type.PrimitiveTypeNode;
+import kafkasql.lang.syntax.ast.type.TypeNode;
+import kafkasql.runtime.type.PrimitiveKind;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -103,29 +105,54 @@ public final class TestHelpers {
     }
 
     public static <T extends Decl> T assertDecl(
-            Class<T> clazz,
-            Stmt stmt,
-            String name) {
-        return assertDecl(
-                clazz,
-                stmt,
-                name,
-                TypedOptional.empty(DocNode.class));
+        Class<T> clazz,
+        Decl decl,
+        String name
+    ) {
+        assertEquals(clazz, decl.getClass());
+        assertEquals(name, decl.name().name());
+        T declType = clazz.cast(decl);
+        return declType;
     }
 
-    public static <T extends Decl> T assertDecl(
-            Class<T> clazz,
-            Stmt stmt,
-            String name,
-            TypedOptional<DocNode> doc) {
-        assertInstanceOf(CreateStmt.class, stmt);
-        CreateStmt cs = (CreateStmt) stmt;
-        assertInstanceOf(clazz, cs.decl());
-        T declType = clazz.cast(cs.decl());
-        assertEquals(name, declType.name().name());
-        assertEquals(doc.isPresent(), declType.doc().isPresent());
-        if (doc.isPresent())
-            assertEquals(doc.get().comment(), declType.doc().get().comment());
+    public static <T extends TypeKindDecl> T assertTypeDecl(
+        Class<T> clazz,
+        TypeKindDecl decl
+    ) {
+        assertInstanceOf(clazz, decl);
+        T declType = clazz.cast(decl);
         return declType;
+    }
+
+    public static void assertPrimitive(
+        TypeNode typeNode,
+        PrimitiveKind kind,
+        Long expectedSize,
+        Long expectedPrecision,
+        Long expectedScale
+    ) {
+        assertInstanceOf(PrimitiveTypeNode.class, typeNode);
+        PrimitiveTypeNode primType = PrimitiveTypeNode.class.cast(typeNode);
+        assertEquals(kind, primType.kind());
+        assertEquals(expectedSize != null, primType.hasLength());
+        assertEquals(expectedPrecision != null, primType.hasPrecision());
+        assertEquals(expectedScale != null, primType.hasScale());
+        if (expectedSize != null)
+            assertEquals(expectedSize, primType.length());
+        if (expectedPrecision != null)
+            assertEquals(expectedPrecision, primType.precision());
+        if (expectedScale != null)
+            assertEquals(expectedScale, primType.scale());
+    }
+
+    public static <T extends DeclFragment> T assertSingleFragmentOf(
+        AstListNode<DeclFragment> fragments,
+        Class<T> clazz
+    ) {
+        var ofType = fragments.stream()
+            .filter(f -> clazz.isInstance(f))
+            .toList();
+        assertEquals(1, ofType.size());
+        return clazz.cast(ofType.getFirst());
     }
 }

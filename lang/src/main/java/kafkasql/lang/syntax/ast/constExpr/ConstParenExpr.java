@@ -1,0 +1,8 @@
+package kafkasql.lang.syntax.ast.constExpr;
+
+import kafkasql.lang.diagnostics.Range;
+
+public final record ConstParenExpr(
+    Range range,
+    ConstExpr inner
+) implements ConstExpr { }

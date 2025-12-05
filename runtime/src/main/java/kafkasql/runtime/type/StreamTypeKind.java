@@ -6,4 +6,5 @@ public sealed interface StreamTypeKind
     permits StreamTypeInline, StreamTypeReference {
     String alias();
     Optional<StructTypeField[]> distributeFields();
+    Optional<StructTypeField> timestampField();
 }

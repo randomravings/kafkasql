@@ -622,6 +622,11 @@ public final class LiteralBinder {
         Diagnostics diags,
         BindingEnv bindings
     ) {
+        // Accept empty MapLiteralNode as empty struct (type-based interpretation)
+        if (node instanceof MapLiteralNode ml && ml.entries().isEmpty()) {
+            return new StructValue(type, new LinkedHashMap<>());
+        }
+        
         if (!(node instanceof StructLiteralNode st)) {
             fail(node, diags, "STRUCT(" + type.fqn().toString() + ")");
             return null;
@@ -729,6 +734,11 @@ public final class LiteralBinder {
         Diagnostics diags,
         BindingEnv bindings
     ) {
+        // Accept empty StructLiteralNode as empty map (type-based interpretation)
+        if (node instanceof StructLiteralNode st && st.fields().isEmpty()) {
+            return new LinkedHashMap<>();
+        }
+        
         if (!(node instanceof MapLiteralNode ml)) {
             fail(node, diags, "MAP");
             return null;

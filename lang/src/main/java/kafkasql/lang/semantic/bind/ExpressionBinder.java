@@ -91,7 +91,8 @@ public final class ExpressionBinder {
             return VoidType.get();
         }
         
-        if (!(typeDeclOpt.get() instanceof EnumDecl enumDecl)) {
+        kafkasql.lang.syntax.ast.decl.TypeDecl typeDecl = typeDeclOpt.get();
+        if (!(typeDecl.kind() instanceof EnumDecl)) {
             diags.error(
                 enumLit.range(),
                 DiagnosticKind.TYPE,
@@ -101,8 +102,8 @@ public final class ExpressionBinder {
             return VoidType.get();
         }
         
-        // Get the pre-built EnumType from bindings
-        Object boundValue = bindings.get(enumDecl);
+        // Get the pre-built EnumType from bindings (keyed by TypeDecl, not EnumDecl)
+        Object boundValue = bindings.get(typeDecl);
         
         if (boundValue == null) {
             // Shouldn't happen if TypeBuilder ran
@@ -422,6 +423,13 @@ public final class ExpressionBinder {
                 AnyType result = numericResult(left, right);
                 bindings.put(inf, result);
                 yield result;
+            }
+
+            // String concatenation
+            case CONCAT -> {
+                // CONCAT works with any types - they'll be converted to strings
+                bindings.put(inf, PrimitiveType.string());
+                yield PrimitiveType.string();
             }
 
             // Bitwise

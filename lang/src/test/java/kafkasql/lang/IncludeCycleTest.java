@@ -25,17 +25,17 @@ public class IncludeCycleTest {
       Files.createDirectories(dir);
 
       Files.writeString(dir.resolve("example.kafka"),
-        "CREATE STRUCT Example ( Id INT32 );\n");
+        "CREATE TYPE Example AS STRUCT ( Id INT32 );\n");
 
       Files.writeString(dir.resolve("Foo.kafka"),
         "INCLUDE 'com/example/example.kafka';\n" +
         "INCLUDE 'com/example/Bar.kafka';\n" +
-        "CREATE STRUCT Foo ( Id INT32 );\n");
+        "CREATE TYPE Foo AS STRUCT ( Id INT32 );\n");
 
       Files.writeString(dir.resolve("Bar.kafka"),
         "INCLUDE 'com/example/example.kafka';\n" +
         "INCLUDE 'com/example/Foo.kafka';\n" +
-        "CREATE STRUCT Bar ( Id INT32 );\n");
+        "CREATE TYPE Bar AS STRUCT ( Id INT32 );\n");
 
       Diagnostics diags = new Diagnostics();
       FileInput input = new FileInput(
@@ -63,9 +63,9 @@ public class IncludeCycleTest {
       Path b = dir.resolve("B.kafka");
       Path c = dir.resolve("C.kafka");
 
-      Files.writeString(c, "CREATE STRUCT C ( Id INT32 );\n");
-      Files.writeString(b, "INCLUDE 'com/example/C.kafka';\nCREATE STRUCT B ( Id INT32 );\n");
-      Files.writeString(a, "INCLUDE 'com/example/B.kafka';\nCREATE STRUCT A ( Id INT32 );\n");
+      Files.writeString(c, "CREATE TYPE C AS STRUCT ( Id INT32 );\n");
+      Files.writeString(b, "INCLUDE 'com/example/C.kafka';\nCREATE TYPE B AS STRUCT ( Id INT32 );\n");
+      Files.writeString(a, "INCLUDE 'com/example/B.kafka';\nCREATE TYPE A AS STRUCT ( Id INT32 );\n");
 
       Diagnostics diags = new Diagnostics();
       FileInput input = new FileInput(

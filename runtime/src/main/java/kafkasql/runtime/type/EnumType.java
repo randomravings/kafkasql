@@ -6,7 +6,7 @@ import kafkasql.runtime.Name;
 
 public record EnumType(
     Name fqn,
-    PrimitiveKind type,
+    PrimitiveType type,
     List<EnumTypeSymbol> symbols,
     Optional<String> doc
 ) implements ComplexType { }

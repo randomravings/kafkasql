@@ -6,7 +6,7 @@ options {
 
 /* ──────────────────── Entry Point ──────────────────── */
 script
-  : includeSection? (statement SEMI)+ EOF
+  : includeSection? statementList EOF
   ;
 
 /* ─────────────────────── Includes ────────────────────── */
@@ -19,6 +19,10 @@ includePragma
   ;
 
 /* ─────────────────────── Statements ─────────────────── */
+statementList
+  : statement (SEMI statement)* SEMI?
+  ;
+
 statement
   : useStmt
   | readStmt
@@ -45,12 +49,16 @@ readBlockList
   ;
 
 readBlock
-  : TYPE streamTypeName readProjection whereClause?
+  : TYPE typeName readProjection whereClause?
   ;
 
 readProjection
   : STAR
-  | readProjectionExpr (COMMA readProjectionExpr)*
+  | readProjectionList
+  ;
+
+readProjectionList
+  : readProjectionExpr (COMMA readProjectionExpr)*
   ;
 
 readProjectionExpr
@@ -67,11 +75,11 @@ fieldAlias
 
 /* ─────────────────────── Write Statements ─────────────────── */
 writeStmt
-  : WRITE TO qname TYPE streamTypeName
-    VALUES LPAREN writeValues RPAREN
+  : WRITE TO qname TYPE typeName
+    VALUES LPAREN writeValueList RPAREN
   ;
 
-writeValues
+writeValueList
   : structLiteral (COMMA structLiteral)*
   ;
 
@@ -88,15 +96,11 @@ decl
 
 /* ─────────────────────── Context Decl ─────────────────── */
 contextDecl
-  : CONTEXT contextName contextTail*
+  : CONTEXT contextName declTailFragments
   ;
 
 contextName
   : identifier
-  ;
-
-contextTail
-  : commentClause
   ;
 
 /* ─────────────────────── Type System ─────────────────── */
@@ -155,49 +159,37 @@ mapType
 
 /* ─────────────────────── Complex Type Decl ─────────────────── */
 typeDecl
+  : TYPE typeName
+    AS typeKindDecl
+    declTailFragments
+  ;
+
+typeName
+  : identifier
+  ;
+
+typeKindDecl
   : scalarDecl
   | enumDecl
   | structDecl
   | unionDecl
+  | derivedType
   ;
 
 /* ─────────────────────── Scalar Decl ─────────────────── */
 scalarDecl
-  : SCALAR scalarName AS primitiveType
-    scalarTail*
-  ;
-
-scalarName
-  : identifier
-  ;
-
-scalarTail
-  : scalarDefault
-  | scalarCheck
-  | commentClause
-  ;
-
-scalarDefault
-  : DEFAULT LPAREN literalValue RPAREN
-  ;
-
-scalarCheck
-  : CHECK LPAREN expr RPAREN
+  : SCALAR
+    type
   ;
 
 /* ─────────────────────── Enum Decl ─────────────────── */
 enumDecl
-  : ENUM enumName (AS enumBaseType)?
+  : ENUM enumType
     enumSymbolList
-    enumTail*
   ;
 
-enumName
-  : identifier
-  ;
-
-enumBaseType
-  : INT8 | INT16 | INT32 | INT64
+enumType
+  : type?
   ;
 
 enumSymbolList
@@ -205,70 +197,32 @@ enumSymbolList
   ;
 
 enumSymbol
-  : identifier COLON NUMBER_LIT enumSymbolTail*
-  ;
-
-enumDefault
-  : DEFAULT LPAREN enumLiteral RPAREN
-  ;
-
-enumTail
-  : enumDefault
-  | commentClause
-  ;
-
-enumSymbolTail
-  : commentClause
+  : identifier EQ constExpr declTailFragments
   ;
 
 /* ─────────────────────── Struct Decl ─────────────────── */
 structDecl
-  : STRUCT structName fieldList
-    structTail*
-  ;
-
-structName
-  : identifier
+  : STRUCT fieldList
   ;
 
 fieldList
   : LPAREN fieldDecl (COMMA fieldDecl)* RPAREN
   ;
 
-structCheck
-  : CHECK identifier LPAREN expr RPAREN
-  ;
-
 fieldDecl
-  : identifier type fieldTail*
+  : identifier
+    type
+    nullableMarker?
+    declTailFragments
   ;
 
-structTail
-  : structCheck
-  | commentClause
-  ;
-
-fieldTail
-  : fieldNullable
-  | fieldDefault
-  | commentClause
-;
-
-fieldNullable
+nullableMarker
   : NULL
-  ;
-
-fieldDefault
-  : DEFAULT literal
   ;
 
 /* ─────────────────────── Union Decl ─────────────────── */
 unionDecl
-  : UNION unionName unionMemberList unionTail*
-  ;
-
-unionName
-  : identifier
+  : UNION unionMemberList
   ;
 
 unionMemberList
@@ -276,20 +230,9 @@ unionMemberList
   ;
 
 unionMemberDecl
-  : identifier type unionMemberTail*
-  ;
-
-unionTail
-  : unionDefault
-  | commentClause
-  ;
-
-unionMemberTail
-  : commentClause
-  ;
-
-unionDefault
-  : DEFAULT LPAREN unionLiteral RPAREN
+  : identifier
+    type
+    declTailFragments
   ;
 
 /* ─────────────────────── Type Reference ─────────────────── */
@@ -297,10 +240,17 @@ typeReference
   : qname
   ;
 
+/* ─────────────────────── Derived Type ─────────────────── */
+
+derivedType
+  : typeReference
+  ;
+
 /* ─────────────────────── Stream Decl ─────────────────── */
 streamDecl
-  : STREAM streamName AS streamTypeDeclList
-    streamTail*
+  : STREAM streamName
+    LPAREN streamTypeDeclList RPAREN
+    declTailFragments
   ;
 
 streamName
@@ -308,54 +258,72 @@ streamName
   ;
 
 streamTypeDeclList
-  : streamTypeDecl+
+  : streamTypeDecl (COMMA streamTypeDecl)*
   ;
 
 streamTypeDecl
-  : TYPE (streamTypeInline | streamTypeRef)
-    AS streamTypeName
-    streamTypeTail*
-  ;
-
-streamTypeName
-  : identifier
-  ;
-
-streamTypeRef
-  : typeReference
-  ;
-
-streamTypeInline
-  : fieldList
-  ;
-
-streamTail
-  : commentClause
-  ;
-
-streamTypeTail
-  : distributeClause
-  | timestampClause
-  | checkExpr
-  | commentClause
+  : typeDecl
+    declTailFragments
   ;
 
 /* ─────────────────────── Stream Helpers ─────────────────── */
-distributeClause
+distributeFragment
   : DISTRIBUTE BY LPAREN identifier (COMMA identifier)* RPAREN
   ;
 
-timestampClause
+timestampFragment
   : TIMESTAMP BY LPAREN identifier RPAREN
   ;
 
 /* ─────────────────────── Checks ─────────────────── */
-checkExpr
-  : CHECK checkExprName? LPAREN expr RPAREN
+
+declTailFragments
+  : declTailFragment*
   ;
 
-checkExprName
-  : identifier AS
+declTailFragment
+  : constraintFragment
+  | namedConstraintFragment
+  | commentFragment
+  | distributeFragment
+  | timestampFragment
+  ;
+
+defaultFragment
+  : DEFAULT literal
+  ;
+
+checkFragment
+  : CHECK LPAREN expr RPAREN
+  ;
+
+namedConstraintFragment
+  : CONSTRAINT identifier LPAREN constraintFragment RPAREN
+  ;
+
+constraintFragment
+  : checkFragment
+  | defaultFragment
+  ;
+  
+commentFragment
+  : COMMENT STRING_LIT
+  ;
+
+/* ─────────────0 Const Expressions ───────────── */
+constExpr
+  : constTerm ((PLUS | MINUS | STAR | SLASH | PERCENT
+              | SHL | SHR | AMP | PIPE | XOR) constTerm)*
+  ;
+
+constTerm
+  : NUMBER_LIT
+  | constSymbolRef
+  | LPAREN constExpr RPAREN
+  ;
+
+constSymbolRef
+  : identifier
   ;
 
 /* ──────────────── Expressions ──────────────── */
@@ -368,13 +336,15 @@ andExpr     : notExpr (AND notExpr)* ;
 notExpr     : NOT notExpr | cmpExpr ;
 
 cmpExpr
-  : shiftExpr ((EQ | NEQ | GT | LT | GTE | LTE) shiftExpr
+  : concatExpr ((EQ | NEQ | GT | LT | GTE | LTE) concatExpr
               | IS NULL
               | IS NOT NULL
-              | BETWEEN shiftExpr AND shiftExpr
+              | BETWEEN concatExpr AND concatExpr
               | IN LPAREN literal (COMMA literal)* RPAREN
               )*
   ;
+
+concatExpr  : shiftExpr (PIPE_PIPE shiftExpr)* ;
 
 shiftExpr   : addExpr ((SHL | SHR) addExpr)* ;
 addExpr     : mulExpr ((PLUS | MINUS) mulExpr)* ;
@@ -431,7 +401,7 @@ mapEntry
   ;
 
 structLiteral
-  : LBRACE (structEntry (COMMA structEntry)*)? RBRACE
+  : AT LBRACE (structEntry (COMMA structEntry)*)? RBRACE
   ;
 
 structEntry
@@ -457,8 +427,4 @@ dotPrefix
 
 identifier
   : ID
-  ;
-
-commentClause
-  : COMMENT STRING_LIT
   ;

@@ -19,5 +19,6 @@ public enum InfixOp {
     BITAND,
     BITOR,
     SHL,
-    SHR
+    SHR,
+    CONCAT
 }

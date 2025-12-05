@@ -3,21 +3,25 @@ package kafkasql.lang;
 import org.junit.jupiter.api.*;
 
 import kafkasql.runtime.type.PrimitiveKind;
+import kafkasql.lang.syntax.ast.constExpr.ConstExpr;
+import kafkasql.lang.syntax.ast.constExpr.ConstLiteralExpr;
 import kafkasql.lang.syntax.ast.decl.ContextDecl;
+import kafkasql.lang.syntax.ast.decl.DerivedTypeDecl;
 import kafkasql.lang.syntax.ast.decl.EnumDecl;
 import kafkasql.lang.syntax.ast.decl.EnumSymbolDecl;
 import kafkasql.lang.syntax.ast.decl.ScalarDecl;
 import kafkasql.lang.syntax.ast.decl.StreamDecl;
 import kafkasql.lang.syntax.ast.decl.StreamMemberDecl;
-import kafkasql.lang.syntax.ast.decl.StreamMemberInlineDecl;
-import kafkasql.lang.syntax.ast.decl.StreamMemberRefDecl;
 import kafkasql.lang.syntax.ast.decl.StructDecl;
 import kafkasql.lang.syntax.ast.decl.StructFieldDecl;
+import kafkasql.lang.syntax.ast.decl.TypeDecl;
 import kafkasql.lang.syntax.ast.decl.UnionDecl;
 import kafkasql.lang.syntax.ast.decl.UnionMemberDecl;
 import kafkasql.lang.syntax.ast.fragment.CheckNode;
+import kafkasql.lang.syntax.ast.fragment.DefaultNode;
 import kafkasql.lang.syntax.ast.literal.EnumLiteralNode;
 import kafkasql.lang.syntax.ast.literal.LiteralNode;
+import kafkasql.lang.syntax.ast.literal.NullLiteralNode;
 import kafkasql.lang.syntax.ast.literal.NumberLiteralNode;
 import kafkasql.lang.syntax.ast.stmt.CreateStmt;
 import kafkasql.lang.syntax.ast.stmt.UseStmt;
@@ -39,96 +43,124 @@ public class CreateStatementsTest {
     @Test
     void createContextSimple() {
         var stmts = TestHelpers.parseAssert("CREATE CONTEXT foo;");
-        assertEquals(1, stmts.size());
+        CreateStmt cstmt = TestHelpers.only(stmts, CreateStmt.class);
 
         TestHelpers.assertDecl(
             ContextDecl.class,
-            stmts.getFirst(),
+            cstmt.decl(),
             "foo"
         );
     }
 
     @Test
     void createScalarPrimitive() {
-        var stmts = TestHelpers.parseAssert("CREATE SCALAR MyInt AS INT32;");
-        CreateStmt ct = TestHelpers.only(stmts, CreateStmt.class);
+        var stmts = TestHelpers.parseAssert("CREATE TYPE MyInt AS SCALAR INT32;");
+        CreateStmt cstmt = TestHelpers.only(stmts, CreateStmt.class);
 
-        ScalarDecl scalar = TestHelpers.assertDecl(
-            ScalarDecl.class,
-            ct,
+        TypeDecl typeDecl = TestHelpers.assertDecl(
+            TypeDecl.class,
+            cstmt.decl(),
             "MyInt"
         );
-        assertEquals("MyInt", scalar.name().name());
-        assertEquals(PrimitiveKind.INT32, scalar.baseType().kind());
-        assertTrue(scalar.defaultValue().isEmpty());
-        assertTrue(scalar.check().isEmpty());
+        ScalarDecl scalar = TestHelpers.assertTypeDecl(
+            ScalarDecl.class,
+            typeDecl.kind()
+        );
+        assertInstanceOf(PrimitiveTypeNode.class, scalar.type());
+        assertEquals(0, typeDecl.fragments().size());
     }
 
     @Test
     void createScalarWithDefaultAndCheck() {
         var stmts = TestHelpers.parseAssert("""
-            CREATE SCALAR PosInt AS INT32
-                DEFAULT(1)
+            CREATE TYPE PosInt AS SCALAR INT32
+                DEFAULT 1
                 CHECK ( value > 0 );
             """);
-        CreateStmt ct = TestHelpers.only(stmts, CreateStmt.class);
-        ScalarDecl scalar = (ScalarDecl) ct.decl();
-
-        assertEquals("PosInt", scalar.name().name());
-        assertEquals(PrimitiveKind.INT32, scalar.baseType().kind());
-
+        CreateStmt cstmt = TestHelpers.only(stmts, CreateStmt.class);
+        TypeDecl typeDecl = TestHelpers.assertDecl(
+            TypeDecl.class,
+            cstmt.decl(),
+            "PosInt"
+        );
+        ScalarDecl scalar = TestHelpers.assertTypeDecl(
+            ScalarDecl.class,
+            typeDecl.kind()
+        );
+        TestHelpers.assertPrimitive(
+            scalar.type(),
+            PrimitiveKind.INT32,
+            null,
+            null,
+            null
+        );
+        assertEquals(2, typeDecl.fragments().size());
         // default literal
-        assertTrue(scalar.defaultValue().isPresent());
-        LiteralNode def = scalar.defaultValue().get();
+        DefaultNode defaultNode = TestHelpers.assertSingleFragmentOf(typeDecl.fragments(), DefaultNode.class);
+        LiteralNode def = defaultNode.value();
         assertInstanceOf(NumberLiteralNode.class, def);
         assertEquals("1", ((NumberLiteralNode) def).text());
 
         // check
-        assertTrue(scalar.check().isPresent());
-        CheckNode chk = scalar.check().get();
-        assertEquals("scalar_check", chk.name().name());
+        TestHelpers.assertSingleFragmentOf(typeDecl.fragments(), CheckNode.class);
     }
 
     @Test
     void createEnumWithSymbols() {
         var stmts = TestHelpers.parseAssert("""
-            CREATE ENUM Color (
-              Red: 1,
-              Green: 2,
-              Blue: 3
+            CREATE TYPE Color AS ENUM (
+                Red = 1,
+                Green = 2,
+                Blue = 3
             );
             """);
-        CreateStmt ct = TestHelpers.only(stmts, CreateStmt.class);
-        EnumDecl en = (EnumDecl) ct.decl();
+        CreateStmt cstmt = TestHelpers.only(stmts, CreateStmt.class);
+        TypeDecl typeDecl = TestHelpers.assertDecl(
+            TypeDecl.class,
+            cstmt.decl(),
+            "Color"
+        );
+        EnumDecl en = TestHelpers.assertTypeDecl(
+            EnumDecl.class,
+            typeDecl.kind()
+        );
 
-        assertEquals("Color", en.name().name());
         List<EnumSymbolDecl> symbols = en.symbols();
         assertEquals(3, symbols.size());
         assertEquals("Red", symbols.get(0).name().name());
         assertEquals("Green", symbols.get(1).name().name());
         assertEquals("Blue", symbols.get(2).name().name());
 
-        assertEquals("2", symbols.get(1).value().text());
+        ConstExpr val = symbols.get(1).value();
+        assertInstanceOf(ConstLiteralExpr.class, val);
+        assertEquals("2", ((ConstLiteralExpr) val).text());
     }
 
     @Test
     void createEnumWithBaseTypeAndDefault() {
         var stmts = TestHelpers.parseAssert("""
-            CREATE ENUM Status AS INT16 (
-              Pending: 1,
-              Active: 2,
-              Disabled: 3
+            CREATE TYPE Status AS ENUM (
+                Pending = 1,
+                Active = 2,
+                Disabled = 3
             )
-            DEFAULT(Status::Active);
+            DEFAULT Status::Active;
             """);
-        CreateStmt ct = TestHelpers.only(stmts, CreateStmt.class);
-        EnumDecl en = (EnumDecl) ct.decl();
-
-        assertTrue(en.baseType().isPresent());
-        assertEquals(PrimitiveKind.INT16, en.baseType().get().kind());
-
-        assertTrue(en.defaultValue().isPresent());
-        EnumLiteralNode def = en.defaultValue().get();
+        CreateStmt cstmt = TestHelpers.only(stmts, CreateStmt.class);
+        TypeDecl typeDecl = TestHelpers.assertDecl(
+            TypeDecl.class,
+            cstmt.decl(),
+            "Status"
+        );
+        TestHelpers.assertTypeDecl(
+            EnumDecl.class,
+            typeDecl.kind()
+        );
+        DefaultNode defaultNode = TestHelpers.assertSingleFragmentOf(
+            typeDecl.fragments(),
+            DefaultNode.class
+        );
+        EnumLiteralNode def = (EnumLiteralNode)defaultNode.value();
         assertEquals("Status", def.enumName().fullName());
         assertEquals("Active", def.symbol().name());
     }
@@ -136,27 +168,34 @@ public class CreateStatementsTest {
     @Test
     void createStructVariousFieldTypes() {
         var stmts = TestHelpers.parseAssert("""
-            CREATE STRUCT Person (
-              Id INT64,
-              Name STRING,
-              Nick STRING(16) NULL,
-              Score DECIMAL(10,2),
-              Tags LIST<STRING>,
-              Attrs MAP<STRING, INT32>,
-              Friend com.example.User NULL
+            CREATE TYPE Person AS STRUCT (
+                Id INT64,
+                Name STRING,
+                Nick STRING(16) NULL,
+                Score DECIMAL(10,2),
+                Tags LIST<STRING>,
+                Attrs MAP<STRING, INT32>,
+                Friend com.example.User NULL
             );
             """);
-        CreateStmt ct = TestHelpers.only(stmts, CreateStmt.class);
-        StructDecl st = (StructDecl) ct.decl();
+        CreateStmt cstmt = TestHelpers.only(stmts, CreateStmt.class);
+        TypeDecl typeDecl = TestHelpers.assertDecl(
+            TypeDecl.class,
+            cstmt.decl(),
+            "Person"
+        );
+        StructDecl st = TestHelpers.assertTypeDecl(
+            StructDecl.class,
+            typeDecl.kind()
+        );
 
-        assertEquals("Person", st.name().name());
         List<StructFieldDecl> fields = st.fields();
         assertEquals(7, fields.size());
 
         assertEquals("Id", fields.get(0).name().name());
         assertInstanceOf(PrimitiveTypeNode.class, fields.get(0).type());
         assertEquals(PrimitiveKind.INT64, ((PrimitiveTypeNode)fields.get(0).type()).kind());
-        assertFalse(fields.get(0).nullable());
+        assertFalse(fields.get(0).nullable().isPresent());
 
         assertEquals("Name", fields.get(1).name().name());
         assertInstanceOf(PrimitiveTypeNode.class, fields.get(1).type());
@@ -168,7 +207,8 @@ public class CreateStatementsTest {
         assertEquals(PrimitiveKind.STRING, ((PrimitiveTypeNode)fields.get(2).type()).kind());
         assertEquals(true, ((PrimitiveTypeNode)fields.get(2).type()).hasLength());
         assertEquals(16, ((PrimitiveTypeNode)fields.get(2).type()).length());
-        assertTrue(fields.get(2).nullable());
+        assertTrue(fields.get(2).nullable().isPresent());
+        assertInstanceOf(NullLiteralNode.class, fields.get(2).nullable().get());
 
         assertEquals("Score", fields.get(3).name().name());
         assertInstanceOf(PrimitiveTypeNode.class, fields.get(3).type());
@@ -185,20 +225,27 @@ public class CreateStatementsTest {
 
         assertEquals("Friend", fields.get(6).name().name());
         assertInstanceOf(ComplexTypeNode.class, fields.get(6).type());
-        assertTrue(fields.get(6).nullable());
+        assertTrue(fields.get(6).nullable().isPresent());
     }
 
     @Test
     void nestedCompositeTypes() {
         var stmts = TestHelpers.parseAssert("""
-            CREATE STRUCT X (
+            CREATE TYPE A AS STRUCT (
                 Data LIST<MAP<STRING, LIST<INT32>>>
             );
             """);
-        CreateStmt ct = TestHelpers.only(stmts, CreateStmt.class);
-        StructDecl st = (StructDecl) ct.decl();
+        CreateStmt cstmt = TestHelpers.only(stmts, CreateStmt.class);
+        TypeDecl typeDecl = TestHelpers.assertDecl(
+            TypeDecl.class,
+            cstmt.decl(),
+            "A"
+        );
+        StructDecl st = TestHelpers.assertTypeDecl(
+            StructDecl.class,
+            typeDecl.kind()
+        );
 
-        assertEquals("X", st.name().name());
         assertEquals(1, st.fields().size());
 
         StructFieldDecl dataField = st.fields().getFirst();
@@ -227,16 +274,23 @@ public class CreateStatementsTest {
     @Test
     void createUnionAlts() {
         var stmts = TestHelpers.parseAssert("""
-            CREATE UNION Value (
-              I INT32,
-              S STRING,
-              Ref com.example.Other
+            CREATE TYPE Value AS UNION (
+                I INT32,
+                S STRING,
+                Ref com.example.Other
             );
             """);
-        CreateStmt ct = TestHelpers.only(stmts, CreateStmt.class);
-        UnionDecl un = (UnionDecl) ct.decl();
+        CreateStmt cstmt = TestHelpers.only(stmts, CreateStmt.class);
+        TypeDecl typeDecl = TestHelpers.assertDecl(
+            TypeDecl.class,
+            cstmt.decl(),
+            "Value"
+        );
+        UnionDecl un = TestHelpers.assertTypeDecl(
+            UnionDecl.class,
+            typeDecl.kind()
+        );
 
-        assertEquals("Value", un.name().name());
         List<UnionMemberDecl> members = un.members();
         assertEquals(3, members.size());
 
@@ -256,47 +310,57 @@ public class CreateStatementsTest {
     @Test
     void createStreamLogWithInlineAndRef() {
         var stmts = TestHelpers.parseAssert("""
-            CREATE STREAM Events AS
-              TYPE ( Id INT32, Kind STRING ) AS Base
-              TYPE com.example.Payload AS Payload;
+            CREATE STREAM Events (
+              TYPE Base AS STRUCT ( Id INT32, Kind STRING ),
+              TYPE Payload AS com.example.Payload
+            );
             """);
         CreateStmt cs = TestHelpers.only(stmts, CreateStmt.class);
         StreamDecl decl = TestHelpers.assertDecl(
             StreamDecl.class,
-            cs,
+            cs.decl(),
             "Events"
         );
 
         List<StreamMemberDecl> members = decl.streamTypes();
         assertEquals(2, members.size());
 
-        StreamMemberDecl m0 = members.get(0);
-        StreamMemberDecl m1 = members.get(1);
-
-        assertInstanceOf(StreamMemberInlineDecl.class, m0);
-        assertInstanceOf(StreamMemberRefDecl.class, m1);
-
-        StreamMemberInlineDecl inline = (StreamMemberInlineDecl) m0;
-        assertEquals("Base", inline.name().name());
+        TypeDecl inlineDecl = TestHelpers.assertDecl(
+            TypeDecl.class,
+            members.get(0).memberDecl(),
+            "Base"
+        );
+        StructDecl inline = TestHelpers.assertTypeDecl(
+            StructDecl.class,
+            inlineDecl.kind()
+        );
         assertEquals(2, inline.fields().size());
 
-        StreamMemberRefDecl ref = (StreamMemberRefDecl) m1;
-        assertEquals("Payload", ref.name().name());
-        assertEquals("com.example.Payload", ref.ref().name().fullName());
+        TypeDecl refDecl = TestHelpers.assertDecl(
+            TypeDecl.class,
+            members.get(1).memberDecl(),
+            "Payload"
+        );
+        DerivedTypeDecl ref = TestHelpers.assertTypeDecl(
+            DerivedTypeDecl.class,
+            refDecl.kind()
+        );
+        assertEquals("com.example.Payload", ref.target().name().fullName());
     }
 
     @Test
     void createStreamCompactMultipleInline() {
         var stmts = TestHelpers.parseAssert("""
-            CREATE STREAM Session AS
-              TYPE ( UserId INT64, Start TIMESTAMP(3) ) AS StartRec
-              TYPE ( UserId INT64, End TIMESTAMP(3) ) AS EndRec
-              TYPE com.example.Extra AS Extra;
+            CREATE STREAM Session (
+                TYPE StartRec AS STRUCT ( UserId INT64, Start TIMESTAMP(3) ),
+                TYPE EndRec AS STRUCT ( UserId INT64, End TIMESTAMP(3) ),
+                TYPE Extra AS com.example.Extra
+            );
             """);
         CreateStmt cs = TestHelpers.only(stmts, CreateStmt.class);
         StreamDecl sd = TestHelpers.assertDecl(
             StreamDecl.class,
-            cs,
+            cs.decl(),
             "Session"
         );
 
@@ -304,15 +368,38 @@ public class CreateStatementsTest {
         List<StreamMemberDecl> members = sd.streamTypes();
         assertEquals(3, members.size());
 
-        assertInstanceOf(StreamMemberInlineDecl.class, members.get(0));
-        assertInstanceOf(StreamMemberInlineDecl.class, members.get(1));
-        assertInstanceOf(StreamMemberRefDecl.class, members.get(2));
+        TypeDecl startRecDecl = TestHelpers.assertDecl(
+            TypeDecl.class,
+            members.get(0).memberDecl(),
+            "StartRec"
+        );
+        StructDecl startRec = TestHelpers.assertTypeDecl(
+            StructDecl.class,
+            startRecDecl.kind()
+        );
+        assertEquals(2, startRec.fields().size());
 
-        StreamMemberInlineDecl startRec = (StreamMemberInlineDecl) members.get(0);
-        StreamMemberInlineDecl endRec   = (StreamMemberInlineDecl) members.get(1);
+        TypeDecl endRecDecl = TestHelpers.assertDecl(
+            TypeDecl.class,
+            members.get(1).memberDecl(),
+            "EndRec"
+        );
+        StructDecl endRec = TestHelpers.assertTypeDecl(
+            StructDecl.class,
+            endRecDecl.kind()
+        );
+        assertEquals(2, endRec.fields().size());
 
-        assertEquals("StartRec", startRec.name().name());
-        assertEquals("EndRec", endRec.name().name());
+        TypeDecl extraDecl = TestHelpers.assertDecl(
+            TypeDecl.class,
+            members.get(2).memberDecl(),
+            "Extra"
+        );
+        DerivedTypeDecl extra = TestHelpers.assertTypeDecl(
+            DerivedTypeDecl.class,
+            extraDecl.kind()
+        );
+        assertEquals("com.example.Extra", extra.target().name().fullName());
     }
 
     @Test
@@ -322,7 +409,7 @@ public class CreateStatementsTest {
             USE CONTEXT company;
             CREATE CONTEXT finance;
             USE CONTEXT finance;
-            CREATE STRUCT Account ( Id INT32 );
+            CREATE TYPE Account AS STRUCT ( Id INT32 );
             """);
 
         assertEquals(5, stmts.size());
@@ -335,21 +422,25 @@ public class CreateStatementsTest {
 
         TestHelpers.assertDecl(
             ContextDecl.class,
-            ctx0,
+            ctx0.decl(),
             "company"
         );
         assertEquals("company", ((ContextUse) use0.target()).qname().fullName());
         TestHelpers.assertDecl(
             ContextDecl.class,
-            ctx1,
+            ctx1.decl(),
             "finance"
         );
         assertEquals("finance", ((ContextUse)use1.target()).qname().fullName());
 
-        StructDecl struct = TestHelpers.assertDecl(
-            StructDecl.class,
-            ct,
+        TypeDecl st = TestHelpers.assertDecl(
+            TypeDecl.class,
+            ct.decl(),
             "Account"
+        );
+        StructDecl struct = TestHelpers.assertTypeDecl(
+            StructDecl.class,
+            st.kind()
         );
         assertEquals(1, struct.fields().size());
         assertEquals("Id", struct.fields().getFirst().name().name());
@@ -361,12 +452,18 @@ public class CreateStatementsTest {
 
         @Test
         void duplicateEnumValuesStillParse() {
-            var stmts = TestHelpers.parseAssert("CREATE ENUM Dups ( A: 1, B: 1 );");
-            CreateStmt ct = TestHelpers.only(stmts, CreateStmt.class);
+            var stmts = TestHelpers.parseAssert("CREATE TYPE Dups AS ENUM ( A = 1, B = 1 );");
+            CreateStmt cstmt = TestHelpers.only(stmts, CreateStmt.class);
+            TypeDecl typeDecl = TestHelpers.assertDecl(
+                TypeDecl.class,
+                cstmt.decl(),
+                "Dups"
+            );
+            EnumDecl en = TestHelpers.assertTypeDecl(
+                EnumDecl.class,
+                typeDecl.kind()
+            );
 
-            assertInstanceOf(EnumDecl.class, ct.decl());
-            EnumDecl en = (EnumDecl) ct.decl();
-            assertEquals("Dups", en.name().name());
             assertEquals(2, en.symbols().size());
         }
     }

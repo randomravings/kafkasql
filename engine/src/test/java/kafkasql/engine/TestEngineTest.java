@@ -25,12 +25,13 @@ class TestEngineTest {
         String script = """
             CREATE CONTEXT test;
             USE CONTEXT test;
-            CREATE STRUCT Customer (
+            CREATE TYPE Customer AS STRUCT (
                 Id INT32,
                 Name STRING
             );
-            CREATE STREAM CustomerEvents AS
-            TYPE test.Customer AS Customer;
+            CREATE STREAM CustomerEvents (
+            TYPE Customer AS test.Customer
+            );
             """;
         
         assertDoesNotThrow(() -> engine.execute(script), 
@@ -43,17 +44,18 @@ class TestEngineTest {
             CREATE CONTEXT test;
             USE CONTEXT test;
             
-            CREATE STRUCT Customer (
+            CREATE TYPE Customer AS STRUCT (
                 Id INT32,
-                Name STRING
+                Name STRING NULL
             );
             
-            CREATE STREAM CustomerEvents AS
-            TYPE test.Customer AS Customer;
+            CREATE STREAM CustomerEvents (
+            TYPE Customer AS test.Customer
+            );
             
             WRITE TO test.CustomerEvents
             TYPE Customer
-            VALUES({Id: 1, Name: 'Alice'});
+            VALUES(@{Id: 1});
             """;
         
         engine.execute(script);
@@ -73,9 +75,9 @@ class TestEngineTest {
         var structValue = record.value();
         var fields = structValue.fields();
         
-        assertEquals(2, fields.size(), "Customer should have 2 fields");
+        assertEquals(1, fields.size(), "Should have 1 field (nullable Name omitted)");
         assertEquals(1, fields.get("Id"), "Id should be 1");
-        assertEquals("Alice", fields.get("Name"), "Name should be 'Alice'");
+        assertFalse(fields.containsKey("Name"), "Name should not be present (nullable and not provided)");
         
         System.out.println("Generated StructValue: " + structValue);
     }
@@ -86,24 +88,25 @@ class TestEngineTest {
             CREATE CONTEXT test;
             USE CONTEXT test;
             
-            CREATE STRUCT Customer (
+            CREATE TYPE Customer AS STRUCT (
                 Id INT32,
                 Name STRING
             );
             
-            CREATE STREAM CustomerEvents AS
-            TYPE test.Customer AS Customer;
-            
-            WRITE TO test.CustomerEvents
-            TYPE Customer
-            VALUES(
-                {Id: 1, Name: 'Alice'},
-                {Id: 2, Name: 'Bob'}
+            CREATE STREAM CustomerEvents (
+            TYPE Customer AS test.Customer
             );
             
             WRITE TO test.CustomerEvents
             TYPE Customer
-            VALUES({Id: 3, Name: 'Charlie'});
+            VALUES(
+                @{Id: 1, Name: 'Alice'},
+                @{Id: 2, Name: 'Bob'}
+            );
+            
+            WRITE TO test.CustomerEvents
+            TYPE Customer
+            VALUES(@{Id: 3, Name: 'Charlie'});
             """;
         
         engine.execute(script);
@@ -135,9 +138,9 @@ class TestEngineTest {
         String script = """
             CREATE CONTEXT test;
             USE CONTEXT test;
-            CREATE STRUCT Customer (Id INT32);
-            CREATE STREAM CustomerEvents AS TYPE test.Customer AS Customer;
-            WRITE TO test.CustomerEvents TYPE Customer VALUES({Id: 1});
+            CREATE TYPE Customer AS STRUCT (Id INT32);
+            CREATE STREAM CustomerEvents (TYPE Customer AS test.Customer);
+            WRITE TO test.CustomerEvents TYPE Customer VALUES(@{Id: 1});
             """;
         
         engine.execute(script);
@@ -153,23 +156,23 @@ class TestEngineTest {
             CREATE CONTEXT test;
             USE CONTEXT test;
             
-            CREATE ENUM Status (
-                ACTIVE: 0,
-                PENDING: 1,
-                DISABLED: 2
+            CREATE TYPE Status AS ENUM (
+                ACTIVE = 0,
+                PENDING = 1,
+                DISABLED = 2
             );
             
-            CREATE STRUCT Address (
+            CREATE TYPE Address AS STRUCT (
                 Street STRING,
                 Zip STRING NULL
             );
             
-            CREATE UNION IdOrName (
+            CREATE TYPE IdOrName AS UNION (
                 Id INT32,
                 Name STRING
             );
             
-            CREATE STRUCT Customer (
+            CREATE TYPE Customer AS STRUCT (
                 Id INT64,
                 Name STRING NULL DEFAULT 'Unknown',
                 Tags LIST<STRING>,
@@ -179,18 +182,19 @@ class TestEngineTest {
                 Identifier test.IdOrName
             );
             
-            CREATE STREAM CustomerEvents AS
-            TYPE test.Customer AS Customer;
+            CREATE STREAM CustomerEvents (
+            TYPE Customer AS test.Customer
+            );
             
             WRITE TO test.CustomerEvents
             TYPE Customer
-            VALUES({
+            VALUES(@{
                 Id: 1001,
                 Name: 'Alice',
                 Tags: ['vip', 'gold'],
                 Attrs: {'level': 5, 'score': 100},
                 Status: test.Status::ACTIVE,
-                Address: {Street: '123 Main St', Zip: '12345'},
+                Address: @{Street: '123 Main St', Zip: '12345'},
                 Identifier: test.IdOrName$Id(42)
             });
             """;
@@ -240,19 +244,20 @@ class TestEngineTest {
             CREATE CONTEXT test;
             USE CONTEXT test;
             
-            CREATE STRUCT Customer (
+            CREATE TYPE Customer AS STRUCT (
                 Id INT32,
                 Name STRING,
                 Email STRING NULL,
                 Score INT32 DEFAULT 0
             );
             
-            CREATE STREAM CustomerEvents AS
-            TYPE test.Customer AS Customer;
+            CREATE STREAM CustomerEvents (
+            TYPE Customer AS test.Customer
+            );
             
             WRITE TO test.CustomerEvents
             TYPE Customer
-            VALUES({Id: 1});
+            VALUES(@{Id: 1});
             """;
         
         // Should fail - Name is required (not nullable, no default)
@@ -269,19 +274,20 @@ class TestEngineTest {
             CREATE CONTEXT test;
             USE CONTEXT test;
             
-            CREATE STRUCT Customer (
+            CREATE TYPE Customer AS STRUCT (
                 Id INT32,
                 Name STRING,
                 Email STRING NULL,
                 Score INT32 DEFAULT 100
             );
             
-            CREATE STREAM CustomerEvents AS
-            TYPE test.Customer AS Customer;
+            CREATE STREAM CustomerEvents (
+            TYPE Customer AS test.Customer
+            );
             
             WRITE TO test.CustomerEvents
             TYPE Customer
-            VALUES({Id: 1, Name: 'Alice'});
+            VALUES(@{Id: 1, Name: 'Alice'});
             """;
         
         // Should succeed - Email is nullable, Score has default

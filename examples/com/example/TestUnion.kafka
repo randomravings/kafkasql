@@ -2,9 +2,9 @@ INCLUDE 'com/example.kafka';
 INCLUDE 'com/example/TestScalar.kafka';
 INCLUDE 'com/example/TestEnum.kafka';
 
-USE CONTEXT .com.example;
+USE CONTEXT com.example;
 
-CREATE UNION TestUnion (
+CREATE TYPE TestUnion AS UNION (
     ScalarValue com.example.TestScalar,
     EnumValue com.example.TestEnum
 );

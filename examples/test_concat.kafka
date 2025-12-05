@@ -1,0 +1,12 @@
+create context test;
+
+use context test;
+
+create type Person as struct (
+    firstName STRING,
+    lastName STRING,
+    age INT32
+)
+constraint fullNameNotEmpty (check (firstName || ' ' || lastName <> ''))
+constraint ageDisplay (check ('Age: ' || age <> 'Age: '))
+;

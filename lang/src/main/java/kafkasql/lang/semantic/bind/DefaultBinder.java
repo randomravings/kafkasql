@@ -1,5 +1,6 @@
 package kafkasql.lang.semantic.bind;
 
+import kafkasql.runtime.Name;
 import kafkasql.runtime.type.*;
 import kafkasql.lang.diagnostics.Diagnostics;
 import kafkasql.lang.semantic.BindingEnv;
@@ -7,13 +8,14 @@ import kafkasql.lang.semantic.factory.ComplexTypeFactory;
 import kafkasql.lang.semantic.factory.PrimitiveTypeFactory;
 import kafkasql.lang.semantic.symbol.SymbolTable;
 import kafkasql.lang.syntax.ast.Script;
+import kafkasql.lang.syntax.ast.decl.DerivedTypeDecl;
 import kafkasql.lang.syntax.ast.decl.EnumDecl;
 import kafkasql.lang.syntax.ast.decl.ScalarDecl;
 import kafkasql.lang.syntax.ast.decl.StructDecl;
 import kafkasql.lang.syntax.ast.decl.StructFieldDecl;
 import kafkasql.lang.syntax.ast.decl.TypeDecl;
 import kafkasql.lang.syntax.ast.decl.UnionDecl;
-import kafkasql.lang.syntax.ast.literal.EnumLiteralNode;
+import kafkasql.lang.syntax.ast.fragment.DefaultNode;
 import kafkasql.lang.syntax.ast.literal.LiteralNode;
 import kafkasql.lang.syntax.ast.literal.UnionLiteralNode;
 import kafkasql.lang.syntax.ast.stmt.CreateStmt;
@@ -45,14 +47,19 @@ public final class DefaultBinder {
             if (!(stmt instanceof CreateStmt ct))
                 continue;
 
-            if (!(ct.decl() instanceof TypeDecl decl))
+            if (!(ct.decl() instanceof TypeDecl typeDecl))
                 continue;
 
-            switch (decl) {
-                case ScalarDecl s -> bindScalarDefault(s, diags, bindings);
-                case StructDecl s -> bindStructDefaults(s, symbols, diags, bindings);
-                case EnumDecl   e -> bindEnumDefault(e, symbols, diags, bindings);
-                case UnionDecl  u -> bindUnionDefault(u, symbols, diags, bindings);
+            Name name = symbols.nameOf(typeDecl).orElseThrow(() ->
+                new IllegalStateException("TypeDecl not in symbol table")
+            );
+
+            switch (typeDecl.kind()) {
+                case ScalarDecl s -> bindScalarDefault(typeDecl, diags, bindings);
+                case StructDecl s -> bindStructDefaults(typeDecl, symbols, diags, bindings);
+                case EnumDecl   e -> bindEnumDefault(name, typeDecl, symbols, diags, bindings);
+                case UnionDecl  u -> bindUnionDefault(name, typeDecl, symbols, diags, bindings);
+                case DerivedTypeDecl d -> { } // Derived types don't have their own defaults
             }
         }
     }
@@ -62,17 +69,30 @@ public final class DefaultBinder {
     // ─────────────────────────────────────────────
 
     private static void bindScalarDefault(
-        ScalarDecl scalar,
+        TypeDecl typeDecl,
         Diagnostics diags,
         BindingEnv bindings
     ) {
-        if (scalar.defaultValue().isEmpty())
+        ScalarDecl scalar = (ScalarDecl) typeDecl.kind();
+        
+        // Find DEFAULT fragment
+        DefaultNode defaultNode = typeDecl.fragments().stream()
+            .filter(f -> f instanceof DefaultNode)
+            .map(f -> (DefaultNode) f)
+            .findFirst()
+            .orElse(null);
+            
+        if (defaultNode == null)
             return;
 
-        LiteralNode lit = scalar.defaultValue().get();
+        LiteralNode lit = defaultNode.value();
 
         // Expected runtime type is the primitive base type
-        PrimitiveType baseType = PrimitiveTypeFactory.fromAst(scalar.baseType());
+        // scalar.type() is TypeNode, cast to PrimitiveTypeNode
+        if (!(scalar.type() instanceof kafkasql.lang.syntax.ast.type.PrimitiveTypeNode ptn))
+            return;
+            
+        PrimitiveType baseType = PrimitiveTypeFactory.fromAst(ptn);
 
         Object value = LiteralBinder.bindLiteralAsType(
             lit,
@@ -81,8 +101,8 @@ public final class DefaultBinder {
             bindings
         );
 
-        // Bind default value to the scalar declaration itself
-        bindings.put(scalar, value);
+        // Bind default value to the type declaration
+        bindings.put(typeDecl, value);
     }
 
     // ─────────────────────────────────────────────
@@ -90,13 +110,15 @@ public final class DefaultBinder {
     // ─────────────────────────────────────────────
 
     private static void bindStructDefaults(
-        StructDecl struct,
+        TypeDecl typeDecl,
         SymbolTable symbols,
         Diagnostics diags,
         BindingEnv bindings
     ) {
+        StructDecl struct = (StructDecl) typeDecl.kind();
+        
         // Get the pre-built runtime type from TypeBuilder
-        StructType structType = bindings.getOrNull(struct, StructType.class);
+        StructType structType = bindings.getOrNull(typeDecl, StructType.class);
         if (structType == null) {
             // Shouldn't happen if TypeBuilder ran
             return;
@@ -104,10 +126,17 @@ public final class DefaultBinder {
 
         for (StructFieldDecl field : struct.fields()) {
 
-            if (field.defaultValue().isEmpty())
+            // Find DEFAULT fragment
+            DefaultNode defaultNode = field.fragments().stream()
+                .filter(f -> f instanceof DefaultNode)
+                .map(f -> (DefaultNode) f)
+                .findFirst()
+                .orElse(null);
+                
+            if (defaultNode == null)
                 continue;
 
-            LiteralNode lit = field.defaultValue().get();
+            LiteralNode lit = defaultNode.value();
 
             // Get field type from the runtime struct type
             StructTypeField fieldInfo = structType.fields().get(field.name().name());
@@ -131,24 +160,28 @@ public final class DefaultBinder {
     // ─────────────────────────────────────────────
 
     private static void bindEnumDefault(
-        EnumDecl enumDecl,
+        Name name,
+        TypeDecl typeDecl,
         SymbolTable symbols,
         Diagnostics diags,
         BindingEnv bindings
     ) {
-        if (enumDecl.defaultValue().isEmpty()) {
+        EnumDecl enumDecl = (EnumDecl) typeDecl.kind();
+        
+        // Find DEFAULT fragment
+        DefaultNode defaultNode = typeDecl.fragments().stream()
+            .filter(f -> f instanceof DefaultNode)
+            .map(f -> (DefaultNode) f)
+            .findFirst()
+            .orElse(null);
+            
+        if (defaultNode == null)
             return;
-        }
 
-        EnumLiteralNode lit = enumDecl.defaultValue().get();
-
-        // Get the Name from symbols
-        kafkasql.runtime.Name enumName = symbols.nameOf(enumDecl).orElseThrow(() ->
-            new IllegalStateException("EnumDecl not in symbol table")
-        );
+        LiteralNode lit = defaultNode.value();
 
         // Build the runtime EnumType from the AST declaration
-        EnumType runtimeEnum = ComplexTypeFactory.fromEnumDecl(enumDecl, enumName, diags);
+        EnumType runtimeEnum = ComplexTypeFactory.fromEnumDecl(name, enumDecl, typeDecl.fragments(), diags);
 
         Object value = LiteralBinder.bindLiteralAsType(
             lit,
@@ -167,24 +200,30 @@ public final class DefaultBinder {
     // ─────────────────────────────────────────────
 
     private static void bindUnionDefault(
-        UnionDecl unionDecl,
+        Name name,
+        TypeDecl typeDecl,
         SymbolTable symbols,
         Diagnostics diags,
         BindingEnv bindings
     ) {
-        if (unionDecl.defaultValue().isEmpty()) {
+        UnionDecl unionDecl = (UnionDecl) typeDecl.kind();
+        
+        // Find DEFAULT fragment
+        DefaultNode defaultNode = typeDecl.fragments().stream()
+            .filter(f -> f instanceof DefaultNode)
+            .map(f -> (DefaultNode) f)
+            .findFirst()
+            .orElse(null);
+            
+        if (defaultNode == null)
             return;
-        }
 
-        UnionLiteralNode lit = unionDecl.defaultValue().get();
-
-        // Get the Name from symbols
-        kafkasql.runtime.Name unionName = symbols.nameOf(unionDecl).orElseThrow(() ->
-            new IllegalStateException("UnionDecl not in symbol table")
-        );
+        // Default for union must be a UnionLiteralNode
+        if (!(defaultNode.value() instanceof UnionLiteralNode lit))
+            return;
 
         // Build the runtime UnionType from the AST declaration
-        UnionType runtimeUnion = ComplexTypeFactory.fromUnionDecl(unionDecl, unionName);
+        UnionType runtimeUnion = ComplexTypeFactory.fromUnionDecl(name, unionDecl, typeDecl.fragments(), diags);
 
         Object value = LiteralBinder.bindLiteralAsType(
             lit,

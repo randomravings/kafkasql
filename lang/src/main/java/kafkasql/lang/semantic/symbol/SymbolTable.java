@@ -34,8 +34,8 @@ public final class SymbolTable {
     }
 
     public Optional<StructDecl> lookupStruct(Name name) {
-        var v = get(name);
-        if (v.isPresent() && v.get() instanceof StructDecl s)
+        var v = lookupType(name);
+        if (v.isPresent() && v.get().kind() instanceof StructDecl s)
             return Optional.of(s);
         else
             return Optional.empty();

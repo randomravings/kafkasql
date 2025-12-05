@@ -2,18 +2,21 @@ package kafkasql.lang.semantic.factory;
 
 import kafkasql.runtime.Name;
 import kafkasql.runtime.type.*;
-import kafkasql.lang.TypedOptional;
 import kafkasql.lang.diagnostics.DiagnosticCode;
 import kafkasql.lang.diagnostics.DiagnosticKind;
 import kafkasql.lang.diagnostics.Diagnostics;
+import kafkasql.lang.semantic.util.FragmentUtils;
+import kafkasql.lang.syntax.ast.AstListNode;
+import kafkasql.lang.syntax.ast.decl.DerivedTypeDecl;
 import kafkasql.lang.syntax.ast.decl.EnumDecl;
 import kafkasql.lang.syntax.ast.decl.EnumSymbolDecl;
 import kafkasql.lang.syntax.ast.decl.ScalarDecl;
 import kafkasql.lang.syntax.ast.decl.StructDecl;
 import kafkasql.lang.syntax.ast.decl.StructFieldDecl;
+import kafkasql.lang.syntax.ast.decl.TypeDecl;
 import kafkasql.lang.syntax.ast.decl.UnionDecl;
 import kafkasql.lang.syntax.ast.decl.UnionMemberDecl;
-import kafkasql.lang.syntax.ast.fragment.DocNode;
+import kafkasql.lang.syntax.ast.fragment.DeclFragment;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -40,11 +43,34 @@ public final class ComplexTypeFactory {
     // STRUCT
     // ========================================================================
 
-    public static StructType fromStructDecl(StructDecl decl, Name declName, Diagnostics diags) {
+    public static ComplexType fromTypeDecl(Name name, TypeDecl decl, Diagnostics diags) {
+        return switch (decl.kind()) {
+            case StructDecl s ->
+                fromStructDecl(name, s, decl.fragments(), diags);
+            case EnumDecl e ->
+                fromEnumDecl(name, e, decl.fragments(), diags);
+            case ScalarDecl s ->
+                fromScalarDecl(name, s, decl.fragments(), diags);
+            case UnionDecl u ->
+                fromUnionDecl(name, u, decl.fragments(), diags);
+            case DerivedTypeDecl d ->
+                throw new IllegalArgumentException("DerivedTypeDecl should be resolved to actual type before calling fromTypeDecl");
+        };
+    }
 
+    // ========================================================================
+    // STRUCT
+    // ========================================================================
+
+    public static StructType fromStructDecl(
+        Name name,
+        StructDecl decl,
+        AstListNode<DeclFragment> fragments,
+        Diagnostics diags
+    ) {
         LinkedHashMap<String, StructTypeField> fields =
             decl.fields().stream()
-                .map(ComplexTypeFactory::structFieldFromAst)
+                .map(f -> structFieldFromAst(f, diags))
                 .collect(Collectors.toMap(
                     StructTypeField::name,
                     f -> f,
@@ -53,25 +79,26 @@ public final class ComplexTypeFactory {
                 ));
 
         return new StructType(
-            declName,
+            name,
             fields,
-            extractDoc(decl.doc())
+            List.of(),  // TODO: Extract CHECK constraints
+            FragmentUtils.extractDoc(fragments, diags)
         );
     }
 
-    private static StructTypeField structFieldFromAst(StructFieldDecl f) {
+    private static StructTypeField structFieldFromAst(StructFieldDecl f, Diagnostics diags) {
 
         AnyType runtimeType = TypeFactory.fromAst(f.type());
-
-        Optional<Object> defaultValue =
-            f.defaultValue().map(dv -> LiteralValueFactory.evaluate(dv));
+        boolean nullable = f.nullable().isPresent();
+        Optional<String> doc = FragmentUtils.extractDoc(f.fragments(), diags);
+        Optional<Object> defaultValue = FragmentUtils.extractDefault(f.fragments(), diags);
 
         return new StructTypeField(
             f.name().name(),
             runtimeType,
-            f.nullable(),
+            nullable,
             defaultValue,
-            extractDoc(f.doc())
+            doc
         );
     }
 
@@ -79,38 +106,68 @@ public final class ComplexTypeFactory {
     // ENUM
     // ========================================================================
 
-    public static EnumType fromEnumDecl(EnumDecl decl, Name declName, Diagnostics diags) {
-
+    public static EnumType fromEnumDecl(
+        Name name,
+        EnumDecl decl,
+        AstListNode<DeclFragment> fragments,
+        Diagnostics diags
+    ) {
         PrimitiveType base = PrimitiveType.int32();
-        if(decl.baseType().isPresent())
-            base = PrimitiveTypeFactory.fromAst(decl.baseType().get());
-
-        if (!base.isIntegerKind()) {
-            diags.error(
-                decl.baseType().map(t -> t.range()).orElse(decl.range()),
-                DiagnosticKind.SEMANTIC,
-                DiagnosticCode.INVALID_ENUM_BASE_TYPE,
-                "Enum base type must be an integral primitive type."
-            );
+        if(decl.type().isPresent()) {
+            AnyType declaredType = TypeFactory.fromAst(decl.type().get());
+            if (!(declaredType instanceof PrimitiveType pt)) {
+                diags.error(
+                    decl.type().get().range(),
+                    DiagnosticKind.SEMANTIC,
+                    DiagnosticCode.INVALID_ENUM_BASE_TYPE,
+                    "Enum base type must be a primitive type."
+                );
+            } else {
+                base = pt;
+            }
         }
-        
+
         List<EnumTypeSymbol> symbols = decl.symbols().stream()
-            .map(ComplexTypeFactory::enumSymbolFromAst)
+            .map(f -> enumSymbolFromAst(f, diags))
             .toList();
+        
+        Optional<String> doc = FragmentUtils.extractDoc(fragments, diags);
 
         return new EnumType(
-            declName,
-            base.kind(),
+            name,
+            base,
             symbols,
-            extractDoc(decl.doc())
+            doc
         );
     }
 
-    private static EnumTypeSymbol enumSymbolFromAst(EnumSymbolDecl s) {
+    private static EnumTypeSymbol enumSymbolFromAst(
+        EnumSymbolDecl s,
+        Diagnostics diags
+    ) {
+        Optional<String> doc = FragmentUtils.extractDoc(s.fragments(), diags);
+        
+        // Evaluate the ConstExpr to get the enum symbol value
+        long value;
+        if (s.value() instanceof kafkasql.lang.syntax.ast.constExpr.ConstLiteralExpr lit) {
+            try {
+                value = Long.parseLong(lit.text());
+            } catch (NumberFormatException e) {
+                // Should never happen if parser is correct
+                throw new IllegalArgumentException("Invalid enum symbol value: " + lit.text(), e);
+            }
+        } else {
+            // For now, only support literal values
+            // TODO: Support const expressions and symbol references
+            throw new UnsupportedOperationException(
+                "Enum symbol values must be numeric literals for now. Got: " + s.value().getClass().getSimpleName()
+            );
+        }
+        
         return new EnumTypeSymbol(
             s.name().name(),
-            LiteralValueFactory.evaluateAsLong(s.value()),
-            extractDoc(s.doc())
+            value,
+            doc
         );
     }
 
@@ -118,18 +175,35 @@ public final class ComplexTypeFactory {
     // SCALAR
     // ========================================================================
 
-    public static ScalarType fromScalarDecl(ScalarDecl decl, Name declName) {
+    public static ScalarType fromScalarDecl(
+        Name name,
+        ScalarDecl decl,
+        AstListNode<DeclFragment> fragments,
+        Diagnostics diags
+    ) {
+        PrimitiveType base = null;
+        AnyType declaredType = TypeFactory.fromAst(decl.type());
+        if (!(declaredType instanceof PrimitiveType pt)) {
+            diags.error(
+                decl.type().range(),
+                DiagnosticKind.SEMANTIC,
+                DiagnosticCode.INVALID_SCALAR_BASE_TYPE,
+                "Scalar type must be a primitive type."
+            );
+            base = PrimitiveType.string(); // Fallback to string to continue
+        } else {
+            base = pt;
+        }
 
-        PrimitiveType base = PrimitiveTypeFactory.fromAst(decl.baseType());
-
-        Optional<Object> defaultValue =
-            decl.defaultValue().map(LiteralValueFactory::evaluate);
+        Optional<String> doc = FragmentUtils.extractDoc(fragments, diags);
+        Optional<Object> defaultValue = FragmentUtils.extractDefault(fragments, diags);
 
         return new ScalarType(
-            declName,
+            name,
             base,
             defaultValue,
-            extractDoc(decl.doc())
+            Optional.empty(),  // TODO: Extract CHECK constraint
+            doc
         );
     }
 
@@ -137,43 +211,41 @@ public final class ComplexTypeFactory {
     // UNION
     // ========================================================================
 
-    public static UnionType fromUnionDecl(UnionDecl decl, Name declName) {
+    public static UnionType fromUnionDecl(
+        Name name,
+        UnionDecl decl,
+        AstListNode<DeclFragment> fragments,
+        Diagnostics diags
+    ) {
 
         LinkedHashMap<String, UnionTypeMember> members =
             decl.members().stream()
-                .map(ComplexTypeFactory::unionMemberFromAst)
+                .map(f -> unionMemberFromAst(f, diags))
                 .collect(Collectors.toMap(
                     UnionTypeMember::name,
                     u -> u,
                     (a, b) -> a,
                     LinkedHashMap::new
                 ));
+        Optional<String> doc = FragmentUtils.extractDoc(fragments, diags);
 
         return new UnionType(
-            declName,
+            name,
             members,
-            extractDoc(decl.doc())
+            doc
         );
     }
 
-    private static UnionTypeMember unionMemberFromAst(UnionMemberDecl m) {
+    private static UnionTypeMember unionMemberFromAst(
+        UnionMemberDecl m,
+        Diagnostics diags
+    ) {
         AnyType runtimeType = TypeFactory.fromAst(m.type());
+        Optional<String> doc = FragmentUtils.extractDoc(m.fragments(), diags);
         return new UnionTypeMember(
             m.name().name(),
             runtimeType,
-            extractDoc(m.doc())
+            doc
         );
-    }
-
-    // ========================================================================
-    // DOC HELPER
-    // ========================================================================
-
-    private static Optional<String> extractDoc(TypedOptional<DocNode> docNode) {
-        if (docNode.isEmpty()) {
-            return Optional.empty();
-        } else {
-            return Optional.of(docNode.get().comment());
-        }
     }
 }

@@ -19,7 +19,7 @@ class CompilerTest {
     @Test
     void testScalarCodeGen() {
         String script = """
-            CREATE SCALAR PersonId AS STRING;
+            CREATE TYPE PersonId AS SCALAR STRING;
             """;
         
         var model = compile(script);
@@ -39,10 +39,10 @@ class CompilerTest {
     @Test
     void testEnumCodeGen() {
         String script = """
-            CREATE ENUM Status (
-                PENDING: 0,
-                ACTIVE: 1,
-                COMPLETED: 2
+            CREATE TYPE Status AS ENUM (
+                PENDING = 0,
+                ACTIVE = 1,
+                COMPLETED = 2
             );
             """;
         
@@ -65,7 +65,7 @@ class CompilerTest {
     @Test
     void testStructCodeGen() {
         String script = """
-            CREATE STRUCT Person (
+            CREATE TYPE Person AS STRUCT (
                 id STRING,
                 name STRING,
                 age INT32
@@ -91,18 +91,18 @@ class CompilerTest {
     @Test
     void testComplexStructCodeGen() {
         String script = """
-            CREATE ENUM Status (
-                PENDING: 0,
-                ACTIVE: 1
+            CREATE TYPE Status AS ENUM (
+                PENDING = 0,
+                ACTIVE = 1
             );
             
-            CREATE STRUCT Address (
+            CREATE TYPE Address AS STRUCT (
                 street STRING,
                 city STRING,
                 zipCode STRING NULL
             );
             
-            CREATE STRUCT Person (
+            CREATE TYPE Person AS STRUCT (
                 id STRING,
                 name STRING,
                 age INT32,
@@ -140,7 +140,7 @@ class CompilerTest {
             CREATE CONTEXT example;
             USE CONTEXT example;
             
-            CREATE STRUCT Person (
+            CREATE TYPE Person AS STRUCT (
                 id STRING,
                 name STRING
             );

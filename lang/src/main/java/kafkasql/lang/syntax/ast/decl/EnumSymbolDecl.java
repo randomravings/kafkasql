@@ -1,14 +1,14 @@
 package kafkasql.lang.syntax.ast.decl;
 
-import kafkasql.lang.TypedOptional;
 import kafkasql.lang.diagnostics.Range;
-import kafkasql.lang.syntax.ast.fragment.DocNode;
-import kafkasql.lang.syntax.ast.literal.NumberLiteralNode;
+import kafkasql.lang.syntax.ast.AstListNode;
+import kafkasql.lang.syntax.ast.constExpr.ConstExpr;
+import kafkasql.lang.syntax.ast.fragment.DeclFragment;
 import kafkasql.lang.syntax.ast.misc.Identifier;
 
 public final record EnumSymbolDecl(
     Range range,
     Identifier name,
-    NumberLiteralNode value,
-    TypedOptional<DocNode> doc
+    ConstExpr value,
+    AstListNode<DeclFragment> fragments
 ) implements TypeMemberDecl { }

@@ -56,7 +56,7 @@ public final class KafkaSqlParser {
 
     public static ParseResult parse(List<Input> sources, KafkaSqlArgs args) {
         Diagnostics diags = new Diagnostics();
-        TypedList<Script> allStmts = new TypedList<>(Script.class);
+        AstListNode<Script> allStmts = new AstListNode<>(Script.class);
 
         for (Input source : sources) {
             StringInput input = switch (source) {
