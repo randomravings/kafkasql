@@ -84,6 +84,8 @@ public final class AstPrinter extends Printer {
     private void writeStmt(Stmt stmt, int indent) throws IOException {
         switch (stmt) {
             case UseStmt u      -> writeUseStmt(u, indent);
+            case ShowStmt s     -> writeShowStmt(s, indent);
+            case ExplainStmt e  -> writeExplainStmt(e, indent);
             case CreateStmt c   -> writeCreateStmt(c, indent);
             case ReadStmt r     -> writeRead(r, indent);
             case WriteStmt w    -> writeWrite(w, indent);
@@ -104,6 +106,37 @@ public final class AstPrinter extends Printer {
         switch (t) {
             case ContextUse cu -> writeUseContext(cu, indent);
         }
+    }
+
+    private void writeShowStmt(ShowStmt s, int indent) throws IOException {
+        switch (s) {
+            case ShowCurrentStmt scs -> {
+                writeClass(scs.getClass());
+                branch("target", indent, true);
+                write("CURRENT CONTEXT");
+            }
+            case ShowAllStmt sas -> {
+                writeClass(sas.getClass());
+                branch("target", indent, true);
+                write("ALL ");
+                write(sas.target().name());
+            }
+            case ShowContextualStmt scs -> {
+                writeClass(scs.getClass());
+                branch("target", indent, true);
+                write(scs.target().name());
+                if (scs.qname().isPresent()) {
+                    branch("qname", indent, false);
+                    writeQName(scs.qname().get(), indent + 1);
+                }
+            }
+        }
+    }
+
+    private void writeExplainStmt(ExplainStmt e, int indent) throws IOException {
+        writeClass(e.getClass());
+        branch("target", indent, true);
+        writeQName(e.target(), indent + 1);
     }
 
     private void writeCreateStmt(CreateStmt c, int indent) throws IOException {

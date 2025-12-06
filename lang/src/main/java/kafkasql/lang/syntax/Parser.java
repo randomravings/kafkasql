@@ -2,6 +2,7 @@ package kafkasql.lang.syntax;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.tree.TerminalNode;
@@ -22,6 +23,7 @@ import kafkasql.lang.syntax.ast.expr.*;
 import kafkasql.lang.syntax.ast.fragment.*;
 import kafkasql.lang.syntax.ast.literal.*;
 import kafkasql.lang.syntax.ast.misc.*;
+import kafkasql.lang.syntax.ast.show.*;
 import kafkasql.lang.syntax.ast.stmt.*;
 import kafkasql.lang.syntax.ast.type.*;
 import kafkasql.lang.syntax.ast.use.*;
@@ -127,6 +129,10 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         public Stmt visitStatement(SqlStreamParser.StatementContext ctx) {
             if (ctx.useStmt() != null)
                 return visitUseStmt(ctx.useStmt());
+            if (ctx.showStmt() != null)
+                return (ShowStmt) visit(ctx.showStmt());
+            if (ctx.explainStmt() != null)
+                return visitExplainStmt(ctx.explainStmt());
             if (ctx.readStmt() != null)
                 return visitReadStmt(ctx.readStmt());
             if (ctx.writeStmt() != null)
@@ -136,7 +142,7 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             
             // Syntax error - report and return placeholder
             Range range = range(ctx);
-            reportSyntaxError(range, "Expected USE, READ, WRITE, or CREATE statement");
+            reportSyntaxError(range, "Expected USE, SHOW, EXPLAIN, READ, WRITE, or CREATE statement");
             Identifier errorId = new Identifier(range, "<error>");
             QName errorQName = QName.of(errorId);
             return new UseStmt(range, new ContextUse(range, errorQName));
@@ -176,7 +182,56 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         @Override
         public ContextUse visitContextUse(SqlStreamParser.ContextUseContext ctx) {
+            // Handle GLOBAL keyword as special marker for returning to global context
+            if (ctx.GLOBAL() != null) {
+                // Use empty QName to represent global context
+                return new ContextUse(range(ctx), new QName(range(ctx), List.of()));
+            }
             return new ContextUse(range(ctx), visitQname(ctx.qname()));
+        }
+
+        // ========================================================================
+        // SHOW
+        // ========================================================================
+
+        @Override
+        public ShowStmt visitShowCurrentStmt(SqlStreamParser.ShowCurrentStmtContext ctx) {
+            return new ShowCurrentStmt(range(ctx));
+        }
+
+        @Override
+        public ShowStmt visitShowAllStmt(SqlStreamParser.ShowAllStmtContext ctx) {
+            Range range = range(ctx);
+            ShowTarget target = parseShowTarget(ctx.showTarget());
+            return new ShowAllStmt(range, target);
+        }
+
+        @Override
+        public ShowStmt visitShowContextualStmt(SqlStreamParser.ShowContextualStmtContext ctx) {
+            Range range = range(ctx);
+            ShowTarget target = parseShowTarget(ctx.showTarget());
+            Optional<QName> qname = ctx.qname() != null 
+                ? Optional.of(visitQname(ctx.qname()))
+                : Optional.empty();
+            return new ShowContextualStmt(range, target, qname);
+        }
+
+        private ShowTarget parseShowTarget(SqlStreamParser.ShowTargetContext ctx) {
+            if (ctx.CONTEXTS() != null) return ShowTarget.CONTEXTS;
+            if (ctx.TYPES() != null) return ShowTarget.TYPES;
+            if (ctx.STREAMS() != null) return ShowTarget.STREAMS;
+            throw new IllegalStateException("Unknown show target");
+        }
+
+        // ========================================================================
+        // EXPLAIN
+        // ========================================================================
+
+        @Override
+        public ExplainStmt visitExplainStmt(SqlStreamParser.ExplainStmtContext ctx) {
+            Range range = range(ctx);
+            QName target = visitQname(ctx.qname());
+            return new ExplainStmt(range, target);
         }
 
         // ========================================================================

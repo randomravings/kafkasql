@@ -3,6 +3,7 @@ package kafkasql.engine;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import kafkasql.lang.KafkaSqlParser;
 import kafkasql.lang.KafkaSqlArgs;
@@ -11,8 +12,11 @@ import kafkasql.lang.input.Input;
 import kafkasql.lang.input.StringInput;
 import kafkasql.lang.semantic.BindingEnv;
 import kafkasql.lang.semantic.SemanticModel;
+import kafkasql.lang.semantic.symbol.SymbolTable;
 import kafkasql.lang.syntax.ast.Script;
 import kafkasql.lang.syntax.ast.stmt.*;
+import kafkasql.lang.syntax.ast.decl.Decl;
+import kafkasql.lang.syntax.ast.show.ShowTarget;
 import kafkasql.lang.syntax.ast.literal.StructLiteralNode;
 import kafkasql.runtime.Name;
 import kafkasql.runtime.value.StructValue;
@@ -35,6 +39,21 @@ import kafkasql.runtime.value.StructValue;
 public abstract class KafkaSqlEngine {
     
     private SemanticModel lastModel;
+    protected String currentContextName = null; // Track current context for SHOW filtering
+    
+    /**
+     * Set the current context name for contextual SHOW commands.
+     */
+    public void setCurrentContext(String contextName) {
+        this.currentContextName = contextName;
+    }
+    
+    /**
+     * Get the current context name.
+     */
+    public String getCurrentContext() {
+        return currentContextName;
+    }
     
     /**
      * Execute a KafkaSQL script.
@@ -86,9 +105,18 @@ public abstract class KafkaSqlEngine {
         
         // Execute statements using bindings
         BindingEnv bindings = model.bindings();
+        
+        // Count total statements to know which is the last one
+        int totalStatements = parseResult.scripts().stream()
+            .mapToInt(script -> script.statements().size())
+            .sum();
+        int currentStatement = 0;
+        
         for (Script scriptNode : parseResult.scripts()) {
             for (Stmt stmt : scriptNode.statements()) {
-                executeStatement(stmt, bindings);
+                currentStatement++;
+                boolean isLastStatement = (currentStatement == totalStatements);
+                executeStatement(stmt, bindings, isLastStatement);
             }
         }
     }
@@ -96,12 +124,14 @@ public abstract class KafkaSqlEngine {
     /**
      * Execute a statement using runtime values from bindings.
      */
-    private void executeStatement(Stmt stmt, BindingEnv bindings) {
+    private void executeStatement(Stmt stmt, BindingEnv bindings, boolean captureResults) {
         switch (stmt) {
             case WriteStmt write -> executeWrite(write, bindings);
-            case ReadStmt read -> executeRead(read, bindings);
+            case ReadStmt read -> executeRead(read, bindings, captureResults);
+            case ShowStmt show -> executeShow(show, captureResults);
+            case ExplainStmt explain -> executeExplain(explain, captureResults);
             default -> {
-                // CREATE statements are handled during binding phase
+                // CREATE and USE statements are handled during binding phase
             }
         }
     }
@@ -128,7 +158,7 @@ public abstract class KafkaSqlEngine {
     /**
      * Execute READ: Query stream via backend and apply filters.
      */
-    private void executeRead(ReadStmt read, BindingEnv bindings) {
+    private void executeRead(ReadStmt read, BindingEnv bindings, boolean captureResults) {
         Name streamName = Name.of(read.stream().context(), read.stream().name());
         
         // Get all records from the stream
@@ -152,7 +182,171 @@ public abstract class KafkaSqlEngine {
         }
         
         // TODO: Apply WHERE clauses and projections
-        handleQueryResult(filteredRecords);
+        if (captureResults) {
+            handleQueryResult(filteredRecords);
+        }
+    }
+    
+    /**
+     * Execute SHOW: Display metadata about contexts, types, or streams.
+     */
+    private void executeShow(ShowStmt show, boolean captureResults) {
+        if (!captureResults) {
+            return; // Don't capture results for replayed statements
+        }
+        
+        if (lastModel == null) {
+            handleShowResult(List.of("No schema loaded"));
+            return;
+        }
+        
+        List<String> results = new ArrayList<>();
+        var symbols = lastModel.symbols();
+        
+        switch (show) {
+            case ShowCurrentStmt scs -> {
+                // Return the current context with label
+                String context = (currentContextName != null && !currentContextName.isEmpty()) 
+                    ? currentContextName 
+                    : "(global)";
+                results.add("Current context: " + context);
+            }
+            
+            case ShowAllStmt sas -> {
+                // Show ALL: list all of the specified type globally
+                results.addAll(getAllOfType(symbols, sas.target()));
+            }
+            
+            case ShowContextualStmt scs -> {
+                // Show contextual: filter by context if qname is present
+                // If qname is empty, use current context if available
+                Optional<Name> contextFilter = scs.qname()
+                    .map(qn -> Name.of(qn.context(), qn.name()));
+                
+                // If no qname and we have a current context, use it
+                if (contextFilter.isEmpty() && currentContextName != null && !currentContextName.isEmpty()) {
+                    contextFilter = Optional.of(Name.of(currentContextName));
+                }
+                
+                results.addAll(getFilteredByContext(symbols, scs.target(), contextFilter));
+            }
+        }
+        
+        handleShowResult(results);
+    }
+    
+    /**
+     * Get all declarations of a specific type globally.
+     */
+    private List<String> getAllOfType(SymbolTable symbols, ShowTarget target) {
+        var predicate = switch (target) {
+            case CONTEXTS -> (java.util.function.Predicate<Decl>) (d -> d instanceof kafkasql.lang.syntax.ast.decl.ContextDecl);
+            case TYPES -> (java.util.function.Predicate<Decl>) (d -> d instanceof kafkasql.lang.syntax.ast.decl.TypeDecl);
+            case STREAMS -> (java.util.function.Predicate<Decl>) (d -> d instanceof kafkasql.lang.syntax.ast.decl.StreamDecl);
+        };
+        
+        var items = symbols._decl.entrySet().stream()
+            .filter(e -> predicate.test(e.getValue()))
+            .map(e -> e.getKey())
+            .sorted((a, b) -> a.fullName().compareTo(b.fullName()))
+            .map(Name::fullName)
+            .toList();
+        
+        return items;
+    }
+    
+    /**
+     * Get declarations filtered by optional context.
+     * Shows only direct children of the context (not nested grandchildren).
+     */
+    private List<String> getFilteredByContext(SymbolTable symbols, ShowTarget target, Optional<Name> contextFilter) {
+        var predicate = switch (target) {
+            case CONTEXTS -> (java.util.function.Predicate<Decl>) (d -> d instanceof kafkasql.lang.syntax.ast.decl.ContextDecl);
+            case TYPES -> (java.util.function.Predicate<Decl>) (d -> d instanceof kafkasql.lang.syntax.ast.decl.TypeDecl);
+            case STREAMS -> (java.util.function.Predicate<Decl>) (d -> d instanceof kafkasql.lang.syntax.ast.decl.StreamDecl);
+        };
+        
+        var items = symbols._decl.entrySet().stream()
+            .filter(e -> predicate.test(e.getValue()))
+            .map(e -> e.getKey())
+            .filter(name -> {
+                String fullName = name.fullName();
+                if (contextFilter.isEmpty()) {
+                    // In global context: show only top-level items (no dots)
+                    return !fullName.contains(".");
+                } else {
+                    // In specific context: show only direct children
+                    String contextPrefix = contextFilter.get().fullName() + ".";
+                    if (!fullName.startsWith(contextPrefix)) {
+                        return false;
+                    }
+                    // Check if it's a direct child (no additional dots after the prefix)
+                    String afterPrefix = fullName.substring(contextPrefix.length());
+                    return !afterPrefix.contains(".");
+                }
+            })
+            .sorted((a, b) -> a.fullName().compareTo(b.fullName()))
+            .map(Name::fullName)
+            .toList();
+        
+        return items;
+    }
+    
+    /**
+     * Execute EXPLAIN: Display the declaration for a symbol.
+     */
+    private void executeExplain(ExplainStmt explain, boolean captureResults) {
+        if (!captureResults) {
+            return; // Don't capture results for replayed statements
+        }
+        
+        if (lastModel == null) {
+            handleExplainResult("No schema loaded");
+            return;
+        }
+        
+        Name name = Name.of(explain.target().context(), explain.target().name());
+        var symbols = lastModel.symbols();
+        var decl = symbols._decl.get(name);
+        
+        if (decl == null) {
+            handleExplainResult("Object not found: " + name.fullName());
+            return;
+        }
+        
+        // Format the declaration as a CREATE statement
+        String explanation = formatDeclaration(name, decl);
+        handleExplainResult(explanation);
+    }
+    
+    /**
+     * Format a declaration as a CREATE statement string.
+     */
+    private String formatDeclaration(Name name, kafkasql.lang.syntax.ast.decl.Decl decl) {
+        switch (decl) {
+            case kafkasql.lang.syntax.ast.decl.ContextDecl cd ->
+                { return "CREATE CONTEXT " + name.fullName() + ";"; }
+            
+            case kafkasql.lang.syntax.ast.decl.TypeDecl td -> {
+                String typeName = name.fullName();
+                return switch (td.kind()) {
+                    case kafkasql.lang.syntax.ast.decl.ScalarDecl sd ->
+                        "CREATE TYPE " + typeName + " AS SCALAR ...;";
+                    case kafkasql.lang.syntax.ast.decl.EnumDecl ed ->
+                        "CREATE TYPE " + typeName + " AS ENUM (...);";
+                    case kafkasql.lang.syntax.ast.decl.StructDecl sd ->
+                        "CREATE TYPE " + typeName + " AS STRUCT (...);";
+                    case kafkasql.lang.syntax.ast.decl.UnionDecl ud ->
+                        "CREATE TYPE " + typeName + " AS UNION (...);";
+                    default -> "CREATE TYPE " + typeName + " ...;";
+                };
+            }
+            
+            case kafkasql.lang.syntax.ast.decl.StreamDecl sd ->
+                { return "CREATE STREAM " + name.fullName() + " (...);"; }
+            
+            default -> { return "Unknown declaration type"; }
+        }
     }
     
     // ========================================================================
@@ -185,6 +379,30 @@ public abstract class KafkaSqlEngine {
     protected void handleQueryResult(List<StreamRecord> records) {
         // Default: no-op
         // Subclasses can override to store results for inspection
+    }
+    
+    /**
+     * Handle the result of a SHOW statement.
+     * Subclasses can override to capture/display the results.
+     * 
+     * @param results List of strings to display (one per line)
+     */
+    protected void handleShowResult(List<String> results) {
+        // Default: print to stdout
+        for (String line : results) {
+            System.out.println(line);
+        }
+    }
+    
+    /**
+     * Handle the result of an EXPLAIN statement.
+     * Subclasses can override to capture/display the result.
+     * 
+     * @param explanation The explanation string to display
+     */
+    protected void handleExplainResult(String explanation) {
+        // Default: print to stdout
+        System.out.println(explanation);
     }
     
     /**

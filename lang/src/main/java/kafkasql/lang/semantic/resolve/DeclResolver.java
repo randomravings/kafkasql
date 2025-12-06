@@ -49,6 +49,13 @@ public final class DeclResolver {
     ) {
         switch (stmt.target()) {
             case ContextUse uc -> {
+                // Check for GLOBAL context (empty QName)
+                if (uc.qname().isRoot()) {
+                    // Return to global/root context
+                    scope.set(Name.ROOT);
+                    return;
+                }
+                
                 Name fqn = toName(uc.qname());
                 Optional<ContextDecl> ctxDecl = symbols.lookupContext(fqn);
 

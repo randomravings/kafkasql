@@ -151,6 +151,9 @@ public class InteractiveRepl {
     
     private void executeStatement(String statement) {
         try {
+            // Clear any cached results from previous statement
+            engine.clearResults();
+            
             // Execute with all previous successful statements plus the new one
             // Don't add to history yet - only add if execution succeeds
             List<String> statementsToExecute = new ArrayList<>(sessionStatements);
@@ -164,18 +167,33 @@ public class InteractiveRepl {
             // Update current context if this was a USE CONTEXT statement
             updateCurrentContext(statement);
             
-            // Check if there are query results to display
-            List<StructValue> results = engine.getLastQueryResult();
+            // Check for different types of results
+            List<StructValue> queryResults = engine.getLastQueryResult();
+            List<String> showResults = engine.getLastShowResult();
+            String explainResult = engine.getLastExplainResult();
             
-            if (!results.isEmpty()) {
+            if (!queryResults.isEmpty()) {
+                // READ query results
                 System.out.println();
-                System.out.println("Results (" + results.size() + " record" + (results.size() == 1 ? "" : "s") + "):");
+                System.out.println("Results (" + queryResults.size() + " record" + (queryResults.size() == 1 ? "" : "s") + "):");
                 System.out.println("─────────────────────────────────────────────────────────");
                 
-                for (int i = 0; i < results.size(); i++) {
-                    StructValue record = results.get(i);
+                for (int i = 0; i < queryResults.size(); i++) {
+                    StructValue record = queryResults.get(i);
                     System.out.println("[" + i + "] " + formatRecord(record));
                 }
+                System.out.println();
+            } else if (!showResults.isEmpty()) {
+                // SHOW statement results
+                System.out.println();
+                for (String line : showResults) {
+                    System.out.println("  " + line);
+                }
+                System.out.println();
+            } else if (!explainResult.isEmpty()) {
+                // EXPLAIN statement result
+                System.out.println();
+                System.out.println(explainResult);
                 System.out.println();
             } else {
                 // Provide more descriptive success messages
@@ -183,7 +201,7 @@ public class InteractiveRepl {
                 System.out.println(msg);
             }
             
-        } catch (RuntimeException e) {
+        } catch (Exception e) {
             System.err.println();
             System.err.println("Error: " + e.getMessage());
             System.err.println();
@@ -202,7 +220,14 @@ public class InteractiveRepl {
             String afterUse = trimmed.substring("USE CONTEXT".length()).trim();
             String contextName = afterUse.replace(";", "").trim();
             if (!contextName.isEmpty()) {
-                currentContext = "[" + contextName + "]";
+                // Check if it's GLOBAL keyword to return to global context
+                if (contextName.equalsIgnoreCase("GLOBAL")) {
+                    currentContext = "(global)";
+                    engine.setCurrentContext(null); // null represents global context
+                } else {
+                    currentContext = "[" + contextName + "]";
+                    engine.setCurrentContext(contextName); // Pass just the name, not the display string
+                }
             }
         } else if (upper.startsWith("CREATE CONTEXT")) {
             // Extract context name from "CREATE CONTEXT x;" - no auto-switch

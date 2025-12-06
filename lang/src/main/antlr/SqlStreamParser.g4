@@ -25,6 +25,8 @@ statementList
 
 statement
   : useStmt
+  | showStmt
+  | explainStmt
   | readStmt
   | writeStmt
   | createStmt
@@ -36,7 +38,25 @@ useStmt
   ;
 
 contextUse
-  : CONTEXT qname
+  : CONTEXT (qname | GLOBAL)
+  ;
+
+/* ─────────────────────── Show Statements ─────────────────── */
+showStmt
+  : SHOW CURRENT CONTEXT                       # ShowCurrentStmt
+  | SHOW ALL showTarget                        # ShowAllStmt
+  | SHOW showTarget qname?                     # ShowContextualStmt
+  ;
+
+showTarget
+  : CONTEXTS
+  | TYPES
+  | STREAMS
+  ;
+
+/* ─────────────────────── Explain Statement ─────────────────── */
+explainStmt
+  : EXPLAIN qname
   ;
 
 /* ─────────────────────── Read Statements ─────────────────── */

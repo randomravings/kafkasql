@@ -17,6 +17,8 @@ public class InteractiveEngine extends KafkaSqlEngine {
     
     private final Map<Name, List<StreamRecord>> streams = new HashMap<>();
     private List<StructValue> lastQueryResult = new ArrayList<>();
+    private List<String> lastShowResult = new ArrayList<>();
+    private String lastExplainResult = "";
     
     @Override
     protected void writeRecord(Name streamName, String typeName, StructValue value) {
@@ -36,11 +38,35 @@ public class InteractiveEngine extends KafkaSqlEngine {
             .toList();
     }
     
+    @Override
+    protected void handleShowResult(List<String> results) {
+        lastShowResult = new ArrayList<>(results);
+    }
+    
+    @Override
+    protected void handleExplainResult(String explanation) {
+        lastExplainResult = explanation;
+    }
+    
     /**
      * Get the results from the last READ query.
      */
     public List<StructValue> getLastQueryResult() {
         return lastQueryResult;
+    }
+    
+    /**
+     * Get the results from the last SHOW statement.
+     */
+    public List<String> getLastShowResult() {
+        return lastShowResult;
+    }
+    
+    /**
+     * Get the result from the last EXPLAIN statement.
+     */
+    public String getLastExplainResult() {
+        return lastExplainResult;
     }
     
     /**
@@ -56,5 +82,16 @@ public class InteractiveEngine extends KafkaSqlEngine {
     public void clear() {
         streams.clear();
         lastQueryResult.clear();
+        lastShowResult.clear();
+        lastExplainResult = "";
+    }
+    
+    /**
+     * Clear only the cached results, not the model/streams.
+     */
+    public void clearResults() {
+        lastQueryResult.clear();
+        lastShowResult.clear();
+        lastExplainResult = "";
     }
 }
