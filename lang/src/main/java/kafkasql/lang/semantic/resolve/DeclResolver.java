@@ -9,6 +9,8 @@ import kafkasql.lang.semantic.symbol.SymbolTable;
 import kafkasql.lang.syntax.ast.Script;
 import kafkasql.lang.syntax.ast.decl.ContextDecl;
 import kafkasql.lang.syntax.ast.decl.Decl;
+import kafkasql.lang.syntax.ast.decl.StreamDecl;
+import kafkasql.lang.syntax.ast.decl.TypeDecl;
 import kafkasql.lang.syntax.ast.misc.QName;
 import kafkasql.lang.syntax.ast.stmt.CreateStmt;
 import kafkasql.lang.syntax.ast.stmt.Stmt;
@@ -72,10 +74,16 @@ public final class DeclResolver {
         Diagnostics diags
     ) {
         Optional<Name> canonicalFqn = Optional.empty();
-        if ((stmt.decl() instanceof Decl c))
-            canonicalFqn = anyName(scope, diags, c);
-        else
-            canonicalFqn = contextName(scope, diags, stmt.decl());
+        
+        // Only STREAMs require an active context
+        // ContextDecl and TypeDecl can be created at global scope
+        if (stmt.decl() instanceof StreamDecl) {
+            canonicalFqn = requireActiveContext(scope, diags, stmt.decl());
+            if (canonicalFqn.isEmpty())
+                return;
+        } else {
+            canonicalFqn = anyName(scope, diags, stmt.decl());
+        }
 
         if (duplicate(canonicalFqn.get(), symbols, diags, stmt.range()))
             return;
@@ -88,22 +96,28 @@ public final class DeclResolver {
     // =======================================================================
     
     /**
-     * Construct canonical context name from simple identifier
-     * Returns empty if context is global (error reported)
+     * Construct canonical name for declarations that require an active context.
+     * Returns empty if context is global (error reported).
+     * Used for TYPE and STREAM declarations.
      * 
-     * @param scope
-     * @param diags
-     * @param decl
-     * @return
+     * @param scope current context scope
+     * @param diags diagnostics
+     * @param decl declaration (TypeDecl or StreamDecl)
+     * @return fully-qualified name
      */
-    private static Optional<Name> contextName(ContextScope scope, Diagnostics diags, Decl decl) {
+    private static Optional<Name> requireActiveContext(ContextScope scope, Diagnostics diags, Decl decl) {
         if (scope.isGlobal()) {
+            String declType = switch (decl) {
+                case TypeDecl t -> "TYPE";
+                case StreamDecl s -> "STREAM";
+                default -> "declaration";
+            };
             diags.error(
                 decl.range(),
                 DiagnosticKind.SEMANTIC,
                 DiagnosticCode.INVALID_TYPE_REF,
-                "Types must be created inside a context. " +
-                "Call USE CONTEXT <name>; before CREATE TYPE."
+                declType + " must be created inside a context. " +
+                "Use CREATE CONTEXT <name>; and USE CONTEXT <name>; first."
             );
             return Optional.empty();
         }

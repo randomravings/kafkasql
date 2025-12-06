@@ -189,11 +189,27 @@ public final class TypeResolver {
             Optional<TypeDecl> decl = symbols.lookupType(name);
 
             if (decl.isEmpty()) {
+                String message = "Unknown type reference: " + name;
+                
+                // Add helpful hint for common primitive type typos
+                String lowerName = name.name().toLowerCase();
+                if (lowerName.equals("int") || lowerName.equals("integer")) {
+                    message += ". Did you mean INT32, INT64, INT16, or INT8?";
+                } else if (lowerName.equals("bool")) {
+                    message += ". Did you mean BOOLEAN?";
+                } else if (lowerName.equals("str") || lowerName.equals("text")) {
+                    message += ". Did you mean STRING?";
+                } else if (lowerName.equals("float") || lowerName.equals("double")) {
+                    message += ". Did you mean FLOAT32, FLOAT64, or DECIMAL?";
+                } else if (lowerName.equals("byte") || lowerName.equals("binary")) {
+                    message += ". Did you mean BYTES?";
+                }
+                
                 diags.error(
                     ref.range(),
                     DiagnosticKind.SEMANTIC,
                     DiagnosticCode.UNKNOWN_TYPE,
-                    "Unknown type reference: " + name
+                    message
                 );
                 return;
             }

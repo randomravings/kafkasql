@@ -128,7 +128,7 @@ primitiveType
   | decimalType
   ;
 
-booleanType      : BOOL ;
+booleanType      : BOOLEAN ;
 int8Type         : INT8 ;
 int16Type        : INT16 ;
 int32Type        : INT32 ;

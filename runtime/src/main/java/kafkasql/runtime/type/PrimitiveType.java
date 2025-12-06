@@ -5,7 +5,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class PrimitiveType implements AnyType {
     private static final PrimitiveType BOOL_T =
-        new PrimitiveType(PrimitiveKind.BOOL, -1, (byte)-1, (byte)-1);
+        new PrimitiveType(PrimitiveKind.BOOLEAN, -1, (byte)-1, (byte)-1);
     private static final PrimitiveType INT8_T =
         new PrimitiveType(PrimitiveKind.INT8, -1, (byte)-1, (byte)-1);
     private static final PrimitiveType INT16_T =
@@ -76,7 +76,7 @@ public final class PrimitiveType implements AnyType {
     }
 
     public boolean isBooleanKind() {
-        return _kind == PrimitiveKind.BOOL;
+        return _kind == PrimitiveKind.BOOLEAN;
     }
 
     public boolean isIntegerKind() {

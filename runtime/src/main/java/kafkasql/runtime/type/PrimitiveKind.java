@@ -1,7 +1,7 @@
 package kafkasql.runtime.type;
 
 public enum PrimitiveKind {
-    BOOL,
+    BOOLEAN,
     INT8,
     INT16,
     INT32,

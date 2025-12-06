@@ -1,6 +1,7 @@
 package kafkasql.engine;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 import kafkasql.lang.KafkaSqlParser;
@@ -31,28 +32,56 @@ import kafkasql.runtime.value.StructValue;
  * 
  * Throws RuntimeException for parse/semantic errors or execution failures.
  */
-public abstract class KafkaEngine {
+public abstract class KafkaSqlEngine {
+    
+    private SemanticModel lastModel;
     
     /**
      * Execute a KafkaSQL script.
      * Parses, binds, validates, and executes all statements.
      * 
+     * Note: CREATE statements are only visible within this single execute() call.
+     * To share schema across multiple scripts, use executeAll().
+     * 
      * @param script The KafkaSQL source code
      * @throws RuntimeException if parsing/binding fails or execution error
      */
     public void execute(String script) {
-        // Parse and bind
-        Input input = new StringInput("script.kafka", script);
+        executeAll(script);
+    }
+    
+    /**
+     * Execute multiple KafkaSQL scripts together in one binding session.
+     * This allows CREATE statements in earlier scripts to be visible to later scripts.
+     * 
+     * @param scripts The KafkaSQL source codes to execute together
+     * @throws RuntimeException if parsing/binding fails or execution error
+     */
+    public void executeAll(String... scripts) {
+        List<Input> inputs = new ArrayList<>();
+        for (int i = 0; i < scripts.length; i++) {
+            inputs.add(new StringInput("script" + i + ".kafka", scripts[i]));
+        }
+        
         KafkaSqlArgs args = new KafkaSqlArgs(Path.of(""), false, false);
-        ParseResult parseResult = KafkaSqlParser.parse(List.of(input), args);
+        ParseResult parseResult = KafkaSqlParser.parse(inputs, args);
         
         if (parseResult.diags().hasError()) {
-            throw new RuntimeException("Parse error: " + parseResult.diags().errors());
+            String errorDetails = parseResult.diags().errors().stream()
+                .map(Object::toString)
+                .reduce((a, b) -> a + "\n" + b)
+                .orElse("Unknown parse error");
+            throw new RuntimeException("Parse errors:\n" + errorDetails);
         }
         
         SemanticModel model = KafkaSqlParser.bind(parseResult);
+        lastModel = model; // Store for inspection
         if (model.hasErrors()) {
-            throw new RuntimeException("Semantic error: " + model.allErrors());
+            String errorDetails = model.diags().errors().stream()
+                .map(Object::toString)
+                .reduce((a, b) -> a + "\n" + b)
+                .orElse("Unknown semantic error");
+            throw new RuntimeException("Semantic errors:\n" + errorDetails);
         }
         
         // Execute statements using bindings
@@ -102,13 +131,28 @@ public abstract class KafkaEngine {
     private void executeRead(ReadStmt read, BindingEnv bindings) {
         Name streamName = Name.of(read.stream().context(), read.stream().name());
         
-        // Delegate to backend for querying
-        // TODO: Pass type filters, WHERE clauses, projections to backend
-        List<StreamRecord> records = readRecords(streamName);
+        // Get all records from the stream
+        List<StreamRecord> allRecords = readRecords(streamName);
         
-        // For now, extract all StructValues
-        // TODO: Apply filtering and projection here
-        handleQueryResult(records);
+        // Filter by type if specific types are requested
+        List<StreamRecord> filteredRecords;
+        if (read.blocks().isEmpty()) {
+            // No type blocks means read all
+            filteredRecords = allRecords;
+        } else {
+            // Collect requested type names from type blocks
+            java.util.Set<String> requestedTypes = read.blocks().stream()
+                .map(block -> block.alias().name())
+                .collect(java.util.stream.Collectors.toSet());
+            
+            // Filter records to only include requested types
+            filteredRecords = allRecords.stream()
+                .filter(record -> requestedTypes.contains(record.typeName()))
+                .toList();
+        }
+        
+        // TODO: Apply WHERE clauses and projections
+        handleQueryResult(filteredRecords);
     }
     
     // ========================================================================
@@ -141,6 +185,16 @@ public abstract class KafkaEngine {
     protected void handleQueryResult(List<StreamRecord> records) {
         // Default: no-op
         // Subclasses can override to store results for inspection
+    }
+    
+    /**
+     * Get the last semantic model from execution.
+     * Useful for querying declared streams, types, contexts, etc.
+     * 
+     * @return The semantic model from the last executeAll() call, or null if not yet executed
+     */
+    public SemanticModel getLastModel() {
+        return lastModel;
     }
     
     // ========================================================================

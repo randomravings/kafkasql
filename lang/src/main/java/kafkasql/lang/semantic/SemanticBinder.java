@@ -14,9 +14,19 @@ import kafkasql.lang.semantic.bind.DefaultBinder;
 
 public final class SemanticBinder {
 
+    /**
+     * Bind scripts starting with a fresh SymbolTable.
+     */
     public static SemanticModel bind(List<Script> scripts, Diagnostics diags) {
-
         SymbolTable symbols = new SymbolTable();
+        return bind(scripts, symbols, diags);
+    }
+
+    /**
+     * Bind scripts using an existing SymbolTable (for persistent semantic model).
+     * This allows CREATE statements to accumulate across multiple execute() calls.
+     */
+    public static SemanticModel bind(List<Script> scripts, SymbolTable symbols, Diagnostics diags) {
         BindingEnv bindings = new BindingEnv();
         ContextScope scope = new ContextScope();
 

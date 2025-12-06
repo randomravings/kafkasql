@@ -52,7 +52,7 @@ public final class ConstraintBinder {
         AnyType resultType = exprBinder.bind(check.expr());
         
         // Validate: CHECK must evaluate to BOOLEAN
-        if (!(resultType instanceof PrimitiveType pt) || pt.kind() != PrimitiveKind.BOOL) {
+        if (!(resultType instanceof PrimitiveType pt) || pt.kind() != PrimitiveKind.BOOLEAN) {
             diags.error(
                 check.range(),
                 DiagnosticKind.SEMANTIC,
@@ -129,7 +129,7 @@ public final class ConstraintBinder {
             AnyType resultType = exprBinder.bind(check.expr());
             
             // Validate: CHECK must evaluate to BOOLEAN
-            if (!(resultType instanceof PrimitiveType pt) || pt.kind() != PrimitiveKind.BOOL) {
+            if (!(resultType instanceof PrimitiveType pt) || pt.kind() != PrimitiveKind.BOOLEAN) {
                 diags.error(
                     check.range(),
                     DiagnosticKind.SEMANTIC,

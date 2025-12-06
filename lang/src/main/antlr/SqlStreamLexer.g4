@@ -34,7 +34,7 @@ DEFAULT       : [Dd][Ee][Ff][Aa][Uu][Ll][Tt] ;
 TRUE          : [Tt][Rr][Uu][Ee] ;
 FALSE         : [Ff][Aa][Ll][Ss][Ee] ;
 NULL          : [Nn][Uu][Ll][Ll] ;
-BOOL          : [Bb][Oo][Oo][Ll] ;
+BOOLEAN       : [Bb][Oo][Oo][Ll][Ee][Aa][Nn] ;
 INT8          : [Ii][Nn][Tt] '8' ;
 INT16         : [Ii][Nn][Tt] '16' ;
 INT32         : [Ii][Nn][Tt] '32' ;

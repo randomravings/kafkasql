@@ -2,7 +2,7 @@ package kafkasql.engine.impl;
 
 import java.util.*;
 
-import kafkasql.engine.KafkaEngine;
+import kafkasql.engine.KafkaSqlEngine;
 import kafkasql.runtime.Name;
 import kafkasql.runtime.value.StructValue;
 
@@ -15,7 +15,7 @@ import kafkasql.runtime.value.StructValue;
  * Key design: The engine's internal operations work ONLY with runtime types
  * (StructValue, StructType, etc.) - no AST or semantic dependencies.
  */
-public final class TestEngine extends KafkaEngine {
+public final class TestEngine extends KafkaSqlEngine {
     
     // In-memory storage: stream name -> list of records
     private final Map<Name, List<StreamRecord>> streams;

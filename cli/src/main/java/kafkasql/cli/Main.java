@@ -23,9 +23,11 @@ public class Main {
 
     private static void usage() {
         System.out.println("Usage:");
+        System.out.println("  kafkasql                                    (interactive mode)");
         System.out.println("  kafkasql [-a] [-n] (-f <f1.kafka>[,<f2.kafka>...] ...)");
         System.out.println("  kafkasql [-a] -t <script...>");
         System.out.println("Options:");
+        System.out.println("  -i, --interactive   Interactive REPL mode (default if no files)");
         System.out.println("  -w, --working-dir   Base directory for includes (default: .)");
         System.out.println("  -f, --files         Comma separated list (can repeat)");
         System.out.println("  -t, --text          Inline script (consumes all remaining args)");
@@ -40,12 +42,14 @@ public class Main {
         boolean printAst = false;
         boolean resolveIncludes = true;
         boolean trace = false;
+        boolean interactive = false;
         String inlineText = null;
         List<String> fileArgs = new ArrayList<>();
 
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
             switch (a) {
+                case "-i", "--interactive" -> interactive = true;
                 case "-w", "--working-dir" -> {
                     if (++i >= args.length) {
                         err("missing value for --working-dir/-w");
@@ -105,6 +109,23 @@ public class Main {
             usage();
             return;
         }
+        
+        // If no files or text provided, and not explicitly requested non-interactive, start REPL
+        if (!interactive && inlineText == null && fileArgs.isEmpty()) {
+            interactive = true;
+        }
+        
+        // Interactive mode
+        if (interactive) {
+            if (inlineText != null || !fileArgs.isEmpty()) {
+                err("cannot use --interactive with --files or --text");
+                usage();
+                return;
+            }
+            InteractiveRepl repl = new InteractiveRepl();
+            repl.run();
+            return;
+        }
 
         Path wd = Path.of(workingDir != null ? workingDir : ".").toAbsolutePath().normalize();
         KafkaSqlArgs parseArgs = new KafkaSqlArgs(wd, resolveIncludes, trace);
@@ -154,9 +175,9 @@ public class Main {
 
         SemanticModel model = KafkaSqlParser.bind(parseResult);
 
-        if (parseResult.diags().hasError()) {
+        if (model.hasErrors()) {
             System.out.println("Binding failed with errors:");
-            printDiags(parseResult.diags());
+            printDiags(model.diags());
             System.exit(1);
         }
 

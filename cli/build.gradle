@@ -5,7 +5,9 @@ plugins {
 }
 
 dependencies {
+  implementation project(':runtime')
   implementation project(':lang')
+  implementation project(':engine')
 }
 
 application {

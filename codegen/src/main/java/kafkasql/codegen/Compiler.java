@@ -232,7 +232,7 @@ public class Compiler {
     
     private String mapPrimitiveType(PrimitiveType type) {
         return switch (type.kind()) {
-            case BOOL -> "boolean";
+            case BOOLEAN -> "boolean";
             case INT8 -> "byte";
             case INT16 -> "short";
             case INT32 -> "int";
@@ -277,7 +277,7 @@ public class Compiler {
     
     private boolean isPrimitivePrimitive(PrimitiveType type) {
         return switch (type.kind()) {
-            case BOOL, INT8, INT16, INT32, INT64, FLOAT32, FLOAT64 -> true;
+            case BOOLEAN, INT8, INT16, INT32, INT64, FLOAT32, FLOAT64 -> true;
             default -> false;
         };
     }

@@ -66,8 +66,11 @@ public final class PrimitiveTypeNode implements TypeNode {
         return _scale;
     }
 
+    public static PrimitiveTypeNode createBool(Range range) {
+        return new PrimitiveTypeNode(range, PrimitiveKind.BOOLEAN);
+    }
     public static PrimitiveTypeNode bool(Range range) {
-        return new PrimitiveTypeNode(range, PrimitiveKind.BOOL);
+        return createBool(range);
     }
     public static PrimitiveTypeNode int8(Range range) {
         return new PrimitiveTypeNode(range, PrimitiveKind.INT8);

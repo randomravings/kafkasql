@@ -223,6 +223,20 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         public TypeDecl visitTypeDecl(SqlStreamParser.TypeDeclContext ctx) {
             Range range = range(ctx);
             Identifier name = visitTypeName(ctx.typeName());
+            
+            // Check if typeKindDecl is null (syntax error case)
+            if (ctx.typeKindDecl() == null) {
+                reportSyntaxError(range, 
+                    "Expected type definition after TYPE keyword. " +
+                    "Use: TYPE <name> AS STRUCT (...) or TYPE <name> AS SCALAR <primitive> etc.");
+                // Return a placeholder to continue parsing
+                Identifier errorId = new Identifier(range, "<error>");
+                QName errorQName = QName.of(errorId);
+                ComplexTypeNode errorType = new ComplexTypeNode(range, errorQName);
+                TypeKindDecl errorKind = new DerivedTypeDecl(range, errorType);
+                return new TypeDecl(range, name, errorKind, new AstListNode<>(DeclFragment.class));
+            }
+            
             TypeKindDecl typeKindDecl = visitTypeKindDecl(ctx.typeKindDecl());
             AstListNode<DeclFragment> fragments = visitDeclTailFragments(ctx.declTailFragments());
             return new TypeDecl(range, name, typeKindDecl, fragments);
@@ -270,6 +284,14 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         @Override
         public Identifier visitIdentifier(SqlStreamParser.IdentifierContext ctx) {
+            if (ctx.ID() == null) {
+                Range range = range(ctx);
+                _diags.syntaxError(
+                    range,
+                    "Expected identifier but found invalid token. Check for typos in type names (use INT32, STRING, etc.)"
+                );
+                return new Identifier(range, "<error>");
+            }
             return new Identifier(range(ctx), ctx.ID().getText());
         }
 
@@ -935,6 +957,17 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         @Override
         public Expr visitCmpExpr(SqlStreamParser.CmpExprContext ctx) {
+            if (ctx == null) {
+                // Should not happen - indicates parser generated invalid context
+                Range errorRange = new Range("<error>", -1, -1, -1, -1);
+                reportSyntaxError(errorRange, "Invalid expression context - possible syntax error with parentheses or operators");
+                return new LiteralExpr(errorRange, new NullLiteralNode(errorRange));
+            }
+            if (ctx.concatExpr(0) == null) {
+                Range range = range(ctx);
+                reportSyntaxError(range, "Expected expression");
+                return new LiteralExpr(range, new NullLiteralNode(range));
+            }
             Expr result = visitConcatExpr(ctx.concatExpr(0));
             int concatIndex = 1;
 

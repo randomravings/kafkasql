@@ -144,7 +144,7 @@ public final class StatementBinder {
             Expr expr = block.where().get().expr();
             AnyType t = exprBinder.bind(expr);
 
-            if (!(t instanceof PrimitiveType pt) || pt.kind() != PrimitiveKind.BOOL) {
+            if (!(t instanceof PrimitiveType pt) || pt.kind() != PrimitiveKind.BOOLEAN) {
                 diags.error(
                     expr.range(),
                     DiagnosticKind.SEMANTIC,

@@ -10,6 +10,7 @@ import kafkasql.lang.diagnostics.Diagnostics;
 import kafkasql.lang.diagnostics.Range;
 import kafkasql.lang.input.*;
 import kafkasql.lang.semantic.SemanticModel;
+import kafkasql.lang.semantic.symbol.SymbolTable;
 import kafkasql.lang.syntax.*;
 import kafkasql.lang.syntax.ast.*;
 import kafkasql.lang.semantic.SemanticBinder;
@@ -48,6 +49,13 @@ public final class KafkaSqlParser {
 
     public static SemanticModel bind(ParseResult parseResult) {
         return SemanticBinder.bind(parseResult.scripts(), parseResult.diags());
+    }
+
+    /**
+     * Bind using an existing SymbolTable (for persistent semantic model).
+     */
+    public static SemanticModel bind(ParseResult parseResult, SymbolTable symbols) {
+        return SemanticBinder.bind(parseResult.scripts(), symbols, parseResult.diags());
     }
 
     // =============================================================

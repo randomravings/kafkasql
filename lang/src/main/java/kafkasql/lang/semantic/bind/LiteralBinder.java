@@ -68,8 +68,38 @@ public final class LiteralBinder {
             case PrimitiveType p ->
                 bindPrimitiveLiteral(node, p, diags);
 
-            case ScalarType s ->
-                bindPrimitiveLiteral(node, s.primitive(), diags);
+            case ScalarType s -> {
+                // Bind the primitive value first
+                Object value = bindPrimitiveLiteral(node, s.primitive(), diags);
+                
+                // Validate CHECK constraint if present
+                if (value != null && s.check().isPresent()) {
+                    var check = s.check().get();
+                    var env = java.util.Map.of("value", value);
+                    try {
+                        Object result = kafkasql.runtime.expr.ExpressionEvaluator.evaluate(check.expr(), env);
+                        if (!(result instanceof Boolean) || !((Boolean) result)) {
+                            diags.error(
+                                node.range(),
+                                DiagnosticKind.SEMANTIC,
+                                DiagnosticCode.INVALID_CHECK_CONSTRAINT,
+                                "CHECK constraint failed for scalar type " + s.fqn() + 
+                                ": value " + value + " does not satisfy constraint"
+                            );
+                            yield null;
+                        }
+                    } catch (Exception e) {
+                        diags.error(
+                            node.range(),
+                            DiagnosticKind.SEMANTIC,
+                            DiagnosticCode.INVALID_CHECK_CONSTRAINT,
+                            "Error evaluating CHECK constraint: " + e.getMessage()
+                        );
+                        yield null;
+                    }
+                }
+                yield value;
+            }
 
             case EnumType e ->
                 bindEnumLiteral(node, e, diags);
@@ -126,7 +156,38 @@ public final class LiteralBinder {
         return switch (expectedType) {
 
             case PrimitiveType p      -> bindPrimitiveLiteral(node, p, diags);
-            case ScalarType s         -> bindPrimitiveLiteral(node, s.primitive(), diags);
+            case ScalarType s -> {
+                // Bind the primitive value first
+                Object value = bindPrimitiveLiteral(node, s.primitive(), diags);
+                
+                // Validate CHECK constraint if present
+                if (value != null && s.check().isPresent()) {
+                    var check = s.check().get();
+                    var env = java.util.Map.of("value", value);
+                    try {
+                        Object result = kafkasql.runtime.expr.ExpressionEvaluator.evaluate(check.expr(), env);
+                        if (!(result instanceof Boolean) || !((Boolean) result)) {
+                            diags.error(
+                                node.range(),
+                                DiagnosticKind.SEMANTIC,
+                                DiagnosticCode.INVALID_CHECK_CONSTRAINT,
+                                "CHECK constraint failed for scalar type " + s.fqn() + 
+                                ": value " + value + " does not satisfy constraint"
+                            );
+                            yield null;
+                        }
+                    } catch (Exception e) {
+                        diags.error(
+                            node.range(),
+                            DiagnosticKind.SEMANTIC,
+                            DiagnosticCode.INVALID_CHECK_CONSTRAINT,
+                            "Error evaluating CHECK constraint: " + e.getMessage()
+                        );
+                        yield null;
+                    }
+                }
+                yield value;
+            }
             case EnumType e           -> bindEnumLiteral(node, e, diags);
             case StructType st        -> bindStructLiteral(node, st, diags, bindings);
             case UnionType ut         -> bindUnionLiteral(node, ut, diags, bindings);
@@ -170,7 +231,7 @@ public final class LiteralBinder {
 
         return switch (type.kind()) {
 
-            case PrimitiveKind.BOOL -> bindBool(node, diags);
+            case PrimitiveKind.BOOLEAN -> bindBool(node, diags);
 
             case PrimitiveKind.INT8 -> bindInt8(node, diags);
             case PrimitiveKind.INT16 -> bindInt16(node, diags);

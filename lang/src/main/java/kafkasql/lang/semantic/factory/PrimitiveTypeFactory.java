@@ -11,7 +11,7 @@ public final class PrimitiveTypeFactory {
         return switch (ast.kind()) {
 
             // Simple Types
-            case BOOL -> PrimitiveType.bool();
+            case BOOLEAN -> PrimitiveType.bool();
             case INT8 -> PrimitiveType.int8();
             case INT16 -> PrimitiveType.int16();
             case INT32 -> PrimitiveType.int32();
