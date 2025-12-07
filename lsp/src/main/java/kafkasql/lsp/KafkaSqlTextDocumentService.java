@@ -2,13 +2,16 @@ package kafkasql.lsp;
 
 import java.nio.file.*;
 
-import kafkasql.lang.IncludeResolver;
-import kafkasql.lang.KafkaSqlArgs;
-import kafkasql.lang.KafkaSqlParser;
-import kafkasql.lang.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.DiagnosticEntry;
 import kafkasql.lang.input.Input;
 import kafkasql.lang.input.StringInput;
-import kafkasql.lang.semantic.SemanticModel;
+import kafkasql.pipeline.Pipeline;
+import kafkasql.pipeline.PipelineContext;
+import kafkasql.pipeline.PipelineResult;
+import kafkasql.pipeline.phases.LintPhase;
+import kafkasql.pipeline.phases.ParsePhase;
+import kafkasql.pipeline.phases.SemanticPhase;
 
 import org.eclipse.lsp4j.*;
 import org.eclipse.lsp4j.services.*;
@@ -20,6 +23,16 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
 
   private LanguageClient client;
   private String workspaceRoot = null;
+  private final Pipeline pipeline;
+
+  public KafkaSqlTextDocumentService() {
+    // Build pipeline once and reuse for all document changes
+    this.pipeline = Pipeline.builder()
+        .addPhase(new ParsePhase())
+        .addPhase(new SemanticPhase())
+        .addPhase(new LintPhase())
+        .build();
+  }
 
   void setClient(LanguageClient client) {
     this.client = client;
@@ -78,38 +91,26 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
 
     System.err.println("[kafkasql-lsp] parseAndPublishDiagnostics for " + uri);
 
-    // Resolve includes first
     Path workingDir = Path.of(this.workspaceRoot);
-    Diagnostics diags = new Diagnostics();
-    
-    // Start with the current file as StringInput
     Input currentInput = new StringInput(uri, text);
-    List<Input> inputs = IncludeResolver.buildIncludeOrder(
-        List.of(currentInput), 
-        workingDir, 
-        diags
-    );
     
-    if (diags.hasError()) {
-      sendDiagnostics(uri, diags);
-      return;
+    // Build pipeline context
+    PipelineContext context = PipelineContext.builder()
+        .inputs(List.of(currentInput))
+        .workingDir(workingDir)
+        .includeResolution(true)
+        .verbose(false)
+        .build();
+    
+    // Execute pipeline
+    PipelineResult result = pipeline.execute(context);
+    
+    // Send diagnostics
+    if (result.diagnostics().all().isEmpty()) {
+      sendOk(uri);
+    } else {
+      sendDiagnostics(uri, result.diagnostics());
     }
-
-    // Now compile with all resolved includes
-    KafkaSqlArgs args = new KafkaSqlArgs(workingDir, true, false);
-    SemanticModel model = KafkaSqlParser.compile(inputs, args);
-    if (model.diags().hasError()) {
-      sendDiagnostics(uri, model.diags());
-      return;
-    }
-
-    // pr = KafkaSqlParser.validate(pr);
-    // if (pr.diags().hasError()) {
-    //   sendDiagnostics(uri, pr.diags());
-    //   return;
-    // }
-
-    sendOk(uri);
   }
 
   private void sendOk(String uri) {
@@ -121,8 +122,14 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
     if (client == null || diags == null) return;
 
     List<org.eclipse.lsp4j.Diagnostic> lspDiags = new ArrayList<>();
-    for (kafkasql.lang.diagnostics.DiagnosticEntry entry : diags.all()) {
-      kafkasql.lang.diagnostics.Range r = entry.range();
+    for (kafkasql.runtime.diagnostics.DiagnosticEntry entry : diags.all()) {
+      
+      // Skip INFO-level diagnostics (e.g., ANTLR ambiguity reports)
+      if (entry.severity() == DiagnosticEntry.Severity.INFO) {
+        continue;
+      }
+      
+      kafkasql.runtime.diagnostics.Range r = entry.range();
       int startLine = Math.max(0, r.from().ln() - 1);
       int startChar = Math.max(0, r.from().ch());
       int endLine = Math.max(startLine, r.to().ln() - 1);
@@ -136,6 +143,7 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
       // map severity
       switch (entry.severity()) {
         case INFO:
+          // Already filtered above, but keep case for completeness
           d.setSeverity(org.eclipse.lsp4j.DiagnosticSeverity.Information);
           break;
         case WARNING:

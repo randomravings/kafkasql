@@ -1,10 +1,10 @@
 package kafkasql.lang.semantic.resolve;
 
 import kafkasql.runtime.*;
-import kafkasql.lang.diagnostics.DiagnosticCode;
-import kafkasql.lang.diagnostics.DiagnosticKind;
-import kafkasql.lang.diagnostics.Diagnostics;
-import kafkasql.lang.diagnostics.Range;
+import kafkasql.runtime.diagnostics.DiagnosticCode;
+import kafkasql.runtime.diagnostics.DiagnosticKind;
+import kafkasql.runtime.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.Range;
 import kafkasql.lang.semantic.symbol.SymbolTable;
 import kafkasql.lang.syntax.ast.Script;
 import kafkasql.lang.syntax.ast.decl.ContextDecl;

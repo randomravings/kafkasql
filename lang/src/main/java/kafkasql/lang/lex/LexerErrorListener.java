@@ -4,11 +4,11 @@ import org.antlr.v4.runtime.RecognitionException;
 import org.antlr.v4.runtime.Recognizer;
 import org.antlr.v4.runtime.BaseErrorListener;
 
-import kafkasql.lang.diagnostics.DiagnosticCode;
-import kafkasql.lang.diagnostics.DiagnosticKind;
-import kafkasql.lang.diagnostics.Diagnostics;
-import kafkasql.lang.diagnostics.Pos;
-import kafkasql.lang.diagnostics.Range;
+import kafkasql.runtime.diagnostics.DiagnosticCode;
+import kafkasql.runtime.diagnostics.DiagnosticKind;
+import kafkasql.runtime.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.Pos;
+import kafkasql.runtime.diagnostics.Range;
 
 public class LexerErrorListener extends BaseErrorListener {
     private final String source;

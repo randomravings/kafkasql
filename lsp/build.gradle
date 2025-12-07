@@ -7,6 +7,8 @@ plugins {
 dependencies {
   implementation project(':runtime')
   implementation project(':lang')
+  implementation project(':linter')
+  implementation project(':pipeline')
   implementation 'org.eclipse.lsp4j:org.eclipse.lsp4j:0.19.0'
 }
 

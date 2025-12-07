@@ -10,11 +10,11 @@ import org.antlr.v4.runtime.BaseErrorListener;
 import org.antlr.v4.runtime.atn.ATNConfigSet;
 import org.antlr.v4.runtime.dfa.DFA;
 
-import kafkasql.lang.diagnostics.DiagnosticCode;
-import kafkasql.lang.diagnostics.DiagnosticKind;
-import kafkasql.lang.diagnostics.Diagnostics;
-import kafkasql.lang.diagnostics.Pos;
-import kafkasql.lang.diagnostics.Range;
+import kafkasql.runtime.diagnostics.DiagnosticCode;
+import kafkasql.runtime.diagnostics.DiagnosticKind;
+import kafkasql.runtime.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.Pos;
+import kafkasql.runtime.diagnostics.Range;
 
 public final class ParserErrorListener extends BaseErrorListener {
 
@@ -59,7 +59,17 @@ public final class ParserErrorListener extends BaseErrorListener {
     }
 
     // ------------------------------------------------------------------------
-    // Ambiguity = parser warnings
+    // Ambiguity reporting
+    // 
+    // These methods report ANTLR's adaptive parsing events. They indicate when
+    // the parser had to use full context lookahead or detected ambiguity.
+    // 
+    // These are logged as INFO level (not WARNING) so they don't:
+    // 1. Clutter the UI with internal parser behavior
+    // 2. Supersede real errors (like semantic validation errors)
+    // 
+    // They're still captured in diagnostics for debugging grammar issues.
+    // To see them: filter diagnostics by INFO severity level.
     // ------------------------------------------------------------------------
 
     @Override
@@ -72,7 +82,7 @@ public final class ParserErrorListener extends BaseErrorListener {
         BitSet ambigAlts,
         ATNConfigSet configs
     ) {
-        diagnostics.warning(
+        diagnostics.info(
             Range.NONE,
             DiagnosticKind.PARSER,
             DiagnosticCode.AMBIGUITY,
@@ -90,7 +100,7 @@ public final class ParserErrorListener extends BaseErrorListener {
         BitSet conflictingAlts,
         ATNConfigSet configs
     ) {
-        diagnostics.warning(
+        diagnostics.info(
             Range.NONE,
             DiagnosticKind.PARSER,
             DiagnosticCode.AMBIGUITY,
@@ -108,7 +118,7 @@ public final class ParserErrorListener extends BaseErrorListener {
         int prediction,
         ATNConfigSet configs
     ) {
-        diagnostics.warning(
+        diagnostics.info(
             Range.NONE,
             DiagnosticKind.PARSER,
             DiagnosticCode.CONTEXT_SENSITIVITY,

@@ -3,7 +3,7 @@ package kafkasql.lang;
 import com.google.common.jimfs.Configuration;
 import com.google.common.jimfs.Jimfs;
 
-import kafkasql.lang.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.Diagnostics;
 import kafkasql.lang.input.FileInput;
 import kafkasql.lang.input.Input;
 import kafkasql.util.TestHelpers;

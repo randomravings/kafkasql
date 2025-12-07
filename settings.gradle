@@ -5,4 +5,4 @@ pluginManagement {
   }
 }
 rootProject.name = 'kafkasql'
-include 'runtime', 'lang', 'lsp', 'cli', 'io', 'codegen', 'engine'
+include 'runtime', 'lang', 'linter', 'pipeline', 'lsp', 'cli', 'io', 'codegen', 'engine'

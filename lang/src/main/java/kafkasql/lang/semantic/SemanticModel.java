@@ -1,6 +1,6 @@
 package kafkasql.lang.semantic;
 
-import kafkasql.lang.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.Diagnostics;
 import kafkasql.lang.semantic.symbol.SymbolTable;
 
 import java.util.List;

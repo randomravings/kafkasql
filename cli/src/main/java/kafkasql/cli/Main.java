@@ -6,18 +6,19 @@ import java.io.Writer;
 import java.nio.file.*;
 import java.util.*;
 
-import kafkasql.lang.IncludeResolver;
-import kafkasql.lang.KafkaSqlArgs;
-import kafkasql.lang.KafkaSqlParser;
 import kafkasql.lang.input.FileInput;
 import kafkasql.lang.input.Input;
 import kafkasql.lang.input.StringInput;
 import kafkasql.lang.printer.AstPrinter;
 import kafkasql.lang.printer.Printer;
-import kafkasql.lang.semantic.SemanticModel;
-import kafkasql.lang.diagnostics.Diagnostics;
-import kafkasql.lang.ParseResult;
 import kafkasql.lang.syntax.ast.Script;
+import kafkasql.pipeline.Pipeline;
+import kafkasql.pipeline.PipelineContext;
+import kafkasql.pipeline.PipelineResult;
+import kafkasql.pipeline.phases.LintPhase;
+import kafkasql.pipeline.phases.ParsePhase;
+import kafkasql.pipeline.phases.SemanticPhase;
+import kafkasql.runtime.diagnostics.Diagnostics;
 
 public class Main {
 
@@ -33,6 +34,7 @@ public class Main {
         System.out.println("  -t, --text          Inline script (consumes all remaining args)");
         System.out.println("  -n, --no-include    Disable INCLUDE resolution");
         System.out.println("  -a, --print-ast     Print AST if parse succeeds");
+        System.out.println("  -l, --lint-only     Show only linting diagnostics");
         System.out.println("  -v, --verbose       Enable antlr trace output");
         System.out.println("  -h, --help          Show this help");
     }
@@ -43,6 +45,7 @@ public class Main {
         boolean resolveIncludes = true;
         boolean trace = false;
         boolean interactive = false;
+        boolean lintOnly = false;
         String inlineText = null;
         List<String> fileArgs = new ArrayList<>();
 
@@ -69,6 +72,7 @@ public class Main {
                 }
                 case "-n", "--no-include" -> resolveIncludes = false;
                 case "-a", "--print-ast" -> printAst = true;
+                case "-l", "--lint-only" -> lintOnly = true;
                 case "-v", "--verbose" -> trace = true;
                 case "-t", "--text" -> {
                     if (inlineText != null) {
@@ -128,20 +132,14 @@ public class Main {
         }
 
         Path wd = Path.of(workingDir != null ? workingDir : ".").toAbsolutePath().normalize();
-        KafkaSqlArgs parseArgs = new KafkaSqlArgs(wd, resolveIncludes, trace);
-        List<Input> fs = new ArrayList<>();
+        List<Input> inputs = new ArrayList<>();
 
         if (inlineText != null) {
-            var source = new StringInput ("<text>", inlineText);
-            fs.add(source);
+            inputs.add(new StringInput("<text>", inlineText));
         } else if (!fileArgs.isEmpty()) {
             for (String p : fileArgs) {
                 Path path = Path.of(p).toAbsolutePath().normalize();
-                FileInput source = new FileInput(
-                    path.toString(),
-                    path
-                );
-                fs.add(source);
+                inputs.add(new FileInput(path.toString(), path));
             }
         } else {
             System.err.println("error: no input (use --files or --text)");
@@ -149,43 +147,59 @@ public class Main {
             System.exit(1);
         }
 
-        if(resolveIncludes) {
-            Diagnostics diags = new Diagnostics();
-            fs = IncludeResolver.buildIncludeOrder(fs, wd, diags);
-            if (diags.hasError()) {
-                System.out.println("Include resolution failed with errors:");
-                printDiags(diags);
-                System.exit(1);
-            }
-        }
+        // Build pipeline
+        Pipeline pipeline = Pipeline.builder()
+            .addPhase(new ParsePhase())
+            .addPhase(new SemanticPhase())
+            .addPhase(new LintPhase())
+            .build();
 
-        ParseResult parseResult =  KafkaSqlParser.parse(fs, parseArgs);
+        // Build context
+        PipelineContext context = PipelineContext.builder()
+            .inputs(inputs)
+            .workingDir(wd)
+            .includeResolution(resolveIncludes)
+            .verbose(trace)
+            .build();
 
-        if (parseResult.diags().hasError()) {
-            System.out.println("Parsing failed with errors:");
-            printDiags(parseResult.diags());
+        // Execute pipeline
+        PipelineResult result = pipeline.execute(context);
+
+        // Check for errors (unless lint-only mode)
+        if (!lintOnly && result.diagnostics().hasError()) {
+            System.out.println("Compilation failed with errors:");
+            printDiags(result.diagnostics(), false);
             System.exit(1);
         }
 
-        if (printAst) {
-            for (Script script : parseResult.scripts()) {
+        // Print AST if requested
+        if (printAst && result.model().parseResult() != null) {
+            for (Script script : result.model().parseResult().scripts()) {
                 printAst(script);
             }
         }
 
-        SemanticModel model = KafkaSqlParser.bind(parseResult);
-
-        if (model.hasErrors()) {
-            System.out.println("Binding failed with errors:");
-            printDiags(model.diags());
-            System.exit(1);
+        // Print warnings (or all diagnostics in lint-only mode)
+        if (lintOnly) {
+            printDiags(result.diagnostics(), true);
+        } else if (result.diagnostics().hasWarning()) {
+            System.out.println("Compilation succeeded with warnings:");
+            printDiags(result.diagnostics(), false);
         }
 
         System.exit(0);
     }
 
-    private static void printDiags(Diagnostics diags) {
+    private static void printDiags(Diagnostics diags, boolean lintOnly) {
         for (var e : diags.all()) {
+            // Filter out INFO diagnostics (parser ambiguity reports, etc.)
+            if (e.severity() == kafkasql.runtime.diagnostics.DiagnosticEntry.Severity.INFO) {
+                continue;
+            }
+            // In lint-only mode, only show LINT diagnostics
+            if (lintOnly && e.kind() != kafkasql.runtime.diagnostics.DiagnosticKind.LINT) {
+                continue;
+            }
             System.out.println(" - " + e);
         }
     }

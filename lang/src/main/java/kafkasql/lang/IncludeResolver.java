@@ -6,10 +6,10 @@ import java.io.IOException;
 
 import org.antlr.v4.runtime.CommonTokenStream;
 
-import kafkasql.lang.diagnostics.DiagnosticCode;
-import kafkasql.lang.diagnostics.DiagnosticKind;
-import kafkasql.lang.diagnostics.Diagnostics;
-import kafkasql.lang.diagnostics.Range;
+import kafkasql.runtime.diagnostics.DiagnosticCode;
+import kafkasql.runtime.diagnostics.DiagnosticKind;
+import kafkasql.runtime.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.Range;
 import kafkasql.lang.input.FileInput;
 import kafkasql.lang.input.Input;
 import kafkasql.lang.input.StringInput;
@@ -27,9 +27,14 @@ public final class IncludeResolver {
         DONE
     }
 
+    private record IncludeWithRange(
+        Path path,
+        Range range
+    ) {}
+
     private final record Node(
         Input input,
-        List<Path> includes
+        List<IncludeWithRange> includes
     ) implements Comparable<Node> {
         @Override
         public int compareTo(Node o) {
@@ -61,6 +66,7 @@ public final class IncludeResolver {
                 case FileInput fInput ->
                     scanTopIncludes(
                         fInput,
+                        Range.NONE,  // Root file, not from an include statement
                         workingDir,
                         graph,
                         diags
@@ -85,7 +91,7 @@ public final class IncludeResolver {
         if (graph.containsKey(input.source()))
             return;
         
-        List<Path> includes = getIncludes(
+        List<IncludeWithRange> includes = getIncludes(
             input,
             workingDir,
             diags
@@ -102,6 +108,7 @@ public final class IncludeResolver {
 
     private static void scanTopIncludes(
         FileInput input,
+        Range includeRange,
         Path workingDir,
         LinkedHashMap<String, Node> graph,
         Diagnostics diags
@@ -112,17 +119,33 @@ public final class IncludeResolver {
         String inputText = null;
         try {
             inputText = Files.readString(input.path());
-        } catch (IOException e) {
+        } catch (java.nio.file.NoSuchFileException e) {
             diags.fatal(
-                Range.NONE,
+                includeRange,
                 DiagnosticKind.INTERNAL,
                 DiagnosticCode.INTERNAL_ERROR,
-                "Failed to read " + input.path() + ": " + e.getMessage()
+                "Include file not found: " + input.path()
+            );
+            return;
+        } catch (java.nio.file.AccessDeniedException e) {
+            diags.fatal(
+                includeRange,
+                DiagnosticKind.INTERNAL,
+                DiagnosticCode.INTERNAL_ERROR,
+                "Cannot read include file (access denied): " + input.path()
+            );
+            return;
+        } catch (IOException e) {
+            diags.fatal(
+                includeRange,
+                DiagnosticKind.INTERNAL,
+                DiagnosticCode.INTERNAL_ERROR,
+                "Cannot read include file: " + e.getMessage()
             );
             return;
         }
 
-        List<Path> includes = getIncludes(
+        List<IncludeWithRange> includes = getIncludes(
                 new StringInput(
                     input.source(),
                     inputText
@@ -140,7 +163,7 @@ public final class IncludeResolver {
         );
     }
 
-    private static List<Path> getIncludes(
+    private static List<IncludeWithRange> getIncludes(
         StringInput input,
         Path workingDir,
         Diagnostics diags
@@ -159,21 +182,21 @@ public final class IncludeResolver {
                 false
             )
         );
-        List<Path> canonicalIncludes = new ArrayList<>();
+        List<IncludeWithRange> canonicalIncludes = new ArrayList<>();
         for (Include include : includes) {
             Path file = workingDir
                 .resolve(include.path())
                 .toAbsolutePath()
                 .normalize()
             ;
-            canonicalIncludes.add(file);
+            canonicalIncludes.add(new IncludeWithRange(file, include.range()));
         }
         return canonicalIncludes;
     }
 
     public static void addAndScan(
         Input input,
-        List<Path> includes,
+        List<IncludeWithRange> includes,
         Path workingDir,
         LinkedHashMap<String, Node> graph,
         Diagnostics diags
@@ -185,13 +208,15 @@ public final class IncludeResolver {
                 includes
             )
         );
-        for (Path include : includes) {
+        for (IncludeWithRange includeWithRange : includes) {
+            Path includePath = includeWithRange.path();
             FileInput includedInput = new FileInput(
-                include.toString(),
-                include
+                includePath.toString(),
+                includePath
             );
             scanTopIncludes(
                 includedInput,
+                includeWithRange.range(),
                 workingDir,
                 graph,
                 diags
@@ -268,9 +293,9 @@ public final class IncludeResolver {
             stack.pop();
             return;
         }
-        List<Path> neighbors = n.includes();
-        for (Path nb : neighbors) {
-            dfsGraph(nb.toString(), graph, diags, ordered, state, stack);
+        List<IncludeWithRange> neighbors = n.includes();
+        for (IncludeWithRange nb : neighbors) {
+            dfsGraph(nb.path().toString(), graph, diags, ordered, state, stack);
             if (diags.hasError()) {
                 stack.pop();
                 return;

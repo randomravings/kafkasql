@@ -1,6 +1,6 @@
 package kafkasql.lang.syntax.ast.expr;
 
-import kafkasql.lang.diagnostics.Range;
+import kafkasql.runtime.diagnostics.Range;
 
 public final record TrifixExpr(
     Range range,

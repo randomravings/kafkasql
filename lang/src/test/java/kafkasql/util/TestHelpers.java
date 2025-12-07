@@ -3,7 +3,7 @@ package kafkasql.util;
 import kafkasql.lang.KafkaSqlArgs;
 import kafkasql.lang.KafkaSqlParser;
 import kafkasql.lang.ParseResult;
-import kafkasql.lang.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.Diagnostics;
 import kafkasql.lang.input.StringInput;
 import kafkasql.lang.syntax.ast.*;
 import kafkasql.lang.syntax.ast.decl.Decl;

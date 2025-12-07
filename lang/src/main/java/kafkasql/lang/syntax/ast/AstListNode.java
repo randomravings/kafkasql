@@ -2,7 +2,7 @@ package kafkasql.lang.syntax.ast;
 
 import java.util.ArrayList;
 
-import kafkasql.lang.diagnostics.Range;
+import kafkasql.runtime.diagnostics.Range;
 
 public final class AstListNode<T extends AstNode>
     extends ArrayList<T>

@@ -1,6 +1,6 @@
 package kafkasql.lang;
 
-import kafkasql.lang.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.Diagnostics;
 import kafkasql.lang.syntax.ast.AstListNode;
 import kafkasql.lang.syntax.ast.Script;
 

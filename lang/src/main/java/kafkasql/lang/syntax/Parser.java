@@ -5,14 +5,14 @@ import java.util.Locale;
 import java.util.Optional;
 
 import org.antlr.v4.runtime.ParserRuleContext;
+import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.TerminalNode;
 
-import groovyjarjarantlr4.v4.runtime.Token;
-import kafkasql.lang.diagnostics.DiagnosticCode;
-import kafkasql.lang.diagnostics.DiagnosticKind;
-import kafkasql.lang.diagnostics.Diagnostics;
-import kafkasql.lang.diagnostics.Pos;
-import kafkasql.lang.diagnostics.Range;
+import kafkasql.runtime.diagnostics.DiagnosticCode;
+import kafkasql.runtime.diagnostics.DiagnosticKind;
+import kafkasql.runtime.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.Pos;
+import kafkasql.runtime.diagnostics.Range;
 import kafkasql.lang.lex.SqlStreamLexer;
 import kafkasql.lang.parse.SqlStreamParser;
 import kafkasql.lang.parse.SqlStreamParserBaseVisitor;

@@ -1,0 +1,10 @@
+INCLUDE 'com/example.kafka';
+INCLUDE 'com/example/TestScalar.kafka';
+INCLUDE 'com/example/TestEnum.kafka';
+INCLUDE 'com/example/TestUnion.kafka';
+
+CREATE TYPE  TestStruct AS STRUCT (
+    ScalarField com.example.TestScalar DEFAULT 10,
+    EnumField com.example.TestEnum DEFAULT TestEnum::B,
+    UnionField com.example.TestUnion DEFAULT TestUnion$EnumValue(TestEnum::A)
+);

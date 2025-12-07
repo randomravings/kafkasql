@@ -4,7 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
 
-import kafkasql.lang.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.Diagnostics;
 import kafkasql.lang.semantic.BindingEnv;
 import kafkasql.lang.semantic.factory.ComplexTypeFactory;
 import kafkasql.lang.semantic.factory.TypeFactory;
@@ -277,8 +277,8 @@ public final class TypeBuilder {
                 // Shouldn't happen if TypeResolver ran correctly
                 diags.error(
                     complexNode.range(),
-                    kafkasql.lang.diagnostics.DiagnosticKind.TYPE,
-                    kafkasql.lang.diagnostics.DiagnosticCode.UNKNOWN_TYPE,
+                    kafkasql.runtime.diagnostics.DiagnosticKind.TYPE,
+                    kafkasql.runtime.diagnostics.DiagnosticCode.UNKNOWN_TYPE,
                     "Unknown type: " + name
                 );
                 return TypeReference.get(complexNode.name().fullName());
@@ -302,8 +302,8 @@ public final class TypeBuilder {
                 // Error: map key must be primitive
                 diags.error(
                     mapNode.keyType().range(),
-                    kafkasql.lang.diagnostics.DiagnosticKind.TYPE,
-                    kafkasql.lang.diagnostics.DiagnosticCode.INVALID_TYPE_REF,
+                    kafkasql.runtime.diagnostics.DiagnosticKind.TYPE,
+                    kafkasql.runtime.diagnostics.DiagnosticCode.INVALID_TYPE_REF,
                     "Map keys must be primitive types"
                 );
                 return TypeFactory.fromAst(typeNode);

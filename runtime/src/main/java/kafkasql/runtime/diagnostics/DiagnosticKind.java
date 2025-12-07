@@ -1,4 +1,4 @@
-package kafkasql.lang.diagnostics;
+package kafkasql.runtime.diagnostics;
 
 public enum DiagnosticKind {
     LEXER,
@@ -8,5 +8,6 @@ public enum DiagnosticKind {
     TYPE,
     SEMANTIC,
     RUNTIME,
+    LINT,
     INTERNAL
 }

@@ -1,6 +1,6 @@
 package kafkasql.lang.syntax.ast.constExpr;
 
-import kafkasql.lang.diagnostics.Range;
+import kafkasql.runtime.diagnostics.Range;
 
 public final record ConstBinaryExpr(
     Range range,

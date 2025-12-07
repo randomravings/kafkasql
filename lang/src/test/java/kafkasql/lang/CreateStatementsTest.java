@@ -467,4 +467,29 @@ public class CreateStatementsTest {
             assertEquals(2, en.symbols().size());
         }
     }
+
+    @Nested
+    @DisplayName("Case insensitivity")
+    class CaseInsensitivity {
+
+        @Test
+        void enumSymbolsCaseInsensitive() {
+            // Enum symbols should match case-insensitively
+            var stmts = TestHelpers.parseAssert("""
+                CREATE TYPE Status AS ENUM (
+                    Active = 1,
+                    Inactive = 2
+                )
+                DEFAULT Status::active;
+                """);
+            CreateStmt cstmt = TestHelpers.only(stmts, CreateStmt.class);
+            TypeDecl typeDecl = TestHelpers.assertDecl(
+                TypeDecl.class,
+                cstmt.decl(),
+                "Status"
+            );
+            // Should parse successfully - 'active' matches 'Active' case-insensitively
+            assertNotNull(typeDecl);
+        }
+    }
 }

@@ -2,9 +2,9 @@ package kafkasql.lang.semantic.factory;
 
 import kafkasql.runtime.Name;
 import kafkasql.runtime.type.*;
-import kafkasql.lang.diagnostics.DiagnosticCode;
-import kafkasql.lang.diagnostics.DiagnosticKind;
-import kafkasql.lang.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.DiagnosticCode;
+import kafkasql.runtime.diagnostics.DiagnosticKind;
+import kafkasql.runtime.diagnostics.Diagnostics;
 import kafkasql.lang.semantic.util.FragmentUtils;
 import kafkasql.lang.syntax.ast.AstListNode;
 import kafkasql.lang.syntax.ast.decl.DerivedTypeDecl;
@@ -148,27 +148,54 @@ public final class ComplexTypeFactory {
         Optional<String> doc = FragmentUtils.extractDoc(s.fragments(), diags);
         
         // Evaluate the ConstExpr to get the enum symbol value
-        long value;
-        if (s.value() instanceof kafkasql.lang.syntax.ast.constExpr.ConstLiteralExpr lit) {
-            try {
-                value = Long.parseLong(lit.text());
-            } catch (NumberFormatException e) {
-                // Should never happen if parser is correct
-                throw new IllegalArgumentException("Invalid enum symbol value: " + lit.text(), e);
-            }
-        } else {
-            // For now, only support literal values
-            // TODO: Support const expressions and symbol references
-            throw new UnsupportedOperationException(
-                "Enum symbol values must be numeric literals for now. Got: " + s.value().getClass().getSimpleName()
-            );
-        }
+        long value = evaluateConstExpr(s.value());
         
         return new EnumTypeSymbol(
             s.name().name(),
             value,
             doc
         );
+    }
+    
+    /**
+     * Evaluates a constant expression to a long value.
+     * Supports literals, binary operations, parentheses, and symbol references.
+     */
+    private static long evaluateConstExpr(kafkasql.lang.syntax.ast.constExpr.ConstExpr expr) {
+        return switch (expr) {
+            case kafkasql.lang.syntax.ast.constExpr.ConstLiteralExpr lit -> {
+                try {
+                    yield Long.parseLong(lit.text());
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException("Invalid numeric literal: " + lit.text(), e);
+                }
+            }
+            case kafkasql.lang.syntax.ast.constExpr.ConstBinaryExpr bin -> {
+                long left = evaluateConstExpr(bin.left());
+                long right = evaluateConstExpr(bin.right());
+                yield switch (bin.op()) {
+                    case ADD -> left + right;
+                    case SUB -> left - right;
+                    case MUL -> left * right;
+                    case DIV -> left / right;
+                    case MOD -> left % right;
+                    case SHL -> left << right;
+                    case SHR -> left >> right;
+                    case BITAND -> left & right;
+                    case BITOR -> left | right;
+                    case BITXOR -> left ^ right;
+                };
+            }
+            case kafkasql.lang.syntax.ast.constExpr.ConstParenExpr paren -> {
+                yield evaluateConstExpr(paren.inner());
+            }
+            case kafkasql.lang.syntax.ast.constExpr.ConstSymbolRefExpr ref -> {
+                // TODO: Support symbol references (e.g., referencing other enum values)
+                throw new UnsupportedOperationException(
+                    "Symbol references in const expressions are not yet supported: " + ref.name().name()
+                );
+            }
+        };
     }
 
     // ========================================================================

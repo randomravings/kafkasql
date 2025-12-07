@@ -22,11 +22,17 @@
       ]
     },
     "include-statement": {
-      "match": "(?i)\\b(INCLUDE)\\s+('[^']*'|\"[^\"]*\")",
-      "captures": {
-        "1": { "name": "keyword.control.kafkasql" },
-        "2": { "name": "string.quoted.kafkasql" }
-      }
+      "begin": "(?i)\\b(INCLUDE)\\b",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.kafkasql" }
+      },
+      "end": "('[^']*'|\"[^\"]*\")",
+      "endCaptures": {
+        "0": { "name": "string.quoted.kafkasql" }
+      },
+      "patterns": [
+        { "include": "#comments" }
+      ]
     },
     "create-statement": {
       "begin": "(?i)\\b(CREATE)\\b",
@@ -206,12 +212,26 @@
       ]
     },
     "use-statement": {
-      "match": "(?i)\\b(USE)\\s+(CONTEXT)\\s+([A-Za-z_][A-Za-z0-9_.]*)",
-      "captures": {
-        "1": { "name": "keyword.control.kafkasql" },
-        "2": { "name": "keyword.control.definition.kafkasql" },
-        "3": { "name": "entity.name.type.kafkasql" }
-      }
+      "begin": "(?i)\\b(USE)\\b",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.kafkasql" }
+      },
+      "end": "(?=;)",
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "match": "(?i)\\b(CONTEXT)\\b",
+          "name": "keyword.control.definition.kafkasql"
+        },
+        {
+          "match": "(?i)\\b(GLOBAL)\\b",
+          "name": "keyword.control.kafkasql"
+        },
+        {
+          "match": "\\b([A-Za-z_][A-Za-z0-9_.]*)\\b",
+          "name": "entity.name.type.kafkasql"
+        }
+      ]
     },
     "read-statement": {
       "begin": "(?i)\\b(READ)\\b",

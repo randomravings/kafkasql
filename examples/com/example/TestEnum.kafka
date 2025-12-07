@@ -3,13 +3,13 @@ INCLUDE 'com/example.kafka';
 USE CONTEXT com.example;
 
 CREATE TYPE TestEnum AS ENUM (
-    A = 1
+    A = 1 << 0
     COMMENT 'Test comment for enum symbol C',
 
-    B = 2
+    B = 1 << 1
     COMMENT 'Test comment for enum symbol B',
 
-    C = 3
+    C = 1 << 2
     COMMENT 'Test comment for enum symbol C'
 )
 DEFAULT TestEnum::A

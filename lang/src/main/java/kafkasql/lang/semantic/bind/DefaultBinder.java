@@ -1,8 +1,10 @@
 package kafkasql.lang.semantic.bind;
 
+import java.util.Map;
+
 import kafkasql.runtime.Name;
 import kafkasql.runtime.type.*;
-import kafkasql.lang.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.Diagnostics;
 import kafkasql.lang.semantic.BindingEnv;
 import kafkasql.lang.semantic.factory.ComplexTypeFactory;
 import kafkasql.lang.semantic.factory.PrimitiveTypeFactory;
@@ -138,8 +140,13 @@ public final class DefaultBinder {
 
             LiteralNode lit = defaultNode.value();
 
-            // Get field type from the runtime struct type
-            StructTypeField fieldInfo = structType.fields().get(field.name().name());
+            // Get field type from the runtime struct type (case-insensitive)
+            String fieldName = field.name().name();
+            StructTypeField fieldInfo = structType.fields().entrySet().stream()
+                .filter(e -> e.getKey().equalsIgnoreCase(fieldName))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElse(null);
             if (fieldInfo == null) {
                 continue;
             }

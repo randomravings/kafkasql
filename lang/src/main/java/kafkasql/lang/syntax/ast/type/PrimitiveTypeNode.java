@@ -1,6 +1,6 @@
 package kafkasql.lang.syntax.ast.type;
 
-import kafkasql.lang.diagnostics.Range;
+import kafkasql.runtime.diagnostics.Range;
 import kafkasql.runtime.type.PrimitiveKind;
 
 public final class PrimitiveTypeNode implements TypeNode {

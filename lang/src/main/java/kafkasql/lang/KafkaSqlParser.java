@@ -4,10 +4,10 @@ import java.nio.file.Files;
 import java.util.List;
 
 import kafkasql.lang.lex.Lexer;
-import kafkasql.lang.diagnostics.DiagnosticCode;
-import kafkasql.lang.diagnostics.DiagnosticKind;
-import kafkasql.lang.diagnostics.Diagnostics;
-import kafkasql.lang.diagnostics.Range;
+import kafkasql.runtime.diagnostics.DiagnosticCode;
+import kafkasql.runtime.diagnostics.DiagnosticKind;
+import kafkasql.runtime.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.Range;
 import kafkasql.lang.input.*;
 import kafkasql.lang.semantic.SemanticModel;
 import kafkasql.lang.semantic.symbol.SymbolTable;

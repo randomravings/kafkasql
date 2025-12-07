@@ -1,6 +1,6 @@
 package kafkasql.lang.syntax.ast.stmt;
 
-import kafkasql.lang.diagnostics.Range;
+import kafkasql.runtime.diagnostics.Range;
 import kafkasql.lang.syntax.ast.AstNode;
 import kafkasql.lang.syntax.ast.AstOptionalNode;
 import kafkasql.lang.syntax.ast.fragment.ProjectionNode;

@@ -1,4 +1,4 @@
-package kafkasql.lang.diagnostics;
+package kafkasql.runtime.diagnostics;
 
 public record Range(
     String source,

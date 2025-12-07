@@ -7,10 +7,12 @@ public final class Name {
     public static final Name ROOT = new Name("");
     private static final Map<String, Name> CACHE = new HashMap<>();
     private static final String SEPARATOR = ".";
-    private final String _fullName;
+    private final String _fullName;      // Original casing for display/codegen
+    private final String _canonicalName; // Lowercase for case-insensitive lookups
 
     private Name(String fullName) {
         _fullName = fullName;
+        _canonicalName = fullName.toLowerCase();
     }
 
     public static Name of(String context, String name) {
@@ -63,13 +65,13 @@ public final class Name {
     @Override
     public boolean equals(Object o) {
         return switch (o) {
-            case Name other -> _fullName.equals(other._fullName);
+            case Name other -> _canonicalName.equals(other._canonicalName);
             default -> false;
         };
     }
 
     @Override
     public int hashCode() {
-        return _fullName.hashCode();
+        return _canonicalName.hashCode();
     }
 }

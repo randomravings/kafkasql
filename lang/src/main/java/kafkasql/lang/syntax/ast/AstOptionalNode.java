@@ -2,7 +2,7 @@ package kafkasql.lang.syntax.ast;
 
 import java.util.Optional;
 
-import kafkasql.lang.diagnostics.Range;
+import kafkasql.runtime.diagnostics.Range;
 
 public final class AstOptionalNode<T extends AstNode>
     implements AstNode {

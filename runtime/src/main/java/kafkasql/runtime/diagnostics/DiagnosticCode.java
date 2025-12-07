@@ -1,4 +1,4 @@
-package kafkasql.lang.diagnostics;
+package kafkasql.runtime.diagnostics;
 
 public enum DiagnosticCode {
 
@@ -37,6 +37,11 @@ public enum DiagnosticCode {
 
     // Runtime
     RUNTIME_ERROR,
+
+    // Linting
+    STYLE,
+    NAMING,
+    COMPLEXITY,
 
     // Constraints
     INVALID_CHECK_CONSTRAINT,

@@ -1,7 +1,7 @@
 package kafkasql.lang.semantic.bind;
 
 import kafkasql.runtime.type.*;
-import kafkasql.lang.diagnostics.*;
+import kafkasql.runtime.diagnostics.*;
 import kafkasql.lang.semantic.BindingEnv;
 import kafkasql.lang.semantic.symbol.SymbolTable;
 import kafkasql.lang.syntax.ast.expr.*;

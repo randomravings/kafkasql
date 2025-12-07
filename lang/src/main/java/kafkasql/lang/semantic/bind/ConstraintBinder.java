@@ -1,8 +1,8 @@
 package kafkasql.lang.semantic.bind;
 
-import kafkasql.lang.diagnostics.DiagnosticCode;
-import kafkasql.lang.diagnostics.DiagnosticKind;
-import kafkasql.lang.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.DiagnosticCode;
+import kafkasql.runtime.diagnostics.DiagnosticKind;
+import kafkasql.runtime.diagnostics.Diagnostics;
 import kafkasql.lang.semantic.BindingEnv;
 import kafkasql.lang.semantic.symbol.SymbolTable;
 import kafkasql.lang.semantic.util.FragmentUtils;

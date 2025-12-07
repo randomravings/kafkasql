@@ -1,6 +1,6 @@
 package kafkasql.lang.syntax.ast.literal;
 
-import kafkasql.lang.diagnostics.Range;
+import kafkasql.runtime.diagnostics.Range;
 
 public final record NullLiteralNode(
     Range range

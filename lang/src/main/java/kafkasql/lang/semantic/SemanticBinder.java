@@ -9,7 +9,7 @@ import kafkasql.lang.semantic.resolve.ContextScope;
 import kafkasql.lang.semantic.resolve.DeclResolver;
 import kafkasql.lang.semantic.bind.StatementBinder;
 import kafkasql.lang.semantic.bind.TypeBuilder;
-import kafkasql.lang.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.Diagnostics;
 import kafkasql.lang.semantic.bind.DefaultBinder;
 
 public final class SemanticBinder {

@@ -1,0 +1,22 @@
+plugins {
+    id 'java'
+}
+
+dependencies {
+    implementation project(':runtime')
+    implementation project(':lang')
+    implementation project(':linter')
+    
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.11.3'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}

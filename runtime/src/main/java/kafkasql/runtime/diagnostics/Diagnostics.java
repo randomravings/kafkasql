@@ -1,4 +1,4 @@
-package kafkasql.lang.diagnostics;
+package kafkasql.runtime.diagnostics;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -3,9 +3,9 @@ package kafkasql.lang.semantic.bind;
 import kafkasql.runtime.*;
 import kafkasql.runtime.type.*;
 import kafkasql.runtime.value.*;
-import kafkasql.lang.diagnostics.DiagnosticCode;
-import kafkasql.lang.diagnostics.DiagnosticKind;
-import kafkasql.lang.diagnostics.Diagnostics;
+import kafkasql.runtime.diagnostics.DiagnosticCode;
+import kafkasql.runtime.diagnostics.DiagnosticKind;
+import kafkasql.runtime.diagnostics.Diagnostics;
 import kafkasql.lang.semantic.BindingEnv;
 import kafkasql.lang.semantic.factory.LiteralValueFactory;
 import kafkasql.lang.syntax.ast.literal.BoolLiteralNode;
@@ -660,7 +660,7 @@ public final class LiteralBinder {
 
         String symbolName = e.symbol().name();
         EnumTypeSymbol symbol = type.symbols().stream()
-            .filter(s -> s.name().equals(symbolName))
+            .filter(s -> s.name().equalsIgnoreCase(symbolName))
             .findFirst()
             .orElse(null);
 
@@ -697,7 +697,12 @@ public final class LiteralBinder {
 
         for (StructFieldLiteralNode f : st.fields()) {
             String fieldName = f.name().name();
-            StructTypeField field = type.fields().get(fieldName);
+            // Case-insensitive lookup for struct fields
+            StructTypeField field = type.fields().entrySet().stream()
+                .filter(e -> e.getKey().equalsIgnoreCase(fieldName))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElse(null);
 
             if (field == null) {
                 diags.error(
@@ -740,7 +745,12 @@ public final class LiteralBinder {
         }
 
         String memberName = ul.memberName().name();
-        UnionTypeMember member = type.members().get(memberName);
+        // Case-insensitive lookup for union members
+        UnionTypeMember member = type.members().entrySet().stream()
+            .filter(e -> e.getKey().equalsIgnoreCase(memberName))
+            .map(Map.Entry::getValue)
+            .findFirst()
+            .orElse(null);
 
         if (member == null) {
             diags.error(
