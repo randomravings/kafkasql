@@ -172,6 +172,11 @@ CREATE TYPE User AS STRUCT (
 -- include stuff ...
 
 CREATE TYPE ComplexDefaults AS STRUCT (
+  ListDefault LIST<STRING> DEFAULT [ 'As', 'Expected' ]         -- Not surprising, but elements will match generic type.
+  MapDefault MAP<INT32, BOOLEAN> DEFAULT {                      -- JSON ish with key litteral matching the key type.
+    1: FALSE,
+    2: TRUE,
+  },
   ScalarDefault com.example.IntScalar DEFAULT 10,               -- Same as primitives.
   EnumDefault com.example.SomeEnum DEFAULT SomeEnum::Symbol,    -- Static access.
   UnionDefault com.example.SomeUnion DEFAULT StringField$'ABC', -- Dollar separating an identifier and literal.
@@ -181,7 +186,7 @@ CREATE TYPE ComplexDefaults AS STRUCT (
   DEFAULT @{
     Id: 1001,
     Name: 'John',
-    Address: {
+    Address: @{
       Street: 'Far away street',
       Zip: 'pick one'
     }
@@ -192,7 +197,7 @@ CREATE TYPE ComplexDefaults AS STRUCT (
 ## Unions
 
 ```SQL
-CREATE TYPE ApplesOrOrange AS UNION(
+CREATE TYPE ApplesOrOrange AS UNION (
     apple com.example.Apple,
     orange com.example.Orange
 );
@@ -216,11 +221,11 @@ Every valid schema will start with a `TYPE` keyword and then followed by either 
 ```SQL
 -- Basic inline stream with distribution (one stream one schema).
 CREATE STREAM Users (
-  TYPE User AS(
+  TYPE User AS STRUCT (
       Id INT32,
       Name String,
-      Email com.example.Email OPTIONAL,
-      Score DEFAULT 0.0
+      Email com.example.Email NULL,
+      Score DECIMAL(5, 2) DEFAULT 0.0
   )
   DISTRIBUTE BY (Id)
 );
@@ -242,9 +247,9 @@ DISTRIBUTE BY (Id);
 INCLUDE 'com/example/User.kafka';
 
 CREATE STREAM Users (
-  TYPE LegacyUser AS (
+  TYPE LegacyUser AS STRUCT (
     Id INT32,
-    Email com.example.Email OPTIONAL,
+    Email com.example.Email NULL,
   ), -- Distribution omitted, not recommended, but hey ...
   TYPE User AS (
       Id INT32,
@@ -262,12 +267,59 @@ CREATE STREAM Users (
 INCLUDE 'com/example/User.kafka';
 
 CREATE STREAM Users
-TYPE (
+TYPE UserA AS STRUCT (
     Id INT32,
     Email com.example.Email,
-    Score OPTIONAL DEFAULT 0.0
-) AS UserA
+    Score DECIMAL(5, 2) DEFAULT 0.0
+) AS
 DISTRIBUTE BY (Id)
-TYPE com.example.User AS UserB
+TYPE UserB AS com.example.User
 DISTRIBUTE BY (Id);
 ```
+
+## Write Statement
+
+```SQL
+-- Write statents target streams as fully qualified names
+WRITE TO com.example.CustomerEvents
+TYPE CustomerV2                     -- and targets one speicific type
+VALUES(@{                           -- and then provides a list of struct literals
+  Id: 1001,
+  Name: 'Alice',
+  Email: 'alice@example.com',
+  Tags: ['customer', 'premium'],
+  Attrs: {'key1': {'2024-01-01T00:00:00.000': [100.50, 200.75]}},
+  Classification: 'VIP',
+  Status: com.example.Status::ACTIVE
+}, @{
+  Id: 1002,
+  Name: 'Bob',
+  Email: NULL,
+  Tags: ['customer'],
+  Attrs: {},
+  Classification: 'STD',
+  Status: com.example.Status::PENDING
+});
+```
+
+## Read Statements
+
+```SQL
+-- Also fqn
+READ FROM com.example.CustomerEvents
+TYPE CustomerV1  -- Type to project
+  *
+WHERE
+  Email = 'joe@example.com' AND
+  Email IS NOT NULL
+TYPE CustomerV2. -- But not limited to just one type, like a union.
+  Id,
+  Tags,
+  Id * 10 AS TenTimesId,
+  Attrs['key1'][98][Id] AS FirstMoney
+WHERE.           -- Allows further filtering per type declaratively.
+  Status <> com.example.Status::DISABLED
+;
+```
+
+> We will not be considering any `GROUP BY`, `JOIN`, `ORDER BY`, or any other stateful operators and leave those for the stream processing tools. What we are interested in are basic IO, managment and the DSL to do so.
