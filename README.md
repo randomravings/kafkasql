@@ -97,7 +97,8 @@ INCLUDE 'com/example.kafka'
 USE CONTEXT com.example; 
 
 -- Creates a strongly typed email as string
-CREATE TYPE Email AS EMAIL STRING;
+CREATE TYPE Email
+AS SCALAR STRING;
 
 -- Creates a strongly typed ph value as an 8 bit integer
 CREATE TYPE PhValue AS SCALAR INT8
@@ -128,7 +129,7 @@ CREATE TYPE ENUM AS Ccy (
 ```SQL
 INCLUDE 'com/example.kafka'
 
-USE CONTEXT com.example; 
+USE CONTEXT com.example;
 
 -- Create an Enum by a 16 bit integer with default symbol B
 CREATE TYPE MoreStuff AS ENUM INT16 (
@@ -172,7 +173,7 @@ CREATE TYPE User AS STRUCT (
 -- include stuff ...
 
 CREATE TYPE ComplexDefaults AS STRUCT (
-  ListDefault LIST<STRING> DEFAULT [ 'As', 'Expected' ]         -- Not surprising, but elements will match generic type.
+  ListDefault LIST<STRING> DEFAULT [ 'As', 'Expected' ],        -- Not surprising, but elements will match generic type.
   MapDefault MAP<INT32, BOOLEAN> DEFAULT {                      -- JSON ish with key litteral matching the key type.
     1: FALSE,
     2: TRUE,
@@ -223,7 +224,7 @@ Every valid schema will start with a `TYPE` keyword and then followed by either 
 CREATE STREAM Users (
   TYPE User AS STRUCT (
       Id INT32,
-      Name String,
+      Name STRING,
       Email com.example.Email NULL,
       Score DECIMAL(5, 2) DEFAULT 0.0
   )
