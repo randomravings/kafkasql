@@ -6,16 +6,30 @@ options {
 
 /* ──────────────────── Entry Point ──────────────────── */
 script
-  : includeSection? statementList EOF
+  : preamble? statementList EOF
   ;
 
-/* ─────────────────────── Includes ────────────────────── */
-includeSection
-  : (includePragma SEMI)+
+/* ─────────────────────── Preamble ────────────────────── */
+preamble
+  : preambleDirective+
+  ;
+
+preambleDirective
+  : includePragma SEMI
+  | versionPragma SEMI
   ;
 
 includePragma
   : INCLUDE STRING_LIT
+  ;
+
+versionPragma
+  : SET VERSION EQ versionValue
+  ;
+
+versionValue
+  : NUMBER_LIT                                  # ExplicitVersion
+  | LATEST                                      # LatestVersion
   ;
 
 /* ─────────────────────── Statements ─────────────────── */

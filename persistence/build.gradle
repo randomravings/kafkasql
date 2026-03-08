@@ -1,0 +1,81 @@
+plugins {
+    id 'java-library'
+}
+
+group = 'io.randomravings.kafkasql'
+version = '1.0.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+// Configuration for generated sources
+def generatedSourceDir = layout.buildDirectory.dir('generated/sources/kafkasql/main')
+def kafkasqlSchemaFile = file("$projectDir/src/main/kafkasql/sys/schema/SymbolEventLog.kafka")
+def kafkasqlWorkingDir = file("$projectDir/src/main/kafkasql")
+
+sourceSets {
+    main {
+        java {
+            srcDirs += generatedSourceDir
+        }
+    }
+}
+
+// Task to generate Java code from KafkaSQL schemas
+tasks.register('generateKafkaSqlCode', JavaExec) {
+    group = 'build'
+    description = 'Generate Java code from KafkaSQL schema files'
+    
+    dependsOn ':codegen:build'
+    
+    classpath = project(':codegen').sourceSets.main.runtimeClasspath
+    mainClass = 'kafkasql.codegen.CodeGenerator'
+    
+    // Working directory for INCLUDE resolution
+    workingDir kafkasqlWorkingDir
+    
+    // Args: schema file (relative to working dir), output directory (absolute)
+    args 'sys/schema/SymbolEventLog.kafka', generatedSourceDir.get().asFile.absolutePath
+    
+    inputs.file kafkasqlSchemaFile
+    outputs.dir generatedSourceDir
+}
+
+// Make compileJava depend on code generation
+tasks.named('compileJava') {
+    dependsOn 'generateKafkaSqlCode'
+}
+
+// Clean generated sources
+tasks.named('clean') {
+    delete generatedSourceDir
+}
+
+dependencies {
+    // Internal dependencies
+    api project(':runtime')
+    api project(':lang')
+    api project(':io')
+    
+    // Kafka client
+    implementation 'org.apache.kafka:kafka-clients:4.0.0'
+    
+    // Logging
+    implementation 'org.slf4j:slf4j-api:2.0.16'
+    
+    // Testing
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

@@ -157,8 +157,8 @@ public final class AstPrinter extends Printer {
     // DECLARATION FRAGMENTS
     //============================================================
 
-    private void writeDeclaratonFragmentList(AstListNode<DeclFragment> fragments, int indent) throws IOException {
-        branch("fragments", indent, true);
+    private void writeDeclaratonFragmentList(AstListNode<DeclFragment> fragments, int indent, boolean last) throws IOException {
+        branch("fragments", indent, last);
         forEach(fragments, "fragment", this::writeDeclaratonFragment, indent + 1, DeclFragment.class);
     }
 
@@ -195,7 +195,7 @@ public final class AstPrinter extends Printer {
 
     private void writeDefaultFragment(DefaultNode d, int indent) throws IOException {
         branch("default", indent, true);
-        writeLiteral(d.value(), indent);
+        writeLiteral(d.value(), indent + 1);
     }
 
     private void writeCommentFragment(DocNode c, int indent) throws IOException {
@@ -221,8 +221,8 @@ public final class AstPrinter extends Printer {
 
     private void writeTimestampFragment(TimestampDecl t, int indent) throws IOException {
         writeClass(t.getClass());
-        branch("field", indent, false);
-        writeIdentifier(t.field(), indent);
+        branch("field", indent, true);
+        writeIdentifier(t.field(), indent + 1);
     }
 
     //============================================================
@@ -241,7 +241,7 @@ public final class AstPrinter extends Printer {
     private void writeCreateContext(ContextDecl c, int indent) throws IOException {
         writeClass(c.getClass());
         writeName(c.name(), indent, false);
-        writeDeclaratonFragmentList(c.fragments(), indent);
+        writeDeclaratonFragmentList(c.fragments(), indent, true);
     }
 
     //============================================================
@@ -250,20 +250,19 @@ public final class AstPrinter extends Printer {
 
     private void writeTypeDecl(TypeDecl d, int indent) throws IOException {
         write(d.getClass().getSimpleName());
-        branch("name", indent, false);
-        writeIdentifier(d.name(), indent + 1);
-        branch("kind", indent, true);
-        writeTypeKindDecl(d.kind(), indent + 1);
-        writeDeclaratonFragmentList(d.fragments(), indent);
+        writeName(d.name(), indent, false);
+        writeTypeKindDecl(d.kind(), indent, false);
+        writeDeclaratonFragmentList(d.fragments(), indent, true);
     }
 
-    private void writeTypeKindDecl(TypeKindDecl k, int indent) throws IOException {
+    private void writeTypeKindDecl(TypeKindDecl k, int indent, boolean last) throws IOException {
+        branch("kind", indent, last);
         switch (k) {
-            case ScalarDecl s -> writeScalarDecl(s, indent);
-            case EnumDecl e   -> writeEnumDecl(e, indent);
-            case StructDecl s -> writeStructDecl(s, indent);
-            case UnionDecl u  -> writeUnionDecl(u, indent);
-            case DerivedTypeDecl d -> writeDerivedTypeDecl(d, indent);
+            case ScalarDecl s -> writeScalarDecl(s, indent + 1);
+            case EnumDecl e   -> writeEnumDecl(e, indent + 1);
+            case StructDecl s -> writeStructDecl(s, indent + 1);
+            case UnionDecl u  -> writeUnionDecl(u, indent + 1);
+            case DerivedTypeDecl d -> writeDerivedTypeDecl(d, indent + 1);
         }
     }
 
@@ -312,7 +311,7 @@ public final class AstPrinter extends Printer {
         writeName(f.name(), indent, false);
         writeNullable(f.nullable(), indent, false);
         writeTypeNode(f.type(), indent, false);
-        writeDeclaratonFragmentList(f.fragments(), indent);
+        writeDeclaratonFragmentList(f.fragments(), indent, true);
     }
 
     private void writeNullable(AstOptionalNode<NullLiteralNode> nullable, int indent, boolean last) throws IOException {
@@ -337,7 +336,7 @@ public final class AstPrinter extends Printer {
         writeClass(m.getClass());
         writeName(m.name(), indent, false);
         writeTypeNode(m.type(), indent, false);
-        writeDeclaratonFragmentList(m.fragments(), indent);
+        writeDeclaratonFragmentList(m.fragments(), indent, true);
     }
 
     //============================================================
@@ -415,10 +414,9 @@ public final class AstPrinter extends Printer {
 
     private void writeStreamType(StreamMemberDecl m, int indent) throws IOException {
         writeClass(m.getClass());
-        branch("name", indent, false);
-        writeIdentifier(m.name(), indent);
+        writeName(m.name(), indent, false);
         branch("type", indent, true);
-        writeTypeDecl(m.memberDecl(), indent);
+        writeTypeDecl(m.memberDecl(), indent + 1);
     }
 
     //============================================================
@@ -688,7 +686,6 @@ public final class AstPrinter extends Printer {
 
     private interface IfPresent<T> {
         void value(T t, int indent) throws IOException;
-
     }
 
     private <T extends AstNode> void forEach(AstListNode<T> xs, String name, ForEach<T> fn, int indent, Class<T> clazz) throws IOException {

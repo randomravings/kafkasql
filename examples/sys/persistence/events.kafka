@@ -1,0 +1,59 @@
+-- KafkaSQL System Domain - Persistence Event Model
+-- This defines the schema for the symbol table event sourcing system
+
+CREATE CONTEXT sys;
+
+USE CONTEXT sys;
+
+CREATE CONTEXT persistence;
+
+USE CONTEXT sys.persistence;
+
+-- Event types for symbol table changes
+CREATE TYPE EventType AS ENUM (
+    NOOP = 0
+    COMMENT 'Not a DDL operation',
+
+    CREATE_STMT = 1
+    COMMENT 'The creation of an object',
+
+    ALTER_STMT = 2
+    COMMENT 'Alteration of an object',
+
+    DROP_STMT = 3
+    COMMENT 'Dropping of an object'
+)
+COMMENT 'Basic enumeration of the type of change being made on the model'
+DEFAULT EventType::NOOP;
+
+-- Kafka stream definition for the event log
+CREATE STREAM SymbolEventLog (
+    TYPE SymbolEvent AS STRUCT (
+        EventId UUID
+        COMMENT 'Unique identifier for event',
+
+        EventTimestamp TIMESTAMP(3)
+        COMMENT 'UTC timestamp for event',
+
+        Source STRING
+        COMMENT 'The source system initiating event',
+
+        EventType sys.persistence.EventType
+        CHECK (value <> EventType::NOOP)
+        COMMENT 'Enumeration of the kind of event happening',
+
+        ObjectName STRING
+        COMMENT 'Object that is the target of event',
+
+        ObjectVersion INT32
+        COMMENT 'The new version of event, 0 for when created',
+
+        Delta STRING
+        COMMENT 'Delta statement, used for ALTER/DROP statements',
+
+        State STRING
+        COMMENT 'A create statement to create object, used for CREATE/ALTER statements'
+    )
+    DISTRIBUTE BY (ObjectName)
+    TIMESTAMP BY (EventTimestamp)
+);

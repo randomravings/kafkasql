@@ -1,4 +1,4 @@
-package kafkasql.io;
+package kafkasql.runtime.value;
 
 /**
  * Marker interface for compiled/generated record types from KafkaSQL schemas.

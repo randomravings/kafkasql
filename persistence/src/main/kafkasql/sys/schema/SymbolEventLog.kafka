@@ -1,0 +1,40 @@
+INCLUDE 'sys/schema.kafka';
+INCLUDE 'sys/schema/EventType.kafka';
+SET VERSION = 1;
+
+USE CONTEXT sys.schema;
+
+-- Kafka stream definition for the event log
+CREATE STREAM SymbolEventLog (
+    TYPE SymbolEvent AS STRUCT (
+        EventId UUID
+        COMMENT 'Unique identifier for event',
+
+        EventTimestamp TIMESTAMP(3)
+        COMMENT 'UTC timestamp for event',
+
+        Source STRING
+        COMMENT 'The source system initiating event',
+
+        GrammarVersion INT32
+        COMMENT 'Version of the KafkaSQL grammar used to produce Delta and State',
+
+        EventType sys.schema.EventType
+        CHECK (value <> EventType::NOOP)
+        COMMENT 'Enumeration of the kind of event happening',
+
+        ObjectName STRING
+        COMMENT 'Object that is the target of event',
+
+        ObjectVersion INT32
+        COMMENT 'The new version of event, 0 for when created',
+
+        Delta STRING
+        COMMENT 'Delta statement, used for ALTER/DROP statements',
+
+        State STRING
+        COMMENT 'A create statement to create object, used for CREATE/ALTER statements'
+    )
+    DISTRIBUTE BY (ObjectName)
+    TIMESTAMP BY (EventTimestamp)
+);

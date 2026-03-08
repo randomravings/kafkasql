@@ -71,6 +71,9 @@ WITH          : [Ww][Ii][Tt][Hh] ;
 COMMENT       : [Cc][Oo][Mm][Mm][Ee][Nn][Tt];
 CONSTRAINT    : [Cc][Oo][Nn][Ss][Tt][Rr][Aa][Ii][Nn][Tt] ;
 SYNONYM       : [Ss][Yy][Nn][Oo][Nn][Yy][Mm] ;
+SET           : [Ss][Ee][Tt] ;
+VERSION       : [Vv][Ee][Rr][Ss][Ii][Oo][Nn] ;
+LATEST        : [Ll][Aa][Tt][Ee][Ss][Tt] ;
 
 // Punctuation / operators
 COMMA         : ',' ;

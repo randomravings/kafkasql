@@ -1,0 +1,21 @@
+INCLUDE 'sys/schema.kafka';
+SET VERSION = 1;
+
+USE CONTEXT sys.schema;
+
+-- Event types for symbol table changes
+CREATE TYPE EventType AS ENUM (
+    NOOP = 0
+    COMMENT 'Not a DDL operation',
+
+    CREATE_STMT = 1
+    COMMENT 'The creation of an object',
+
+    ALTER_STMT = 2
+    COMMENT 'Alteration of an object',
+
+    DROP_STMT = 3
+    COMMENT 'Dropping of an object'
+)
+COMMENT 'Basic enumeration of the type of change being made on the model'
+DEFAULT EventType::NOOP;

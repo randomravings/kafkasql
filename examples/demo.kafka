@@ -34,11 +34,8 @@ CREATE TYPE Address AS STRUCT (
   Zip STRING NULL
 );
 
-CREATE
- TYPE
-  DefaultAddress
-   AS
-    com.example.Address
+CREATE TYPE DefaultAddress
+AS com.example.Address
 COMMENT 'Default address type'
 
 DEFAULT @{

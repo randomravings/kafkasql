@@ -69,10 +69,12 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         SqlStreamParser.ScriptContext script = parser.script();
         AstBuilder builder = new AstBuilder(args.source(), args.diags());
-        if (script.includeSection() != null) {
-            for (SqlStreamParser.IncludePragmaContext ic : script.includeSection().includePragma()) {
-                Include include = builder.visitIncludePragma(ic);
-                incs.add(include);
+        if (script.preamble() != null) {
+            for (SqlStreamParser.PreambleDirectiveContext pd : script.preamble().preambleDirective()) {
+                if (pd.includePragma() != null) {
+                    Include include = builder.visitIncludePragma(pd.includePragma());
+                    incs.add(include);
+                }
             }
         }
         return incs;
@@ -93,19 +95,39 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         @Override
         public Script visitScript(SqlStreamParser.ScriptContext ctx) {
-            AstListNode<Include> includes = visitIncludeSection(ctx.includeSection());
-            AstListNode<Stmt> stmts = visitStatementList(ctx.statementList());
-            return new Script(range(ctx), includes, stmts);
-        }
-
-        @Override
-        public AstListNode<Include> visitIncludeSection(SqlStreamParser.IncludeSectionContext ctx) {
             AstListNode<Include> includes = new AstListNode<>(Include.class);
-            if (ctx == null)
-                return includes;
-            for (SqlStreamParser.IncludePragmaContext ic : ctx.includePragma())
-                includes.add(visitIncludePragma(ic));
-            return includes;
+            Optional<VersionPragma> version = Optional.empty();
+            
+            if (ctx.preamble() != null) {
+                for (SqlStreamParser.PreambleDirectiveContext pd : ctx.preamble().preambleDirective()) {
+                    if (pd.includePragma() != null) {
+                        includes.add(visitIncludePragma(pd.includePragma()));
+                    } else if (pd.versionPragma() != null) {
+                        if (version.isPresent()) {
+                            reportSyntaxError(range(pd), "Duplicate SET VERSION directive");
+                        } else {
+                            version = Optional.of(visitVersionPragma(pd.versionPragma()));
+                        }
+                    }
+                }
+            }
+            
+            AstListNode<Stmt> stmts = visitStatementList(ctx.statementList());
+            return new Script(range(ctx), includes, version, stmts);
+        }
+        
+        public VersionPragma visitVersionPragma(SqlStreamParser.VersionPragmaContext ctx) {
+            Range range = range(ctx);
+            SqlStreamParser.VersionValueContext vc = ctx.versionValue();
+            if (vc instanceof SqlStreamParser.LatestVersionContext) {
+                return new VersionPragma(range, VersionPragma.LATEST);
+            } else {
+                int ver = Integer.parseInt(vc.getText());
+                if (ver < 1) {
+                    reportSyntaxError(range, "Version must be >= 1, got: " + ver);
+                }
+                return new VersionPragma(range, ver);
+            }
         }
 
         @Override
