@@ -53,11 +53,11 @@ class ReadQueryTest {
             WRITE TO test.Customers
             TYPE Customer
             VALUES(
-                @{Id: 1, Name: 'Alice', Email: 'alice@example.com', Age: 30, Status: 'ACTIVE'},
-                @{Id: 2, Name: 'Bob', Email: 'bob@example.com', Age: 25, Status: 'ACTIVE'},
-                @{Id: 3, Name: 'Charlie', Email: 'charlie@example.com', Age: 35, Status: 'INACTIVE'},
-                @{Id: 4, Name: 'Diana', Email: 'diana@example.com', Age: 28, Status: 'ACTIVE'},
-                @{Id: 5, Name: 'Eve', Email: 'eve@example.com', Age: 42, Status: 'ACTIVE'}
+                {Id: 1, Name: 'Alice', Email: 'alice@example.com', Age: 30, Status: 'ACTIVE'},
+                {Id: 2, Name: 'Bob', Email: 'bob@example.com', Age: 25, Status: 'ACTIVE'},
+                {Id: 3, Name: 'Charlie', Email: 'charlie@example.com', Age: 35, Status: 'INACTIVE'},
+                {Id: 4, Name: 'Diana', Email: 'diana@example.com', Age: 28, Status: 'ACTIVE'},
+                {Id: 5, Name: 'Eve', Email: 'eve@example.com', Age: 42, Status: 'ACTIVE'}
             );
             
             -- Product data
@@ -76,11 +76,11 @@ class ReadQueryTest {
             WRITE TO test.Products
             TYPE Product
             VALUES(
-                @{Id: 101, Name: 'Widget', Category: 'Tools', Price: 100, InStock: true},
-                @{Id: 102, Name: 'Gadget', Category: 'Electronics', Price: 250, InStock: true},
-                @{Id: 103, Name: 'Gizmo', Category: 'Tools', Price: 150, InStock: false},
-                @{Id: 104, Name: 'Doohickey', Category: 'Home', Price: 75, InStock: true},
-                @{Id: 105, Name: 'Thingamajig', Category: 'Electronics', Price: 300, InStock: true}
+                {Id: 101, Name: 'Widget', Category: 'Tools', Price: 100, InStock: true},
+                {Id: 102, Name: 'Gadget', Category: 'Electronics', Price: 250, InStock: true},
+                {Id: 103, Name: 'Gizmo', Category: 'Tools', Price: 150, InStock: false},
+                {Id: 104, Name: 'Doohickey', Category: 'Home', Price: 75, InStock: true},
+                {Id: 105, Name: 'Thingamajig', Category: 'Electronics', Price: 300, InStock: true}
             );
             
             -- Order data (simplified - just customer ID and product ID)
@@ -99,12 +99,12 @@ class ReadQueryTest {
             WRITE TO test.Orders
             TYPE Order
             VALUES(
-                @{OrderId: 1001, CustomerId: 1, ProductId: 101, Quantity: 2, Total: 200},
-                @{OrderId: 1002, CustomerId: 2, ProductId: 102, Quantity: 1, Total: 250},
-                @{OrderId: 1003, CustomerId: 1, ProductId: 103, Quantity: 1, Total: 150},
-                @{OrderId: 1004, CustomerId: 4, ProductId: 104, Quantity: 3, Total: 225},
-                @{OrderId: 1005, CustomerId: 2, ProductId: 105, Quantity: 1, Total: 300},
-                @{OrderId: 1006, CustomerId: 5, ProductId: 101, Quantity: 1, Total: 100}
+                {OrderId: 1001, CustomerId: 1, ProductId: 101, Quantity: 2, Total: 200},
+                {OrderId: 1002, CustomerId: 2, ProductId: 102, Quantity: 1, Total: 250},
+                {OrderId: 1003, CustomerId: 1, ProductId: 103, Quantity: 1, Total: 150},
+                {OrderId: 1004, CustomerId: 4, ProductId: 104, Quantity: 3, Total: 225},
+                {OrderId: 1005, CustomerId: 2, ProductId: 105, Quantity: 1, Total: 300},
+                {OrderId: 1006, CustomerId: 5, ProductId: 101, Quantity: 1, Total: 100}
             );
             
             -- Multi-type event stream (demonstrates multiple types on same stream)
@@ -135,21 +135,21 @@ class ReadQueryTest {
             WRITE TO test.Events
             TYPE UserCreated
             VALUES(
-                @{UserId: 1, Username: 'alice', Email: 'alice@example.com'},
-                @{UserId: 2, Username: 'bob', Email: 'bob@example.com'}
+                {UserId: 1, Username: 'alice', Email: 'alice@example.com'},
+                {UserId: 2, Username: 'bob', Email: 'bob@example.com'}
             );
             
             WRITE TO test.Events
             TYPE UserUpdated
             VALUES(
-                @{UserId: 1, Field: 'Email', OldValue: 'alice@example.com', NewValue: 'alice.new@example.com'},
-                @{UserId: 2, Field: 'Username', OldValue: 'bob', NewValue: 'robert'}
+                {UserId: 1, Field: 'Email', OldValue: 'alice@example.com', NewValue: 'alice.new@example.com'},
+                {UserId: 2, Field: 'Username', OldValue: 'bob', NewValue: 'robert'}
             );
             
             WRITE TO test.Events
             TYPE UserDeleted
             VALUES(
-                @{UserId: 2, Reason: 'Account closed by user'}
+                {UserId: 2, Reason: 'Account closed by user'}
             );
             """;
         
@@ -651,15 +651,15 @@ class ReadQueryTest {
             -- Add more events in different order
             WRITE TO test.Events
             TYPE UserCreated
-            VALUES(@{UserId: 3, Username: 'charlie', Email: 'charlie@example.com'});
+            VALUES({UserId: 3, Username: 'charlie', Email: 'charlie@example.com'});
             
             WRITE TO test.Events
             TYPE UserDeleted
-            VALUES(@{UserId: 1, Reason: 'Duplicate account'});
+            VALUES({UserId: 1, Reason: 'Duplicate account'});
             
             WRITE TO test.Events
             TYPE UserUpdated
-            VALUES(@{UserId: 3, Field: 'Email', OldValue: 'charlie@example.com', NewValue: 'chuck@example.com'});
+            VALUES({UserId: 3, Field: 'Email', OldValue: 'charlie@example.com', NewValue: 'chuck@example.com'});
             
             -- Now read multiple types
             READ FROM test.Events

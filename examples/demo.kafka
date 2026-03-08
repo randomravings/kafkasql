@@ -37,8 +37,7 @@ CREATE TYPE Address AS STRUCT (
 CREATE TYPE DefaultAddress
 AS com.example.Address
 COMMENT 'Default address type'
-
-DEFAULT @{
+DEFAULT {
   Street: '123 Main St',
   Zip: '00000'
 };
@@ -57,7 +56,7 @@ CREATE TYPE Customer AS STRUCT (
   Attrs MAP<STRING, MAP<TIMESTAMP(3), LIST<com.example.Money>>>,
   Classification STRING(5),
   Status com.example.Status,
-  Address com.example.Address DEFAULT @{
+  Address com.example.Address DEFAULT {
     Street: 'Knowhere',
     Zip: 'Space 101'
   }
@@ -76,14 +75,14 @@ CREATE STREAM CustomerEvents (
 
 WRITE TO com.example.CustomerEvents
 TYPE CustomerV1
-VALUES(@{
+VALUES({
   Id: com.example.CustomerIdOrName$Id(5000),
   Ts: '2024-01-01T00:00:00.000',
   Email: 'joe@example.com'
 });
 
 WRITE TO com.example.CustomerEvents TYPE CustomerV2
-VALUES(@{
+VALUES({
   Id: 1001,
   Name: 'Alice',
   Email: 'alice@example.com',
@@ -91,7 +90,7 @@ VALUES(@{
   Attrs: {'key1': {'2024-01-01T00:00:00.000': [100.50, 200.75]}},
   Classification: 'VIP',
   Status: com.example.Status::ACTIVE
-}, @{
+}, {
   Id: 1002,
   Name: 'Bob',
   Email: NULL,

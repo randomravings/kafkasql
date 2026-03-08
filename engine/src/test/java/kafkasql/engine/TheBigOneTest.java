@@ -58,24 +58,24 @@ class TheBigOneTest {
             WRITE TO test.Events
             TYPE UserCreated
             VALUES(
-                @{UserId: 1, Username: 'alice', Email: 'alice@example.com'},
-                @{UserId: 2, Username: 'bob', Email: 'bob@example.com'},
-                @{UserId: 3, Username: 'charlie', Email: 'charlie@example.com'}
+                {UserId: 1, Username: 'alice', Email: 'alice@example.com'},
+                {UserId: 2, Username: 'bob', Email: 'bob@example.com'},
+                {UserId: 3, Username: 'charlie', Email: 'charlie@example.com'}
             );
             
             WRITE TO test.Events
             TYPE UserUpdated
             VALUES(
-                @{UserId: 1, Field: 'Email', OldValue: 'alice@example.com', NewValue: 'alice.new@example.com'},
-                @{UserId: 2, Field: 'Username', OldValue: 'bob', NewValue: 'robert'},
-                @{UserId: 3, Field: 'Email', OldValue: 'charlie@example.com', NewValue: 'chuck@example.com'}
+                {UserId: 1, Field: 'Email', OldValue: 'alice@example.com', NewValue: 'alice.new@example.com'},
+                {UserId: 2, Field: 'Username', OldValue: 'bob', NewValue: 'robert'},
+                {UserId: 3, Field: 'Email', OldValue: 'charlie@example.com', NewValue: 'chuck@example.com'}
             );
             
             WRITE TO test.Events
             TYPE UserDeleted
             VALUES(
-                @{UserId: 2, Reason: 'Account closed by user'},
-                @{UserId: 4, Reason: 'Duplicate account'}
+                {UserId: 2, Reason: 'Account closed by user'},
+                {UserId: 4, Reason: 'Duplicate account'}
             );
             """;
         
@@ -406,14 +406,14 @@ class TheBigOneTest {
             WRITE TO stress.ComplexEvents
             TYPE ComplexEvent
             VALUES(
-                @{
+                {
                     Id: 1001,
                     Name: 'Alice Anderson',
                     Status: stress.Status::ACTIVE,
-                    Contact: @{
+                    Contact: {
                         Email: 'alice@example.com',
                         Phone: '555-1234',
-                        Address: @{
+                        Address: {
                             Street: '123 Main St',
                             City: 'Springfield',
                             Zip: '12345',
@@ -421,7 +421,7 @@ class TheBigOneTest {
                         }
                     },
                     Identifier: stress.Identifier$Ssn('123-45-6789'),
-                    Metadata: @{
+                    Metadata: {
                         Tags: ['vip', 'gold', 'verified'],
                         Attributes: {'level': 5, 'score': 100, 'points': 9999},
                         Flags: {'active': true, 'premium': true, 'beta': false}
@@ -429,13 +429,13 @@ class TheBigOneTest {
                     Aliases: ['alice', 'ally', 'alison'],
                     Scores: {'math': 95, 'science': 88, 'english': 92}
                 },
-                @{
+                {
                     Id: 1002,
                     Name: 'Bob Builder',
                     Status: stress.Status::SUSPENDED,
-                    Contact: @{
+                    Contact: {
                         Email: 'bob@example.com',
-                        Address: @{
+                        Address: {
                             Street: '456 Oak Ave',
                             City: 'Metropolis',
                             Zip: '54321',
@@ -443,7 +443,7 @@ class TheBigOneTest {
                         }
                     },
                     Identifier: stress.Identifier$PassportNo('P87654321'),
-                    Metadata: @{
+                    Metadata: {
                         Tags: ['basic'],
                         Attributes: {'level': 2, 'score': 50},
                         Flags: {'active': false, 'premium': false}
@@ -451,20 +451,20 @@ class TheBigOneTest {
                     Aliases: ['bob', 'bobby'],
                     Scores: {'math': 75, 'science': 80}
                 },
-                @{
+                {
                     Id: 1003,
                     Name: 'Charlie Chen',
                     Status: stress.Status::ACTIVE,
-                    Contact: @{
+                    Contact: {
                         Email: 'charlie@example.com',
                         Phone: '555-9999',
-                        Address: @{
+                        Address: {
                             Street: '789 Pine Rd',
                             City: 'Gotham'
                         }
                     },
                     Identifier: stress.Identifier$DriverLicense('DL-999888'),
-                    Metadata: @{
+                    Metadata: {
                         Tags: ['platinum', 'verified', 'expert', 'admin'],
                         Attributes: {'level': 10, 'score': 200, 'points': 50000, 'bonus': 1000},
                         Flags: {'active': true, 'premium': true, 'beta': true, 'admin': true}
@@ -587,7 +587,7 @@ class TheBigOneTest {
             WRITE TO edge.EdgeCases
             TYPE EdgeCase
             VALUES(
-                @{
+                {
                     Id: 0,
                     EmptyList: [],
                     EmptyMap: {},
@@ -596,7 +596,7 @@ class TheBigOneTest {
                     NegativeNumber: -2147483648,
                     ZeroValue: 0
                 },
-                @{
+                {
                     Id: -1,
                     EmptyList: [],
                     EmptyMap: {},
@@ -696,21 +696,21 @@ class TheBigOneTest {
             
             WRITE TO deep.DeepEvents
             TYPE DeepEvent
-            VALUES(@{
+            VALUES({
                 EventId: 999,
-                Data: @{
+                Data: {
                     Id: 1,
-                    Level2Data: @{
+                    Level2Data: {
                         Name: 'nested',
-                        Level3Data: @{
+                        Level3Data: {
                             Value: 'deep value',
                             Number: 42
                         },
                         Items: ['a', 'b', 'c']
                     },
                     NestedMaps: {
-                        'key1': @{Value: 'val1', Number: 10},
-                        'key2': @{Value: 'val2', Number: 20}
+                        'key1': {Value: 'val1', Number: 10},
+                        'key2': {Value: 'val2', Number: 20}
                     }
                 },
                 ExtraLists: [[1, 2, 3], [4, 5], [6]],

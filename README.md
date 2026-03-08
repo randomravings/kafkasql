@@ -184,10 +184,10 @@ CREATE TYPE ComplexDefaults AS STRUCT (
   StructDefault com.example.SomeStruct
   COMMENT 'JSON style default but with @ to disabiguate from map defualt
            and Identifier for fields and literal values.'
-  DEFAULT @{
+  DEFAULT {
     Id: 1001,
     Name: 'John',
-    Address: @{
+    Address: {
       Street: 'Far away street',
       Zip: 'pick one'
     }
@@ -284,7 +284,7 @@ DISTRIBUTE BY (Id);
 -- Write statents target streams as fully qualified names
 WRITE TO com.example.CustomerEvents
 TYPE CustomerV2                     -- and targets one speicific type
-VALUES(@{                           -- and then provides a list of struct literals
+VALUES({                           -- and then provides a list of struct literals
   Id: 1001,
   Name: 'Alice',
   Email: 'alice@example.com',
@@ -292,7 +292,7 @@ VALUES(@{                           -- and then provides a list of struct litera
   Attrs: {'key1': {'2024-01-01T00:00:00.000': [100.50, 200.75]}},
   Classification: 'VIP',
   Status: com.example.Status::ACTIVE
-}, @{
+}, {
   Id: 1002,
   Name: 'Bob',
   Email: NULL,

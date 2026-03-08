@@ -30,7 +30,7 @@ class CheckConstraintValidationTest {
                 )
             );
             
-            WRITE TO test.events TYPE val VALUES (@{ name: 'thing', val: 99 });
+            WRITE TO test.events TYPE val VALUES ({ name: 'thing', val: 99 });
             """;
 
         var model = compile(source);
@@ -53,7 +53,7 @@ class CheckConstraintValidationTest {
                 )
             );
             
-            WRITE TO test.events TYPE val VALUES (@{ name: 'thing', val: -99 });
+            WRITE TO test.events TYPE val VALUES ({ name: 'thing', val: -99 });
             """;
 
         var model = compile(source);
@@ -81,7 +81,7 @@ class CheckConstraintValidationTest {
                 )
             );
             
-            WRITE TO test.events TYPE val VALUES (@{ name: 'thing', val: 0 });
+            WRITE TO test.events TYPE val VALUES ({ name: 'thing', val: 0 });
             """;
 
         var model = compile(source);

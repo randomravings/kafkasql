@@ -402,14 +402,14 @@
       }
     },
     "default-clause": {
-      "begin": "(?i)\\b(DEFAULT)\\b\\s*",
+      "begin": "(?i)\\b(DEFAULT)\\b",
       "beginCaptures": {
         "1": { "name": "keyword.control.clause.kafkasql" }
       },
-      "end": "(?<=\\S)",
-      "applyEndPatternLast": true,
+      "end": "(?=(?i)\\b(?:COMMENT|CHECK|CONSTRAINT|DISTRIBUTE|TIMESTAMP)\\b|[;,)])",
       "patterns": [
-        { "include": "#literals" }
+        { "include": "#literals" },
+        { "include": "#keywords" }
       ]
     },
     "distribute-by-clause": {
@@ -578,12 +578,13 @@
     "literals": {
       "patterns": [
         { "include": "#string-literal" },
+        { "include": "#bytes-literal" },
         { "include": "#number-literal" },
         { "include": "#enum-literal" },
+        { "include": "#union-constructor-call" },
         { "include": "#union-literal" },
         { "include": "#list-literal" },
-        { "include": "#struct-literal" },
-        { "include": "#map-literal" }
+        { "include": "#brace-literal" }
       ]
     },
     "string-literal": {
@@ -591,18 +592,22 @@
         {
           "name": "string.quoted.single.kafkasql",
           "begin": "'", "end": "'",
-          "patterns": [{ "name": "constant.character.escape.kafkasql", "match": "\\\\." }]
+          "patterns": [{ "name": "constant.character.escape.kafkasql", "match": "''" }]
         },
         {
           "name": "string.quoted.double.kafkasql",
           "begin": "\"", "end": "\"",
-          "patterns": [{ "name": "constant.character.escape.kafkasql", "match": "\\\\." }]
+          "patterns": [{ "name": "constant.character.escape.kafkasql", "match": "\\\\."}]
         }
       ]
     },
+    "bytes-literal": {
+      "name": "constant.numeric.hex.kafkasql",
+      "match": "\\b0[xX][0-9a-fA-F]+\\b"
+    },
     "number-literal": {
       "name": "constant.numeric.kafkasql",
-      "match": "\\b\\d+(?:\\.\\d+)?\\b"
+      "match": "-?\\b\\d+(?:\\.\\d+|[eE][+-]?\\d+)?\\b"
     },
     "enum-literal": {
       "match": "([A-Za-z_][A-Za-z0-9_.]*)(::)([A-Za-z_][A-Za-z0-9_]*)",
@@ -645,31 +650,87 @@
         { "match": ",", "name": "punctuation.separator.comma.kafkasql" }
       ]
     },
-    "struct-literal": {
+    "brace-literal": {
       "begin": "\\{", "end": "\\}",
       "patterns": [
         {
-          "match": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
-          "captures": {
+          "comment": "Map entry: single-quoted string key (STRING_LIT)",
+          "begin": "('[^']*')\\s*(:)",
+          "beginCaptures": {
+            "1": { "name": "string.quoted.single.kafkasql" },
+            "2": { "name": "punctuation.separator.colon.kafkasql" }
+          },
+          "end": "(?=[,}])",
+          "patterns": [
+            { "include": "#keywords" },
+            { "include": "#literals" }
+          ]
+        },
+        {
+          "comment": "Map entry: double-quoted string key (STRING_LIT)",
+          "begin": "(\"[^\"]*\")\\s*(:)",
+          "beginCaptures": {
+            "1": { "name": "string.quoted.double.kafkasql" },
+            "2": { "name": "punctuation.separator.colon.kafkasql" }
+          },
+          "end": "(?=[,}])",
+          "patterns": [
+            { "include": "#keywords" },
+            { "include": "#literals" }
+          ]
+        },
+        {
+          "comment": "Map entry: numeric key (NUMBER_LIT incl. negative, decimal, exponent)",
+          "begin": "(-?\\d+(?:\\.\\d+|[eE][+-]?\\d+)?)\\s*(:)",
+          "beginCaptures": {
+            "1": { "name": "constant.numeric.kafkasql" },
+            "2": { "name": "punctuation.separator.colon.kafkasql" }
+          },
+          "end": "(?=[,}])",
+          "patterns": [
+            { "include": "#keywords" },
+            { "include": "#literals" }
+          ]
+        },
+        {
+          "comment": "Map entry: bytes key (BYTES_LIT e.g. 0xFF)",
+          "begin": "(0[xX][0-9a-fA-F]+)\\s*(:)",
+          "beginCaptures": {
+            "1": { "name": "constant.numeric.hex.kafkasql" },
+            "2": { "name": "punctuation.separator.colon.kafkasql" }
+          },
+          "end": "(?=[,}])",
+          "patterns": [
+            { "include": "#keywords" },
+            { "include": "#literals" }
+          ]
+        },
+        {
+          "comment": "Map entry: boolean key (TRUE/FALSE)",
+          "begin": "(?i)(TRUE|FALSE)\\s*(:)",
+          "beginCaptures": {
+            "1": { "name": "constant.language.boolean.kafkasql" },
+            "2": { "name": "punctuation.separator.colon.kafkasql" }
+          },
+          "end": "(?=[,}])",
+          "patterns": [
+            { "include": "#keywords" },
+            { "include": "#literals" }
+          ]
+        },
+        {
+          "comment": "Struct entry: identifier key followed by colon",
+          "begin": "([A-Za-z_][A-Za-z0-9_]*)\\s*(:)",
+          "beginCaptures": {
             "1": { "name": "variable.other.property.kafkasql" },
             "2": { "name": "punctuation.separator.colon.kafkasql" }
-          }
+          },
+          "end": "(?=[,}])",
+          "patterns": [
+            { "include": "#keywords" },
+            { "include": "#literals" }
+          ]
         },
-        { "include": "#literals" },
-        { "match": ",", "name": "punctuation.separator.comma.kafkasql" }
-      ]
-    },
-    "map-literal": {
-      "begin": "\\{", "end": "\\}",
-      "patterns": [
-        {
-          "match": "(\\d+(?:\\.\\d+)?|'[^']*'|\"[^\"]*\")\\s*(:)",
-          "captures": {
-            "1": { "name": "constant.other.key.kafkasql" },
-            "2": { "name": "punctuation.separator.colon.kafkasql" }
-          }
-        },
-        { "include": "#literals" },
         { "match": ",", "name": "punctuation.separator.comma.kafkasql" }
       ]
     },

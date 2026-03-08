@@ -407,11 +407,10 @@ primary
 literal
   : NULL
   | literalValue
-  | structLiteral
+  | braceLiteral
   | enumLiteral
   | unionLiteral
   | listLiteral
-  | mapLiteral
   ;
 
 literalValue
@@ -426,16 +425,25 @@ listLiteral
   : LBRACK (literal (COMMA literal)*)? RBRACK
   ;
 
-mapLiteral
-  : LBRACE (mapEntry (COMMA mapEntry)*)? RBRACE
+/*
+ * braceLiteral disambiguates struct vs map using key tokens:
+ *   - Identifiers   → struct  (e.g.  { Name: 'Alice' })
+ *   - Primitive lits → map    (e.g.  { 'key': 42 })
+ *   - Empty braces   → resolved by semantic layer
+ */
+braceLiteral
+  : LBRACE RBRACE                                      # EmptyBraceLiteral
+  | LBRACE structEntry (COMMA structEntry)* RBRACE     # StructBraceLiteral
+  | LBRACE mapEntry (COMMA mapEntry)* RBRACE           # MapBraceLiteral
   ;
 
 mapEntry
   : literalValue COLON literal
   ;
 
+/* structLiteral kept for writeValueList where context is unambiguous */
 structLiteral
-  : AT LBRACE (structEntry (COMMA structEntry)*)? RBRACE
+  : LBRACE (structEntry (COMMA structEntry)*)? RBRACE
   ;
 
 structEntry

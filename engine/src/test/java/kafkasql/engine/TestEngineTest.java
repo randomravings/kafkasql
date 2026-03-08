@@ -55,7 +55,7 @@ class TestEngineTest {
             
             WRITE TO test.CustomerEvents
             TYPE Customer
-            VALUES(@{Id: 1});
+            VALUES({Id: 1});
             """;
         
         engine.execute(script);
@@ -100,13 +100,13 @@ class TestEngineTest {
             WRITE TO test.CustomerEvents
             TYPE Customer
             VALUES(
-                @{Id: 1, Name: 'Alice'},
-                @{Id: 2, Name: 'Bob'}
+                {Id: 1, Name: 'Alice'},
+                {Id: 2, Name: 'Bob'}
             );
             
             WRITE TO test.CustomerEvents
             TYPE Customer
-            VALUES(@{Id: 3, Name: 'Charlie'});
+            VALUES({Id: 3, Name: 'Charlie'});
             """;
         
         engine.execute(script);
@@ -140,7 +140,7 @@ class TestEngineTest {
             USE CONTEXT test;
             CREATE TYPE Customer AS STRUCT (Id INT32);
             CREATE STREAM CustomerEvents (TYPE Customer AS test.Customer);
-            WRITE TO test.CustomerEvents TYPE Customer VALUES(@{Id: 1});
+            WRITE TO test.CustomerEvents TYPE Customer VALUES({Id: 1});
             """;
         
         engine.execute(script);
@@ -188,13 +188,13 @@ class TestEngineTest {
             
             WRITE TO test.CustomerEvents
             TYPE Customer
-            VALUES(@{
+            VALUES({
                 Id: 1001,
                 Name: 'Alice',
                 Tags: ['vip', 'gold'],
                 Attrs: {'level': 5, 'score': 100},
                 Status: test.Status::ACTIVE,
-                Address: @{Street: '123 Main St', Zip: '12345'},
+                Address: {Street: '123 Main St', Zip: '12345'},
                 Identifier: test.IdOrName$Id(42)
             });
             """;
@@ -257,7 +257,7 @@ class TestEngineTest {
             
             WRITE TO test.CustomerEvents
             TYPE Customer
-            VALUES(@{Id: 1});
+            VALUES({Id: 1});
             """;
         
         // Should fail - Name is required (not nullable, no default)
@@ -287,7 +287,7 @@ class TestEngineTest {
             
             WRITE TO test.CustomerEvents
             TYPE Customer
-            VALUES(@{Id: 1, Name: 'Alice'});
+            VALUES({Id: 1, Name: 'Alice'});
             """;
         
         // Should succeed - Email is nullable, Score has default

@@ -1286,16 +1286,21 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
                 return new NullLiteralNode(range(ctx));
             if (ctx.literalValue() != null)
                 return visitLiteralValue(ctx.literalValue());
-            if (ctx.structLiteral() != null)
-                return visitStructLiteral(ctx.structLiteral());
+            if (ctx.braceLiteral() != null) {
+                var blc = ctx.braceLiteral();
+                if (blc instanceof SqlStreamParser.EmptyBraceLiteralContext e)
+                    return visitEmptyBraceLiteral(e);
+                if (blc instanceof SqlStreamParser.StructBraceLiteralContext s)
+                    return visitStructBraceLiteral(s);
+                if (blc instanceof SqlStreamParser.MapBraceLiteralContext m)
+                    return visitMapBraceLiteral(m);
+            }
             if (ctx.enumLiteral() != null)
                 return visitEnumLiteral(ctx.enumLiteral());
             if (ctx.unionLiteral() != null)
                 return visitUnionLiteral(ctx.unionLiteral());
             if (ctx.listLiteral() != null)
                 return visitListLiteral(ctx.listLiteral());
-            if (ctx.mapLiteral() != null)
-                return visitMapLiteral(ctx.mapLiteral());
             
             // Syntax error - report and return placeholder null literal
             Range range = range(ctx);
@@ -1335,14 +1340,36 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             return new ListLiteralNode(range(ctx), elems);
         }
 
-        @Override
-        public MapLiteralNode visitMapLiteral(SqlStreamParser.MapLiteralContext ctx) {
+        // ── braceLiteral alternatives ──────────────────────────────
+
+        /**
+         * Empty braces {} – default to empty map.
+         * The semantic layer may reinterpret as an empty struct
+         * when the expected type is known.
+         */
+        public MapLiteralNode visitEmptyBraceLiteral(SqlStreamParser.EmptyBraceLiteralContext ctx) {
+            return new MapLiteralNode(range(ctx), new AstListNode<>(MapEntryLiteralNode.class));
+        }
+
+        /** { identifier: literal, ... } → struct */
+        public StructLiteralNode visitStructBraceLiteral(SqlStreamParser.StructBraceLiteralContext ctx) {
+            AstListNode<StructFieldLiteralNode> fields = new AstListNode<>(StructFieldLiteralNode.class);
+            for (SqlStreamParser.StructEntryContext sc : ctx.structEntry()) {
+                fields.add(visitStructEntry(sc));
+            }
+            return new StructLiteralNode(range(ctx), fields);
+        }
+
+        /** { literalValue: literal, ... } → map */
+        public MapLiteralNode visitMapBraceLiteral(SqlStreamParser.MapBraceLiteralContext ctx) {
             AstListNode<MapEntryLiteralNode> entries = new AstListNode<>(MapEntryLiteralNode.class);
             for (SqlStreamParser.MapEntryContext mc : ctx.mapEntry()) {
                 entries.add(visitMapEntry(mc));
             }
             return new MapLiteralNode(range(ctx), entries);
         }
+
+        // ── map / struct entry helpers ────────────────────────────────
 
         @Override
         public MapEntryLiteralNode visitMapEntry(SqlStreamParser.MapEntryContext ctx) {
@@ -1352,6 +1379,9 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             return new MapEntryLiteralNode(range, key, value);
         }
 
+        /**
+         * Used by writeValueList where context is unambiguously struct.
+         */
         @Override
         public StructLiteralNode visitStructLiteral(SqlStreamParser.StructLiteralContext ctx) {
             AstListNode<StructFieldLiteralNode> fields = new AstListNode<>(StructFieldLiteralNode.class);
