@@ -195,6 +195,20 @@ public class BinarySerializer {
             }
         }
         
+        // Handle sealed interfaces (e.g., compiled stream types with a single variant)
+        if (clazz.isSealed()) {
+            Class<?>[] permitted = clazz.getPermittedSubclasses();
+            if (permitted.length == 1) {
+                @SuppressWarnings("unchecked")
+                Class<T> subclass = (Class<T>) permitted[0];
+                return deserialize(subclass, in);
+            }
+            throw new IllegalArgumentException(
+                "Sealed interface " + clazz.getName() + " has " + permitted.length +
+                " permitted subclasses; only single-variant sealed interfaces are supported"
+            );
+        }
+        
         // Handle records
         if (clazz.isRecord()) {
             RecordComponent[] components = clazz.getRecordComponents();

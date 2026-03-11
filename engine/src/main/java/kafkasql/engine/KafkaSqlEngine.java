@@ -2,8 +2,12 @@ package kafkasql.engine;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import kafkasql.lang.KafkaSqlParser;
 import kafkasql.lang.KafkaSqlArgs;
@@ -19,6 +23,7 @@ import kafkasql.lang.syntax.ast.decl.Decl;
 import kafkasql.lang.syntax.ast.show.ShowTarget;
 import kafkasql.lang.syntax.ast.literal.StructLiteralNode;
 import kafkasql.runtime.Name;
+import kafkasql.runtime.diagnostics.Range;
 import kafkasql.runtime.value.StructValue;
 
 /**
@@ -40,6 +45,44 @@ public abstract class KafkaSqlEngine {
     
     private SemanticModel lastModel;
     protected String currentContextName = null; // Track current context for SHOW filtering
+    private SymbolTable symbolTable;             // Persistent symbol table (null = ephemeral mode)
+    private ModelChangeListener changeListener;  // Notified on DDL mutations
+    
+    /**
+     * Set a persistent symbol table for the engine.
+     * <p>
+     * When set, the engine reuses this symbol table across {@link #executeAll} calls
+     * instead of creating a fresh one each time. New CREATE statements are detected
+     * as delta changes and reported via the {@link ModelChangeListener}.
+     * <p>
+     * When null (default), the engine creates a fresh symbol table per call
+     * (ephemeral mode — backward compatible).
+     *
+     * @param symbolTable Persistent symbol table, or null for ephemeral mode
+     */
+    public void setSymbolTable(SymbolTable symbolTable) {
+        this.symbolTable = symbolTable;
+    }
+    
+    /**
+     * Returns the persistent symbol table, or null if in ephemeral mode.
+     */
+    public SymbolTable getSymbolTable() {
+        return symbolTable;
+    }
+    
+    /**
+     * Set a listener for model mutations (CREATE/DROP).
+     * <p>
+     * The listener is only invoked in persistent mode (when a symbol table
+     * has been set via {@link #setSymbolTable}). It receives the fully
+     * qualified name, declaration, and original DDL text for each new symbol.
+     *
+     * @param listener Mutation listener, or null to disable
+     */
+    public void setModelChangeListener(ModelChangeListener listener) {
+        this.changeListener = listener;
+    }
     
     /**
      * Set the current context name for contextual SHOW commands.
@@ -77,9 +120,13 @@ public abstract class KafkaSqlEngine {
      * @throws RuntimeException if parsing/binding fails or execution error
      */
     public void executeAll(String... scripts) {
+        // Build inputs and source map for statement text extraction
         List<Input> inputs = new ArrayList<>();
+        Map<String, String> sourceMap = new HashMap<>();
         for (int i = 0; i < scripts.length; i++) {
-            inputs.add(new StringInput("script" + i + ".kafka", scripts[i]));
+            String sourceName = "script" + i + ".kafka";
+            inputs.add(new StringInput(sourceName, scripts[i]));
+            sourceMap.put(sourceName, scripts[i]);
         }
         
         KafkaSqlArgs args = new KafkaSqlArgs(Path.of(""), false, false);
@@ -93,14 +140,38 @@ public abstract class KafkaSqlEngine {
             throw new RuntimeException("Parse errors:\n" + errorDetails);
         }
         
-        SemanticModel model = KafkaSqlParser.bind(parseResult);
+        // Determine symbol table mode
+        boolean persistent = (symbolTable != null);
+        SymbolTable symbols = persistent ? symbolTable : new SymbolTable();
+        Set<Name> beforeKeys = persistent ? new HashSet<>(symbols._decl.keySet()) : Set.of();
+        
+        SemanticModel model = KafkaSqlParser.bind(parseResult, symbols);
         lastModel = model; // Store for inspection
+        
         if (model.hasErrors()) {
+            // Rollback: remove any newly registered symbols in persistent mode
+            if (persistent) {
+                Set<Name> toRemove = new HashSet<>(symbols._decl.keySet());
+                toRemove.removeAll(beforeKeys);
+                for (Name key : toRemove) {
+                    symbols._decl.remove(key);
+                }
+            }
+            
             String errorDetails = model.diags().errors().stream()
                 .map(Object::toString)
                 .reduce((a, b) -> a + "\n" + b)
                 .orElse("Unknown semantic error");
             throw new RuntimeException("Semantic errors:\n" + errorDetails);
+        }
+        
+        // Detect and notify new symbols in persistent mode
+        if (persistent && changeListener != null) {
+            Set<Name> newKeys = new HashSet<>(symbols._decl.keySet());
+            newKeys.removeAll(beforeKeys);
+            if (!newKeys.isEmpty()) {
+                notifyNewSymbols(newKeys, symbols, parseResult, sourceMap);
+            }
         }
         
         // Execute statements using bindings
@@ -413,6 +484,70 @@ public abstract class KafkaSqlEngine {
      */
     public SemanticModel getLastModel() {
         return lastModel;
+    }
+    
+    // ========================================================================
+    // Model mutation detection
+    // ========================================================================
+    
+    /**
+     * Walks the parsed scripts to find CREATE statements for newly registered
+     * symbols and notifies the change listener with the original DDL text.
+     */
+    private void notifyNewSymbols(
+        Set<Name> newKeys,
+        SymbolTable symbols,
+        ParseResult parseResult,
+        Map<String, String> sourceMap
+    ) {
+        for (Script script : parseResult.scripts()) {
+            for (Stmt stmt : script.statements()) {
+                if (stmt instanceof CreateStmt create) {
+                    symbols.nameOf(create.decl()).ifPresent(name -> {
+                        if (newKeys.contains(name)) {
+                            String text = extractStatementText(sourceMap, create.range());
+                            try {
+                                changeListener.onSymbolCreated(name, create.decl(), text);
+                            } catch (Exception e) {
+                                throw new RuntimeException(
+                                    "Failed to persist model change for: " + name, e
+                                );
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    }
+    
+    /**
+     * Extracts the DDL statement text from the original source using Range coordinates.
+     */
+    private String extractStatementText(Map<String, String> sourceMap, Range range) {
+        String content = sourceMap.get(range.source());
+        if (content == null) return "";
+        
+        String[] lines = content.split("\n", -1);
+        int startLine = range.from().ln() - 1; // 0-based
+        int startCol = range.from().ch();
+        int endLine = range.to().ln() - 1;
+        int endCol = range.to().ch();
+        
+        if (startLine < 0 || startLine >= lines.length) return "";
+        if (endLine < 0 || endLine >= lines.length) return "";
+        
+        if (startLine == endLine) {
+            int end = Math.min(endCol, lines[startLine].length());
+            return lines[startLine].substring(startCol, end);
+        }
+        
+        StringBuilder sb = new StringBuilder();
+        sb.append(lines[startLine].substring(startCol));
+        for (int i = startLine + 1; i < endLine; i++) {
+            sb.append("\n").append(lines[i]);
+        }
+        sb.append("\n").append(lines[endLine], 0, Math.min(endCol, lines[endLine].length()));
+        return sb.toString();
     }
     
     // ========================================================================

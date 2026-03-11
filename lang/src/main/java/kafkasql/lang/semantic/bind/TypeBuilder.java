@@ -83,6 +83,23 @@ public final class TypeBuilder {
         return visitor.resolveType(typeNode);
     }
 
+    /**
+     * Public helper: build and cache the runtime type for a single TypeDecl.
+     * <p>
+     * Used when a TypeDecl is loaded from the symbol table (e.g., restored from
+     * the event log) and its runtime type has not yet been built in the current
+     * binding session. Builds the type and caches it in bindings.
+     */
+    public static AnyType buildType(
+        TypeDecl decl,
+        SymbolTable symbols,
+        BindingEnv bindings,
+        Diagnostics diags
+    ) {
+        TypeBuildVisitor visitor = new TypeBuildVisitor(symbols, bindings, diags);
+        return visitor.buildRuntimeType(decl);
+    }
+
     // ========================================================================
     // VISITOR
     // ========================================================================

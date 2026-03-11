@@ -1,0 +1,60 @@
+plugins {
+    id 'java'
+}
+
+group = 'io.randomravings.kafkasql'
+version = '1.0.0-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // Internal modules
+    implementation project(':engine')
+    implementation project(':persistence')
+    implementation project(':io')
+    implementation project(':runtime')
+    implementation project(':lang')
+
+    // Kafka client
+    implementation 'org.apache.kafka:kafka-clients:4.0.0'
+
+    // Testcontainers
+    testImplementation 'org.testcontainers:testcontainers:1.20.4'
+    testImplementation 'org.testcontainers:kafka:1.20.4'
+    testImplementation 'org.testcontainers:junit-jupiter:1.20.4'
+
+    // JUnit
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // Logging (Testcontainers needs SLF4J impl)
+    testRuntimeOnly 'org.slf4j:slf4j-simple:2.0.16'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+
+    // Docker Desktop on macOS: tell Testcontainers where the socket is
+    def dockerSocket = file("${System.getProperty('user.home')}/.docker/run/docker.sock")
+    if (dockerSocket.exists()) {
+        environment 'DOCKER_HOST', "unix://${dockerSocket.absolutePath}"
+    }
+
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+        showExceptions true
+        showCauses true
+        showStackTraces true
+        showStandardStreams true
+    }
+}

@@ -5,16 +5,19 @@ This directory provides a local Apache Kafka instance for development and testin
 ## Quick Start
 
 Start Kafka:
+
 ```bash
 docker compose up -d
 ```
 
 Stop Kafka:
+
 ```bash
 docker compose down
 ```
 
 Stop and remove data:
+
 ```bash
 docker compose down -v
 ```
@@ -80,12 +83,14 @@ Press Ctrl+C to exit.
 ## Health Check
 
 Check if Kafka is ready:
+
 ```bash
 docker compose exec kafka kafka-broker-api-versions.sh \
   --bootstrap-server localhost:9092
 ```
 
 Or check container health:
+
 ```bash
 docker compose ps
 ```
@@ -93,11 +98,13 @@ docker compose ps
 ## Accessing from Host Applications
 
 Connect to Kafka from your local machine using:
+
 - **Bootstrap Server:** `localhost:9092`
 - **Security Protocol:** `PLAINTEXT` (no authentication)
 
 Example connection string for most clients:
-```
+
+```bash
 localhost:9092
 ```
 
@@ -110,6 +117,7 @@ docker compose logs kafka
 ```
 
 Follow logs in real-time:
+
 ```bash
 docker compose logs -f kafka
 ```
@@ -117,6 +125,7 @@ docker compose logs -f kafka
 ### Container Not Starting
 
 1. Check if port 9092 or 9093 is already in use:
+
    ```bash
    lsof -i :9092
    lsof -i :9093
@@ -129,6 +138,7 @@ docker compose logs -f kafka
 ### Reset Everything
 
 To completely reset Kafka (deletes all topics and data):
+
 ```bash
 docker compose down -v
 docker compose up -d

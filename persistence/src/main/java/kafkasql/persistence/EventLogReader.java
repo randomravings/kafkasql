@@ -1,11 +1,22 @@
 package kafkasql.persistence;
 
 import kafkasql.lang.GrammarVersion;
+import kafkasql.lang.KafkaSqlArgs;
+import kafkasql.lang.KafkaSqlParser;
+import kafkasql.lang.ParseResult;
+import kafkasql.lang.input.Input;
+import kafkasql.lang.input.StringInput;
 import kafkasql.lang.semantic.symbol.SymbolTable;
+import kafkasql.lang.syntax.ast.Script;
 import kafkasql.lang.syntax.ast.decl.Decl;
+import kafkasql.lang.syntax.ast.stmt.CreateStmt;
+import kafkasql.lang.syntax.ast.stmt.Stmt;
 import kafkasql.runtime.Name;
 import kafkasql.runtime.stream.StreamReader;
 import sys.schema.SymbolEventLog;
+
+import java.nio.file.Path;
+import java.util.List;
 
 /**
  * Reads events from SymbolEventLog stream and applies them to a SymbolTable.
@@ -110,14 +121,24 @@ public class EventLogReader {
      * @return The parsed declaration
      */
     private Decl parseState(int grammarVersion, String state) {
-        // Version 1 is the initial grammar - parse using current parser
+        // Parse the DDL statement text back into an AST
         // When grammar evolves, add version-specific handling here:
         //   case 2 -> parseV2(state)
         //   case 3 -> parseV3(state)
-        // Older versions may need migration transforms before parsing
-        throw new UnsupportedOperationException(
-            "State parsing not yet implemented for grammar version " + grammarVersion +
-            ". Need to implement DDL-to-Decl parser integration."
+        Input input = new StringInput("event-replay", state);
+        KafkaSqlArgs args = new KafkaSqlArgs(Path.of(""), false, false);
+        ParseResult result = KafkaSqlParser.parse(List.of(input), args);
+
+        for (Script script : result.scripts()) {
+            for (Stmt stmt : script.statements()) {
+                if (stmt instanceof CreateStmt create) {
+                    return create.decl();
+                }
+            }
+        }
+
+        throw new IllegalStateException(
+            "Could not parse DDL state for grammar version " + grammarVersion + ": " + state
         );
     }
 }

@@ -30,7 +30,7 @@ public final class Decoder {
     }
     public static int decodeInt32(InputStream in) throws Exception {
         var bs = nextN(in, 4);
-        return (bs[0] << 24) | (bs[1] << 16) | (bs[2] << 8) | (bs[3] & 0xFF);
+        return ((bs[0] & 0xFF) << 24) | ((bs[1] & 0xFF) << 16) | ((bs[2] & 0xFF) << 8) | (bs[3] & 0xFF);
     }
     public static long decodeInt64(InputStream in) throws Exception {
         var bs = nextN(in, 8);

@@ -17,8 +17,8 @@ repositories {
 
 // Configuration for generated sources
 def generatedSourceDir = layout.buildDirectory.dir('generated/sources/kafkasql/main')
-def kafkasqlSchemaFile = file("$projectDir/src/main/kafkasql/sys/schema/SymbolEventLog.kafka")
-def kafkasqlWorkingDir = file("$projectDir/src/main/kafkasql")
+def kafkasqlSchemaFile = file("$projectDir/src/main/resources/kafkasql/sys/schema/SymbolEventLog.kafka")
+def kafkasqlWorkingDir = file("$projectDir/src/main/resources/kafkasql")
 
 sourceSets {
     main {
@@ -71,6 +71,7 @@ dependencies {
     implementation 'org.slf4j:slf4j-api:2.0.16'
     
     // Testing
+    testImplementation project(':engine')
     testImplementation platform('org.junit:junit-bom:5.11.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

@@ -1,11 +1,11 @@
 package kafkasql.cli;
 
+import kafkasql.lang.semantic.symbol.SymbolTable;
 import kafkasql.runtime.value.StructValue;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -16,7 +16,6 @@ public class InteractiveRepl {
     
     private final InteractiveEngine engine;
     private final BufferedReader reader;
-    private final List<String> sessionStatements; // Accumulate statements for context
     private StringBuilder multilineBuffer;
     private boolean inMultilineMode;
     private String currentContext = "(global)"; // Track current context for prompt
@@ -24,9 +23,11 @@ public class InteractiveRepl {
     public InteractiveRepl() {
         this.engine = new InteractiveEngine();
         this.reader = new BufferedReader(new InputStreamReader(System.in));
-        this.sessionStatements = new ArrayList<>();
         this.multilineBuffer = new StringBuilder();
         this.inMultilineMode = false;
+        
+        // Set up persistent symbol table for incremental execution
+        engine.setSymbolTable(new SymbolTable());
     }
     
     public void run() throws IOException {
@@ -111,18 +112,19 @@ public class InteractiveRepl {
             }
             case ".clear" -> {
                 engine.clear();
-                sessionStatements.clear();
+                engine.setSymbolTable(new SymbolTable());
+                currentContext = "(global)";
                 System.out.println("✓ All data cleared");
                 return true;
             }
             case ".streams" -> {
-                // Get declared streams from symbol table
-                var model = engine.getLastModel();
-                if (model == null || model.symbols()._decl.isEmpty()) {
+                // Get declared streams from persistent symbol table
+                var symbolTable = engine.getSymbolTable();
+                if (symbolTable == null || symbolTable._decl.isEmpty()) {
                     System.out.println("No streams declared yet");
                 } else {
                     var streams = engine.getAllStreams(); // Data map
-                    var declaredStreams = model.symbols()._decl.entrySet().stream()
+                    var declaredStreams = symbolTable._decl.entrySet().stream()
                         .filter(e -> e.getValue() instanceof kafkasql.lang.syntax.ast.decl.StreamDecl)
                         .toList();
                     
@@ -154,15 +156,9 @@ public class InteractiveRepl {
             // Clear any cached results from previous statement
             engine.clearResults();
             
-            // Execute with all previous successful statements plus the new one
-            // Don't add to history yet - only add if execution succeeds
-            List<String> statementsToExecute = new ArrayList<>(sessionStatements);
-            statementsToExecute.add(statement);
-            String[] allStatements = statementsToExecute.toArray(new String[0]);
-            engine.executeAll(allStatements);
-            
-            // Only add to session history if execution succeeded
-            sessionStatements.add(statement);
+            // Build incremental script with context prefix
+            String script = buildIncrementalScript(statement);
+            engine.execute(script);
             
             // Update current context if this was a USE CONTEXT statement
             updateCurrentContext(statement);
@@ -206,6 +202,20 @@ public class InteractiveRepl {
             System.err.println("Error: " + e.getMessage());
             System.err.println();
         }
+    }
+    
+    /**
+     * Build a script for incremental execution.
+     * Prepends a USE CONTEXT statement if we're in a specific context,
+     * so the binding pipeline resolves names correctly.
+     */
+    private String buildIncrementalScript(String statement) {
+        if (currentContext != null && !currentContext.equals("(global)")) {
+            // currentContext format is "[com.example]" — extract the name
+            String ctx = currentContext.substring(1, currentContext.length() - 1);
+            return "USE CONTEXT " + ctx + ";\n" + statement;
+        }
+        return statement;
     }
     
     /**

@@ -66,7 +66,7 @@ public class EventLogWriter {
             objectName.fullName(),
             1,  // CREATE is always version 1
             statementText,
-            serializeDecl(decl)
+            statementText  // State = full DDL for replay (same as Delta for CREATE)
         );
         
         writer.write(event);
@@ -95,7 +95,7 @@ public class EventLogWriter {
             objectName.fullName(),
             version,
             statementText,
-            serializeDecl(decl)
+            statementText  // State = full DDL for replay (TODO: DDL printer for ALTER)
         );
         
         writer.write(event);
@@ -138,16 +138,5 @@ public class EventLogWriter {
         writer.flush();
     }
     
-    /**
-     * Serializes a Decl to its DDL statement text for storage in event log.
-     * This is the "State" field - a full CREATE statement that can be re-parsed
-     * to reconstruct the object.
-     */
-    private String serializeDecl(Decl decl) {
-        if (decl == null) {
-            return null;
-        }
-        // TODO: Use proper DDL printer to emit canonical DDL text
-        return decl.toString();
-    }
+
 }

@@ -45,10 +45,10 @@ public final class Encoder {
         out.write((byte)(v & 0x7F));
     }
     public static void writeVarInt32(OutputStream out, int v) throws IOException {
-        writeInt64(out, v);
+        writeVarInt64(out, v);
     }
     public static void writeVarInt16(OutputStream out, short v) throws IOException {
-        writeInt64(out, v);
+        writeVarInt64(out, v);
     }
     public static void writeFloat32(OutputStream out, float v) throws IOException {
         writeInt32(out, Float.floatToIntBits(v));
@@ -59,7 +59,7 @@ public final class Encoder {
     public static void writeString(OutputStream out, String v) throws IOException {
         var bytes = v.getBytes();
         writeVarInt32(out, bytes.length);
-        writeBytes(out, bytes);
+        out.write(bytes);
     }
     public static void writeChars(OutputStream out, String v) throws IOException {
         var bytes = v.getBytes();

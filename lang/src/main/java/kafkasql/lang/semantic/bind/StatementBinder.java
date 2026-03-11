@@ -232,9 +232,29 @@ public final class StatementBinder {
         if (typeDecl.kind() instanceof DerivedTypeDecl derivedType) {
             // Get the referenced TypeDecl from bindings (set by TypeResolver)
             Object resolved = bindings.get(derivedType.target());
+            
+            // Fallback: if the type reference was parsed in a different session
+            // (e.g., loaded from the event log), it won't be in the current
+            // bindings. Resolve directly from the symbol table by name.
+            if (resolved == null) {
+                Name refName = Name.of(
+                    derivedType.target().name().context(),
+                    derivedType.target().name().name()
+                );
+                resolved = symbols.lookupType(refName).orElse(null);
+            }
+            
             if (resolved instanceof TypeDecl referencedTypeDecl) {
-                // Get the runtime type for the referenced declaration
+                // Get the runtime type for the referenced declaration.
+                // If not yet built in this session (e.g., loaded from event log),
+                // build it on demand via TypeBuilder.
                 StructType baseRowType = bindings.getOrNull(referencedTypeDecl, StructType.class);
+                if (baseRowType == null && referencedTypeDecl.kind() instanceof StructDecl) {
+                    AnyType built = TypeBuilder.buildType(referencedTypeDecl, symbols, bindings, diags);
+                    if (built instanceof StructType st) {
+                        baseRowType = st;
+                    }
+                }
                 if (baseRowType != null && referencedTypeDecl.kind() instanceof StructDecl refStructDecl) {
                     // Need to rebuild StructType with defaults from DefaultBinder
                     // The defaults are stored in bindings keyed by StructFieldDecl
