@@ -206,6 +206,9 @@ public final class StatementBinder {
                 
                 boolean nullable = f.nullable().isPresent();
 
+                boolean dropped = f.fragments().stream()
+                    .anyMatch(frag -> frag instanceof DroppedNode);
+
                 Optional<Object> defaultValue = FragmentUtils.extractDefault(f.fragments(), diags);
 
                 Optional<String> doc = FragmentUtils.extractDoc(f.fragments(), diags);
@@ -215,6 +218,7 @@ public final class StatementBinder {
                         fieldName,
                         type,
                         nullable,
+                        dropped,
                         defaultValue,
                         doc
                     )
@@ -272,6 +276,7 @@ public final class StatementBinder {
                                 baseField.name(),
                                 baseField.type(),
                                 baseField.nullable(),
+                                baseField.dropped(),
                                 defaultValue != null ? Optional.of(defaultValue) : baseField.defaultValue(),
                                 baseField.doc()
                             );
@@ -379,10 +384,29 @@ public final class StatementBinder {
             providedFields.add(f.name().name());
         }
         
+        // Reject writes to dropped fields
+        for (StructFieldLiteralNode f : lit.fields()) {
+            String fieldName = f.name().name();
+            StructTypeField field = rowType.fields().get(fieldName);
+            if (field != null && field.dropped()) {
+                diags.error(
+                    f.range(),
+                    DiagnosticKind.SEMANTIC,
+                    DiagnosticCode.INVALID_TYPE_REF,
+                    "Cannot write to dropped field '" + fieldName + "'"
+                );
+            }
+        }
+        
         // Check each field in the struct type
         for (var entry : rowType.fields().entrySet()) {
             String fieldName = entry.getKey();
             StructTypeField field = entry.getValue();
+            
+            // Dropped fields are not required in writes
+            if (field.dropped()) {
+                continue;
+            }
             
             if (providedFields.contains(fieldName)) {
                 continue; // Field is provided

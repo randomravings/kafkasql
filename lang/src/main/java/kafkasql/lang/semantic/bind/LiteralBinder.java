@@ -98,7 +98,7 @@ public final class LiteralBinder {
                         yield null;
                     }
                 }
-                yield value;
+                yield new ScalarValue(s, value);
             }
 
             case EnumType e ->
@@ -186,7 +186,7 @@ public final class LiteralBinder {
                         yield null;
                     }
                 }
-                yield value;
+                yield new ScalarValue(s, value);
             }
             case EnumType e           -> bindEnumLiteral(node, e, diags);
             case StructType st        -> bindStructLiteral(node, st, diags, bindings);

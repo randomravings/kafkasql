@@ -1,6 +1,7 @@
 package kafkasql.integration;
 
 import kafkasql.engine.KafkaSqlEngine;
+import kafkasql.io.SchemaMarker;
 import kafkasql.runtime.Name;
 import kafkasql.runtime.value.StructValue;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -12,6 +13,7 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
@@ -125,6 +127,12 @@ public class KafkaEngine extends KafkaSqlEngine {
                 } else {
                     emptyPolls = 0;
                     for (ConsumerRecord<String, byte[]> rec : batch) {
+                        // Check for schema-change markers — skip them
+                        if (SchemaMarker.isMarker(rec)) {
+                            // In a streaming reader this is where we would
+                            // sync the event log and re-resolve the schema.
+                            continue;
+                        }
                         StreamRecord sr = deserializeRecord(rec);
                         if (sr != null) {
                             records.add(sr);
@@ -135,6 +143,20 @@ public class KafkaEngine extends KafkaSqlEngine {
         }
 
         return records;
+    }
+
+    @Override
+    protected Map<Integer, Long> writeSchemaMarker(Name streamName, String typeName) {
+        String topic = streamName.fullName();
+        ensureTopic(topic);
+
+        try {
+            RecordMetadata metadata = SchemaMarker.write(producer, topic, typeName);
+            return Map.of(metadata.partition(), metadata.offset());
+        } catch (Exception e) {
+            throw new RuntimeException(
+                "Failed to write schema marker to topic: " + topic, e);
+        }
     }
 
     @Override

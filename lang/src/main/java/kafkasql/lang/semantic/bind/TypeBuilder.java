@@ -20,6 +20,7 @@ import kafkasql.lang.syntax.ast.decl.UnionDecl;
 import kafkasql.lang.syntax.ast.decl.UnionMemberDecl;
 import kafkasql.lang.syntax.ast.stmt.CreateStmt;
 import kafkasql.lang.semantic.util.FragmentUtils;
+import kafkasql.lang.syntax.ast.fragment.DroppedNode;
 import kafkasql.lang.syntax.ast.stmt.Stmt;
 import kafkasql.lang.syntax.ast.type.ComplexTypeNode;
 import kafkasql.lang.syntax.ast.type.ListTypeNode;
@@ -166,14 +167,15 @@ public final class TypeBuilder {
             for (StructFieldDecl f : decl.fields()) {
                 AnyType fieldType = resolveType(f.type());
                 
-                // Don't evaluate defaults here - that's DefaultBinder's job
-                // Just build the type structure with no default values
-                
+                boolean dropped = f.fragments().stream()
+                    .anyMatch(frag -> frag instanceof DroppedNode);
+
                 StructTypeField field = new StructTypeField(
                     f.name().name(),
                     fieldType,
                     f.nullable().isPresent(),
-                    Optional.empty(),  // No default yet
+                    dropped,
+                    FragmentUtils.extractDefault(f.fragments(), diags),
                     FragmentUtils.extractDoc(f.fragments(), diags)
                 );
                 

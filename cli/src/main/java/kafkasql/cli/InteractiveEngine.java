@@ -30,6 +30,12 @@ public class InteractiveEngine extends KafkaSqlEngine {
     protected List<StreamRecord> readRecords(Name streamName) {
         return streams.getOrDefault(streamName, List.of());
     }
+
+    @Override
+    protected Map<Integer, Long> writeSchemaMarker(Name streamName, String typeName) {
+        // No-op for in-memory CLI engine
+        return Map.of();
+    }
     
     @Override
     protected void handleQueryResult(List<StreamRecord> records) {

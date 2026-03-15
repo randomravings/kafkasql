@@ -161,10 +161,14 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
                 return visitWriteStmt(ctx.writeStmt());
             if (ctx.createStmt() != null)
                 return visitCreateStmt(ctx.createStmt());
+            if (ctx.alterStmt() != null)
+                return visitAlterStmt(ctx.alterStmt());
+            if (ctx.dropStmt() != null)
+                return visitDropStmt(ctx.dropStmt());
             
             // Syntax error - report and return placeholder
             Range range = range(ctx);
-            reportSyntaxError(range, "Expected USE, SHOW, EXPLAIN, READ, WRITE, or CREATE statement");
+            reportSyntaxError(range, "Expected USE, SHOW, EXPLAIN, READ, WRITE, CREATE, ALTER, or DROP statement");
             Identifier errorId = new Identifier(range, "<error>");
             QName errorQName = QName.of(errorId);
             return new UseStmt(range, new ContextUse(range, errorQName));
@@ -265,6 +269,90 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             Range range = range(ctx);
             Decl decl = visitDecl(ctx.decl());
             return new CreateStmt(range, decl);
+        }
+
+        // ========================================================================
+        // ALTER
+        // ========================================================================
+
+        @Override
+        public AlterStmt visitAlterStmt(SqlStreamParser.AlterStmtContext ctx) {
+            return (AlterStmt) visit(ctx.alterTarget());
+        }
+
+        @Override
+        public AlterStmt.AlterType visitAlterType(SqlStreamParser.AlterTypeContext ctx) {
+            Range range = range(ctx);
+            QName target = visitQname(ctx.qname());
+            AlterStmt.AlterTypeAction action = (AlterStmt.AlterTypeAction) visit(ctx.alterTypeAction());
+            return new AlterStmt.AlterType(range, target, action);
+        }
+
+        @Override
+        public AlterStmt.AlterStream visitAlterStream(SqlStreamParser.AlterStreamContext ctx) {
+            Range range = range(ctx);
+            QName target = visitQname(ctx.qname());
+            AlterStmt.AlterStreamAction action = (AlterStmt.AlterStreamAction) visit(ctx.alterStreamAction());
+            return new AlterStmt.AlterStream(range, target, action);
+        }
+
+        @Override
+        public AlterStmt.AddField visitAlterAddField(SqlStreamParser.AlterAddFieldContext ctx) {
+            Range range = range(ctx);
+            StructFieldDecl field = visitFieldDecl(ctx.fieldDecl());
+            return new AlterStmt.AddField(range, field);
+        }
+
+        @Override
+        public AlterStmt.AddSymbol visitAlterAddSymbol(SqlStreamParser.AlterAddSymbolContext ctx) {
+            Range range = range(ctx);
+            EnumSymbolDecl symbol = visitEnumSymbol(ctx.enumSymbol());
+            return new AlterStmt.AddSymbol(range, symbol);
+        }
+
+        @Override
+        public AlterStmt.DropMember visitAlterDropMember(SqlStreamParser.AlterDropMemberContext ctx) {
+            Range range = range(ctx);
+            Identifier name = visitIdentifier(ctx.identifier());
+            return new AlterStmt.DropMember(range, name);
+        }
+
+        @Override
+        public AlterStmt.AddStreamType visitAlterAddStreamType(SqlStreamParser.AlterAddStreamTypeContext ctx) {
+            Range range = range(ctx);
+            StreamMemberDecl member = visitStreamTypeDecl(ctx.streamTypeDecl());
+            return new AlterStmt.AddStreamType(range, member);
+        }
+
+        @Override
+        public AlterStmt.DropStreamType visitAlterDropStreamType(SqlStreamParser.AlterDropStreamTypeContext ctx) {
+            Range range = range(ctx);
+            Identifier name = visitTypeName(ctx.typeName());
+            return new AlterStmt.DropStreamType(range, name);
+        }
+
+        // ========================================================================
+        // DROP
+        // ========================================================================
+
+        @Override
+        public DropStmt visitDropStmt(SqlStreamParser.DropStmtContext ctx) {
+            return (DropStmt) visit(ctx.dropTarget());
+        }
+
+        @Override
+        public DropStmt.DropContext visitDropContext(SqlStreamParser.DropContextContext ctx) {
+            return new DropStmt.DropContext(range(ctx), visitQname(ctx.qname()));
+        }
+
+        @Override
+        public DropStmt.DropType visitDropType(SqlStreamParser.DropTypeContext ctx) {
+            return new DropStmt.DropType(range(ctx), visitQname(ctx.qname()));
+        }
+
+        @Override
+        public DropStmt.DropStream visitDropStream(SqlStreamParser.DropStreamContext ctx) {
+            return new DropStmt.DropStream(range(ctx), visitQname(ctx.qname()));
         }
 
         @Override

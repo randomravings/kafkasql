@@ -42,6 +42,12 @@ public final class TestEngine extends KafkaSqlEngine {
     protected List<StreamRecord> readRecords(Name streamName) {
         return new ArrayList<>(streams.getOrDefault(streamName, Collections.emptyList()));
     }
+
+    @Override
+    protected Map<Integer, Long> writeSchemaMarker(Name streamName, String typeName) {
+        // No-op for in-memory test engine
+        return Map.of();
+    }
     
     @Override
     protected void handleQueryResult(List<StreamRecord> records) {

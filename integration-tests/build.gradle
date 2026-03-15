@@ -18,7 +18,6 @@ repositories {
 dependencies {
     // Internal modules
     implementation project(':engine')
-    implementation project(':persistence')
     implementation project(':io')
     implementation project(':runtime')
     implementation project(':lang')

@@ -9,5 +9,6 @@ public sealed interface DeclFragment
             DocNode,
             ConstraintNode,
             DistributeDecl,
+            DroppedNode,
             TimestampDecl
 { }

@@ -24,6 +24,8 @@ import kafkasql.lang.syntax.ast.show.ShowTarget;
 import kafkasql.lang.syntax.ast.literal.StructLiteralNode;
 import kafkasql.runtime.Name;
 import kafkasql.runtime.diagnostics.Range;
+import kafkasql.runtime.type.SchemaResolver;
+import kafkasql.runtime.type.StructType;
 import kafkasql.runtime.value.StructValue;
 
 /**
@@ -47,6 +49,8 @@ public abstract class KafkaSqlEngine {
     protected String currentContextName = null; // Track current context for SHOW filtering
     private SymbolTable symbolTable;             // Persistent symbol table (null = ephemeral mode)
     private ModelChangeListener changeListener;  // Notified on DDL mutations
+    private ModelDropListener dropListener;      // Notified on DDL drops
+    private ModelAlterListener alterListener;    // Notified on DDL alters
     
     /**
      * Set a persistent symbol table for the engine.
@@ -82,6 +86,24 @@ public abstract class KafkaSqlEngine {
      */
     public void setModelChangeListener(ModelChangeListener listener) {
         this.changeListener = listener;
+    }
+    
+    /**
+     * Set a listener for DROP mutations.
+     *
+     * @param listener Drop listener, or null to disable
+     */
+    public void setModelDropListener(ModelDropListener listener) {
+        this.dropListener = listener;
+    }
+    
+    /**
+     * Set a listener for ALTER mutations.
+     *
+     * @param listener Alter listener, or null to disable
+     */
+    public void setModelAlterListener(ModelAlterListener listener) {
+        this.alterListener = listener;
     }
     
     /**
@@ -174,6 +196,21 @@ public abstract class KafkaSqlEngine {
             }
         }
         
+        // Detect and notify dropped symbols in persistent mode
+        if (persistent && dropListener != null) {
+            Set<Name> droppedKeys = new HashSet<>(beforeKeys);
+            droppedKeys.removeAll(symbols._decl.keySet());
+            if (!droppedKeys.isEmpty()) {
+                notifyDroppedSymbols(droppedKeys, parseResult, sourceMap);
+            }
+        }
+        
+        // Detect ALTER TYPE statements and write schema-change markers
+        // to every stream that references the altered type.
+        if (persistent) {
+            notifyAlteredTypes(symbols, parseResult, sourceMap);
+        }
+        
         // Execute statements using bindings
         BindingEnv bindings = model.bindings();
         
@@ -214,10 +251,21 @@ public abstract class KafkaSqlEngine {
         Name streamName = Name.of(write.stream().context(), write.stream().name());
         String typeName = write.alias().name();
         
+        // Get the current schema for this type from the write binding
+        StructType schema = bindings.getOrNull(write, StructType.class);
+        
         // Each literal in VALUES(...) should be bound to a StructValue
         for (StructLiteralNode literal : write.values()) {
             Object bound = bindings.get(literal);
             if (bound instanceof StructValue structValue) {
+                // Resolve against current schema: fill defaults, strip dropped fields
+                if (schema != null) {
+                    var result = SchemaResolver.resolveWrite(structValue, schema);
+                    if (result.hasError()) {
+                        throw new RuntimeException("Write resolution failed: " + result.error());
+                    }
+                    structValue = result.resolved();
+                }
                 writeRecord(streamName, typeName, structValue);
             } else {
                 throw new RuntimeException("Expected StructValue but got: " + 
@@ -241,14 +289,31 @@ public abstract class KafkaSqlEngine {
             // No type blocks means read all
             filteredRecords = allRecords;
         } else {
-            // Collect requested type names from type blocks
-            java.util.Set<String> requestedTypes = read.blocks().stream()
-                .map(block -> block.alias().name())
-                .collect(java.util.stream.Collectors.toSet());
+            // Build a map of type name → StructType from bindings for resolution
+            Map<String, StructType> typeSchemas = new HashMap<>();
+            for (ReadTypeBlock block : read.blocks()) {
+                String typeName = block.alias().name();
+                StructType rowType = bindings.getOrNull(block, StructType.class);
+                if (rowType != null) {
+                    typeSchemas.put(typeName, rowType);
+                }
+            }
             
-            // Filter records to only include requested types
+            // Collect requested type names from type blocks
+            java.util.Set<String> requestedTypes = typeSchemas.keySet();
+            
+            // Filter records to only include requested types, resolving schema
             filteredRecords = allRecords.stream()
                 .filter(record -> requestedTypes.contains(record.typeName()))
+                .map(record -> {
+                    StructType schema = typeSchemas.get(record.typeName());
+                    if (schema != null) {
+                        StructValue resolved = SchemaResolver.resolveRead(
+                            record.value().fields(), schema);
+                        return new StreamRecord(record.typeName(), resolved);
+                    }
+                    return record;
+                })
                 .toList();
         }
         
@@ -442,6 +507,18 @@ public abstract class KafkaSqlEngine {
     protected abstract List<StreamRecord> readRecords(Name streamName);
     
     /**
+     * Write a schema-change marker to a stream topic.
+     * Called after an ALTER TYPE modifies a type referenced by this stream.
+     * Readers encountering this marker must sync the event log and
+     * re-resolve the schema before reading further data.
+     *
+     * @param streamName Fully qualified stream name (topic)
+     * @param typeName   The type alias that was altered
+     * @return partition → offset map of the marker record
+     */
+    protected abstract Map<Integer, Long> writeSchemaMarker(Name streamName, String typeName);
+    
+    /**
      * Handle the result of a READ query.
      * Subclasses can override to capture/store query results.
      * 
@@ -515,6 +592,90 @@ public abstract class KafkaSqlEngine {
                             }
                         }
                     });
+                }
+            }
+        }
+    }
+    
+    /**
+     * Walks the parsed scripts to find DROP statements for removed
+     * symbols and notifies the drop listener with the original DDL text.
+     */
+    private void notifyDroppedSymbols(
+        Set<Name> droppedKeys,
+        ParseResult parseResult,
+        Map<String, String> sourceMap
+    ) {
+        for (Script script : parseResult.scripts()) {
+            for (Stmt stmt : script.statements()) {
+                if (stmt instanceof DropStmt drop) {
+                    Name target = Name.of(drop.target().context(), drop.target().name());
+                    if (droppedKeys.contains(target)) {
+                        String text = extractStatementText(sourceMap, drop.range());
+                        try {
+                            dropListener.onSymbolDropped(target, text);
+                        } catch (Exception e) {
+                            throw new RuntimeException(
+                                "Failed to persist drop for: " + target, e
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Walks the parsed scripts to find ALTER TYPE statements. For each
+     * altered type, locates every stream that references it and writes
+     * a schema-change marker to the stream's topic. Collects the marker
+     * offsets and persists the ALTER event with stream offset metadata.
+     */
+    private void notifyAlteredTypes(
+        SymbolTable symbols,
+        ParseResult parseResult,
+        Map<String, String> sourceMap
+    ) {
+        for (Script script : parseResult.scripts()) {
+            for (Stmt stmt : script.statements()) {
+                if (stmt instanceof AlterStmt.AlterType alter) {
+                    String typeName = alter.target().name();
+                    Map<String, Map<Integer, Long>> streamOffsets = new HashMap<>();
+                    // Find all streams that reference this type and write markers
+                    for (var entry : symbols._decl.entrySet()) {
+                        if (entry.getValue() instanceof kafkasql.lang.syntax.ast.decl.StreamDecl sd) {
+                            for (var member : sd.streamTypes()) {
+                                if (member.name().name().equals(typeName)) {
+                                    Name streamName = entry.getKey();
+                                    try {
+                                        Map<Integer, Long> offsets = writeSchemaMarker(streamName, typeName);
+                                        if (!offsets.isEmpty()) {
+                                            streamOffsets.put(streamName.fullName(), offsets);
+                                        }
+                                    } catch (Exception e) {
+                                        throw new RuntimeException(
+                                            "Failed to write schema marker for: " + streamName, e
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Persist the ALTER to the event log with stream offsets
+                    if (alterListener != null) {
+                        Name target = Name.of(alter.target().context(), alter.target().name());
+                        var decl = symbols._decl.get(target);
+                        if (decl != null) {
+                            String text = extractStatementText(sourceMap, alter.range());
+                            try {
+                                alterListener.onSymbolAltered(target, decl, text, streamOffsets);
+                            } catch (Exception e) {
+                                throw new RuntimeException(
+                                    "Failed to persist ALTER for: " + target, e
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }

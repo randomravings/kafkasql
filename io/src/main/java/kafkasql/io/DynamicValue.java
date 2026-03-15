@@ -1,17 +1,18 @@
 package kafkasql.io;
 
 import java.util.LinkedHashMap;
+import kafkasql.runtime.Record;
 
 /**
  * A dynamic record value that can hold arbitrary fields.
  * <p>
  * This class extends LinkedHashMap to allow dynamic storage of fields
- * associated with a record. It also implements the RecordValue interface
+ * associated with a record. It also implements the Record interface
  * to be compatible with the KafkaSQL type system.
  */
 public class DynamicValue
     extends LinkedHashMap<String, Object>
-    implements RecordValue<DynamicValue> {
+    implements Record {
 
     private final String _streamName;
     private final Integer _typeId;

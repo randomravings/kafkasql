@@ -1,10 +1,64 @@
 plugins {
-  id 'java'
+  id 'java-library'
+}
+
+java {
+  toolchain {
+    languageVersion = JavaLanguageVersion.of(21)
+  }
+}
+
+// Configuration for generated sources (from persistence schema)
+def generatedSourceDir = layout.buildDirectory.dir('generated/sources/kafkasql/main')
+def kafkasqlSchemaFile = file("$projectDir/src/main/resources/kafkasql/sys/schema/SymbolEventLog.kafka")
+def kafkasqlWorkingDir = file("$projectDir/src/main/resources/kafkasql")
+
+sourceSets {
+  main {
+    java.srcDirs += generatedSourceDir
+  }
+}
+
+// Task to generate Java code from KafkaSQL schemas
+tasks.register('generateKafkaSqlCode', JavaExec) {
+  group = 'build'
+  description = 'Generate Java code from KafkaSQL schema files'
+  
+  dependsOn ':codegen:build'
+  
+  classpath = project(':codegen').sourceSets.main.runtimeClasspath
+  mainClass = 'kafkasql.codegen.CodeGenerator'
+  
+  // Working directory for INCLUDE resolution
+  workingDir kafkasqlWorkingDir
+  
+  // Args: schema file (relative to working dir), output directory (absolute)
+  args 'sys/schema/SymbolEventLog.kafka', generatedSourceDir.get().asFile.absolutePath
+  
+  inputs.file kafkasqlSchemaFile
+  outputs.dir generatedSourceDir
+}
+
+// Make compileJava depend on code generation
+tasks.named('compileJava') {
+  dependsOn 'generateKafkaSqlCode'
+}
+
+// Clean generated sources
+tasks.named('clean') {
+  delete generatedSourceDir
 }
 
 dependencies {
-  implementation project(':runtime')
-  implementation project(':lang')
+  api project(':runtime')
+  api project(':lang')
+  api project(':io')
+  
+  // Kafka client (for persistence)
+  implementation 'org.apache.kafka:kafka-clients:4.0.0'
+  
+  // Logging
+  implementation 'org.slf4j:slf4j-api:2.0.16'
   
   testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.3'
   testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.10.3'

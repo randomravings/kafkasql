@@ -13,6 +13,7 @@ import kafkasql.lang.syntax.ast.fragment.DeclFragment;
 import kafkasql.lang.syntax.ast.fragment.DefaultNode;
 import kafkasql.lang.syntax.ast.fragment.DistributeDecl;
 import kafkasql.lang.syntax.ast.fragment.DocNode;
+import kafkasql.lang.syntax.ast.fragment.DroppedNode;
 import kafkasql.lang.syntax.ast.fragment.ProjectionExprNode;
 import kafkasql.lang.syntax.ast.fragment.ProjectionNode;
 import kafkasql.lang.syntax.ast.fragment.TimestampDecl;
@@ -87,6 +88,8 @@ public final class AstPrinter extends Printer {
             case ShowStmt s     -> writeShowStmt(s, indent);
             case ExplainStmt e  -> writeExplainStmt(e, indent);
             case CreateStmt c   -> writeCreateStmt(c, indent);
+            case AlterStmt a    -> writeAlterStmt(a, indent);
+            case DropStmt d     -> writeDropStmt(d, indent);
             case ReadStmt r     -> writeRead(r, indent);
             case WriteStmt w    -> writeWrite(w, indent);
         }
@@ -145,6 +148,53 @@ public final class AstPrinter extends Printer {
         writeDecl(c.decl(), indent + 1);
     }
 
+    private void writeAlterStmt(AlterStmt a, int indent) throws IOException {
+        switch (a) {
+            case AlterStmt.AlterType at -> {
+                writeClass(at.getClass());
+                branch("target", indent, false);
+                writeQName(at.target(), indent + 1);
+                branch("action", indent, true);
+                switch (at.action()) {
+                    case AlterStmt.AddField af -> {
+                        write("ADD FIELD ");
+                        write(af.field().name().name());
+                    }
+                    case AlterStmt.AddSymbol as -> {
+                        write("ADD SYMBOL ");
+                        write(as.symbol().name().name());
+                    }
+                    case AlterStmt.DropMember dm -> {
+                        write("DROP ");
+                        write(dm.name().name());
+                    }
+                }
+            }
+            case AlterStmt.AlterStream as -> {
+                writeClass(as.getClass());
+                branch("target", indent, false);
+                writeQName(as.target(), indent + 1);
+                branch("action", indent, true);
+                switch (as.action()) {
+                    case AlterStmt.AddStreamType ast -> {
+                        write("ADD TYPE ");
+                        write(ast.member().memberDecl().name().name());
+                    }
+                    case AlterStmt.DropStreamType dst -> {
+                        write("DROP TYPE ");
+                        write(dst.name().name());
+                    }
+                }
+            }
+        }
+    }
+
+    private void writeDropStmt(DropStmt d, int indent) throws IOException {
+        writeClass(d.getClass());
+        branch("target", indent, true);
+        writeQName(d.target(), indent + 1);
+    }
+
     private void writeDecl(Decl d, int indent) throws IOException {
         switch (d) {
             case TypeDecl t   -> writeTypeDecl(t, indent);
@@ -176,6 +226,8 @@ public final class AstPrinter extends Printer {
                 writeDistributeFragment(dist, indent);
             case TimestampDecl ts ->
                 writeTimestampFragment(ts, indent);
+            case DroppedNode dropped ->
+                writeDroppedFragment(dropped, indent);
         }
     }
 
@@ -223,6 +275,10 @@ public final class AstPrinter extends Printer {
         writeClass(t.getClass());
         branch("field", indent, true);
         writeIdentifier(t.field(), indent + 1);
+    }
+
+    private void writeDroppedFragment(DroppedNode d, int indent) throws IOException {
+        writeClass(d.getClass());
     }
 
     //============================================================

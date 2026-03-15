@@ -44,6 +44,8 @@ statement
   | readStmt
   | writeStmt
   | createStmt
+  | alterStmt
+  | dropStmt
   ;
 
 /* ─────────────────────── Use Statement ─────────────────── */
@@ -120,6 +122,38 @@ writeValueList
 /* ─────────────────────── Create Statements ─────────────────────── */
 createStmt
   : CREATE decl
+  ;
+
+/* ─────────────────────── Alter Statements ─────────────────────── */
+alterStmt
+  : ALTER alterTarget
+  ;
+
+alterTarget
+  : TYPE qname alterTypeAction                 # AlterType
+  | STREAM qname alterStreamAction             # AlterStream
+  ;
+
+alterTypeAction
+  : ADD fieldDecl                              # AlterAddField
+  | ADD enumSymbol                             # AlterAddSymbol
+  | DROP identifier                            # AlterDropMember
+  ;
+
+alterStreamAction
+  : ADD streamTypeDecl                         # AlterAddStreamType
+  | DROP TYPE typeName                         # AlterDropStreamType
+  ;
+
+/* ─────────────────────── Drop Statements ─────────────────────── */
+dropStmt
+  : DROP dropTarget
+  ;
+
+dropTarget
+  : CONTEXT qname                              # DropContext
+  | TYPE qname                                 # DropType
+  | STREAM qname                               # DropStream
   ;
 
 decl

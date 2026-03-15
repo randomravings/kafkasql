@@ -9,14 +9,25 @@ import kafkasql.lang.semantic.symbol.SymbolTable;
 import kafkasql.lang.syntax.ast.Script;
 import kafkasql.lang.syntax.ast.decl.ContextDecl;
 import kafkasql.lang.syntax.ast.decl.Decl;
+import kafkasql.lang.syntax.ast.decl.DerivedTypeDecl;
 import kafkasql.lang.syntax.ast.decl.StreamDecl;
+import kafkasql.lang.syntax.ast.decl.StreamMemberDecl;
+import kafkasql.lang.syntax.ast.decl.StructDecl;
+import kafkasql.lang.syntax.ast.decl.StructFieldDecl;
 import kafkasql.lang.syntax.ast.decl.TypeDecl;
+import kafkasql.lang.syntax.ast.fragment.DeclFragment;
+import kafkasql.lang.syntax.ast.fragment.DroppedNode;
 import kafkasql.lang.syntax.ast.misc.QName;
+import kafkasql.lang.syntax.ast.AstListNode;
+import kafkasql.lang.syntax.ast.stmt.AlterStmt;
 import kafkasql.lang.syntax.ast.stmt.CreateStmt;
+import kafkasql.lang.syntax.ast.stmt.DropStmt;
 import kafkasql.lang.syntax.ast.stmt.Stmt;
 import kafkasql.lang.syntax.ast.stmt.UseStmt;
 import kafkasql.lang.syntax.ast.use.ContextUse;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 public final class DeclResolver {
@@ -34,6 +45,8 @@ public final class DeclResolver {
             switch (stmt) {
                 case UseStmt s -> resolveUseStmt(s, symbols, scope, diags);
                 case CreateStmt c -> resolveCreateStmt(c, symbols, scope, diags);
+                case AlterStmt a -> resolveAlterStmt(a, symbols, diags);
+                case DropStmt d -> resolveDropStmt(d, symbols, diags);
                 default -> {
                     // ignore other statements
                 }
@@ -96,6 +109,220 @@ public final class DeclResolver {
             return;
         
         symbols.register(canonicalFqn.get(), stmt.decl());
+    }
+
+    private static void resolveAlterStmt(
+        AlterStmt stmt,
+        SymbolTable symbols,
+        Diagnostics diags
+    ) {
+        Name target = toName(stmt.target());
+        if (!symbols.hasKey(target)) {
+            diags.error(
+                stmt.range(),
+                DiagnosticKind.SEMANTIC,
+                DiagnosticCode.UNKNOWN_TYPE,
+                "Cannot ALTER unknown object: " + target
+            );
+            return;
+        }
+
+        switch (stmt) {
+            case AlterStmt.AlterType at -> {
+                var typeOpt = symbols.lookupType(target);
+                if (typeOpt.isEmpty()) {
+                    diags.error(
+                        stmt.range(),
+                        DiagnosticKind.SEMANTIC,
+                        DiagnosticCode.UNKNOWN_TYPE,
+                        target + " is not a TYPE"
+                    );
+                    return;
+                }
+                applyAlterType(at, typeOpt.get(), target, symbols, diags);
+            }
+            case AlterStmt.AlterStream as -> {
+                if (symbols.lookupStream(target).isEmpty()) {
+                    diags.error(
+                        stmt.range(),
+                        DiagnosticKind.SEMANTIC,
+                        DiagnosticCode.UNKNOWN_STREAM,
+                        target + " is not a STREAM"
+                    );
+                }
+            }
+        }
+    }
+
+    private static void applyAlterType(
+        AlterStmt.AlterType at,
+        TypeDecl existingType,
+        Name target,
+        SymbolTable symbols,
+        Diagnostics diags
+    ) {
+        switch (at.action()) {
+            case AlterStmt.AddField af -> {
+                if (!(existingType.kind() instanceof StructDecl struct)) {
+                    diags.error(af.range(), DiagnosticKind.SEMANTIC, DiagnosticCode.INVALID_TYPE_REF,
+                        "Can only ADD FIELD to STRUCT types");
+                    return;
+                }
+                String newFieldName = af.field().name().name();
+                for (StructFieldDecl f : struct.fields()) {
+                    if (f.name().name().equals(newFieldName)) {
+                        diags.error(af.range(), DiagnosticKind.SEMANTIC, DiagnosticCode.DUPLICATE_DECLARATION,
+                            "Field '" + newFieldName + "' already exists");
+                        return;
+                    }
+                }
+                AstListNode<StructFieldDecl> newFields = new AstListNode<>(StructFieldDecl.class);
+                newFields.addAll(struct.fields());
+                newFields.add(af.field());
+                StructDecl newStruct = new StructDecl(struct.range(), newFields);
+                TypeDecl newTypeDecl = new TypeDecl(
+                    existingType.range(), existingType.name(), newStruct, existingType.fragments());
+                symbols.replace(target, newTypeDecl);
+            }
+            case AlterStmt.DropMember dm -> {
+                if (!(existingType.kind() instanceof StructDecl struct)) {
+                    diags.error(dm.range(), DiagnosticKind.SEMANTIC, DiagnosticCode.INVALID_TYPE_REF,
+                        "Can only DROP member from STRUCT types");
+                    return;
+                }
+                String dropFieldName = dm.name().name();
+                AstListNode<StructFieldDecl> newFields = new AstListNode<>(StructFieldDecl.class);
+                boolean found = false;
+                for (StructFieldDecl f : struct.fields()) {
+                    if (f.name().name().equals(dropFieldName)) {
+                        if (f.fragments().stream().anyMatch(frag -> frag instanceof DroppedNode)) {
+                            diags.error(dm.range(), DiagnosticKind.SEMANTIC, DiagnosticCode.INVALID_TYPE_REF,
+                                "Field '" + dropFieldName + "' is already dropped");
+                            return;
+                        }
+                        AstListNode<DeclFragment> newFragments = new AstListNode<>(DeclFragment.class);
+                        newFragments.addAll(f.fragments());
+                        newFragments.add(new DroppedNode(f.range()));
+                        newFields.add(new StructFieldDecl(
+                            f.range(), f.name(), f.type(), f.nullable(), newFragments));
+                        found = true;
+                    } else {
+                        newFields.add(f);
+                    }
+                }
+                if (!found) {
+                    diags.error(dm.range(), DiagnosticKind.SEMANTIC, DiagnosticCode.UNKNOWN_MEMBER,
+                        "Unknown field: " + dropFieldName);
+                    return;
+                }
+                StructDecl newStruct = new StructDecl(struct.range(), newFields);
+                TypeDecl newTypeDecl = new TypeDecl(
+                    existingType.range(), existingType.name(), newStruct, existingType.fragments());
+                symbols.replace(target, newTypeDecl);
+            }
+            case AlterStmt.AddSymbol as -> {
+                // TODO: handle enum symbol addition
+            }
+        }
+    }
+
+    private static void resolveDropStmt(
+        DropStmt stmt,
+        SymbolTable symbols,
+        Diagnostics diags
+    ) {
+        Name target = toName(stmt.target());
+        if (!symbols.hasKey(target)) {
+            diags.error(
+                stmt.range(),
+                DiagnosticKind.SEMANTIC,
+                DiagnosticCode.UNKNOWN_TYPE,
+                "Cannot DROP unknown object: " + target
+            );
+            return;
+        }
+
+        boolean hasError = false;
+
+        switch (stmt) {
+            case DropStmt.DropContext dc -> {
+                if (symbols.lookupContext(target).isEmpty()) {
+                    diags.error(dc.range(), DiagnosticKind.SEMANTIC, DiagnosticCode.UNKNOWN_CONTEXT,
+                        target + " is not a CONTEXT");
+                    hasError = true;
+                } else {
+                    List<Name> children = findChildren(symbols, target);
+                    if (!children.isEmpty()) {
+                        diags.error(dc.range(), DiagnosticKind.SEMANTIC, DiagnosticCode.DEPENDENCY_EXISTS,
+                            "Cannot DROP CONTEXT " + target + ": contains " + children.size() + " object(s)");
+                        hasError = true;
+                    }
+                }
+            }
+            case DropStmt.DropType dt -> {
+                if (symbols.lookupType(target).isEmpty()) {
+                    diags.error(dt.range(), DiagnosticKind.SEMANTIC, DiagnosticCode.UNKNOWN_TYPE,
+                        target + " is not a TYPE");
+                    hasError = true;
+                } else {
+                    List<Name> dependents = findTypeDependents(symbols, target);
+                    if (!dependents.isEmpty()) {
+                        diags.error(dt.range(), DiagnosticKind.SEMANTIC, DiagnosticCode.DEPENDENCY_EXISTS,
+                            "Cannot DROP TYPE " + target + ": referenced by " + dependents.getFirst());
+                        hasError = true;
+                    }
+                }
+            }
+            case DropStmt.DropStream ds -> {
+                if (symbols.lookupStream(target).isEmpty()) {
+                    diags.error(ds.range(), DiagnosticKind.SEMANTIC, DiagnosticCode.UNKNOWN_STREAM,
+                        target + " is not a STREAM");
+                    hasError = true;
+                }
+            }
+        }
+
+        if (!hasError) {
+            symbols._decl.remove(target);
+        }
+    }
+
+    // =======================================================================
+    // Dependency helpers
+    // =======================================================================
+
+    /**
+     * Find all symbols that are children of the given context.
+     */
+    private static List<Name> findChildren(SymbolTable symbols, Name context) {
+        String prefix = context.fullName() + ".";
+        return symbols._decl.keySet().stream()
+            .filter(n -> n.fullName().toLowerCase().startsWith(prefix.toLowerCase()))
+            .toList();
+    }
+
+    /**
+     * Find all symbols that reference the given type.
+     * Checks stream member derived types and struct field type references.
+     */
+    private static List<Name> findTypeDependents(SymbolTable symbols, Name typeName) {
+        return symbols._decl.entrySet().stream()
+            .filter(e -> referencesType(e.getValue(), typeName))
+            .map(Map.Entry::getKey)
+            .toList();
+    }
+
+    private static boolean referencesType(Decl decl, Name typeName) {
+        if (decl instanceof StreamDecl sd) {
+            for (StreamMemberDecl member : sd.streamTypes()) {
+                if (member.memberDecl().kind() instanceof DerivedTypeDecl dt) {
+                    if (toName(dt.target().name()).equals(typeName)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     // =======================================================================

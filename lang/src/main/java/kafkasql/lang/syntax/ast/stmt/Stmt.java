@@ -8,6 +8,8 @@ public sealed interface Stmt
             ShowStmt,
             ExplainStmt,
             CreateStmt,
+            AlterStmt,
+            DropStmt,
             ReadStmt,
             WriteStmt
 { }

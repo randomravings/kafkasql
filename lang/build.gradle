@@ -18,6 +18,12 @@ dependencies {
   ebnfConvert 'de.bottlecaps.ebnf-convert:ebnf-convert-webapp:0.72'
 }
 
+java {
+  toolchain {
+    languageVersion = JavaLanguageVersion.of(21)
+  }
+}
+
 def antlrLexerOut  = file("$buildDir/generated-src/antlr/kafkasql/lang/lex")
 def antlrParserOut = file("$buildDir/generated-src/antlr/kafkasql/lang/parse")
 

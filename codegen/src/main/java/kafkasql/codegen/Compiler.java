@@ -76,12 +76,15 @@ public class Compiler {
         }
         
         // Imports
-        sb.append("import kafkasql.runtime.value.RecordValue;\n");
+        sb.append("import kafkasql.runtime.Record;\n");
+        sb.append("import kafkasql.io.codec.Encoder;\n");
+        sb.append("import kafkasql.io.codec.Decoder;\n");
         if (needsImport(type.primitive())) {
             sb.append("import java.math.BigDecimal;\n");
             sb.append("import java.time.*;\n");
             sb.append("import java.util.UUID;\n");
         }
+        sb.append("import java.io.*;\n");
         sb.append("\n");
         
         // Documentation
@@ -91,9 +94,25 @@ public class Compiler {
             sb.append(" */\n");
         });
         
-        // Type alias as record wrapper with self-referential generic
+        // Type alias as record wrapper
         String typeName = name.name();
-        sb.append("public record ").append(typeName).append("(").append(javaType).append(" value) implements RecordValue<").append(typeName).append("> {\n");
+        sb.append("public record ").append(typeName).append("(").append(javaType).append(" value) implements Record {\n");
+        
+        // writeTo
+        sb.append(INDENT).append("public void writeTo(OutputStream out) throws Exception {\n");
+        sb.append(INDENT).append(INDENT);
+        emitFieldWrite(sb, "value", type.primitive(), false);
+        sb.append(INDENT).append("}\n\n");
+        
+        // readFrom
+        sb.append(INDENT).append("public static ").append(typeName).append(" readFrom(InputStream in) throws Exception {\n");
+        sb.append(INDENT).append(INDENT).append("return new ").append(typeName).append("(\n");
+        sb.append(INDENT).append(INDENT).append(INDENT);
+        emitFieldRead(sb, type.primitive(), false);
+        sb.append("\n");
+        sb.append(INDENT).append(INDENT).append(");\n");
+        sb.append(INDENT).append("}\n");
+        
         sb.append("}\n");
         
         generatedFiles.put(className, sb.toString());
@@ -114,7 +133,10 @@ public class Compiler {
         }
         
         // Imports
-        sb.append("import kafkasql.runtime.value.RecordValue;\n\n");
+        sb.append("import kafkasql.runtime.Record;\n");
+        sb.append("import kafkasql.io.codec.Encoder;\n");
+        sb.append("import kafkasql.io.codec.Decoder;\n");
+        sb.append("import java.io.*;\n\n");
         
         // Documentation
         type.doc().ifPresent(doc -> {
@@ -123,9 +145,9 @@ public class Compiler {
             sb.append(" */\n");
         });
         
-        // Enum declaration with self-referential generic
+        // Enum declaration
         String enumName = name.name();
-        sb.append("public enum ").append(enumName).append(" implements RecordValue<").append(enumName).append("> {");
+        sb.append("public enum ").append(enumName).append(" implements Record {");
         
         // Enum constants
         boolean first = true;
@@ -153,6 +175,20 @@ public class Compiler {
         // Getter
         sb.append(INDENT).append("public int getValue() {\n");
         sb.append(INDENT).append(INDENT).append("return value;\n");
+        sb.append(INDENT).append("}\n\n");
+        
+        // writeTo
+        sb.append(INDENT).append("public void writeTo(OutputStream out) throws Exception {\n");
+        sb.append(INDENT).append(INDENT).append("Encoder.writeInt32(out, this.value);\n");
+        sb.append(INDENT).append("}\n\n");
+        
+        // readFrom
+        sb.append(INDENT).append("public static ").append(enumName).append(" readFrom(InputStream in) throws Exception {\n");
+        sb.append(INDENT).append(INDENT).append("int v = Decoder.decodeInt32(in);\n");
+        sb.append(INDENT).append(INDENT).append("for (").append(enumName).append(" e : values()) {\n");
+        sb.append(INDENT).append(INDENT).append(INDENT).append("if (e.value == v) return e;\n");
+        sb.append(INDENT).append(INDENT).append("}\n");
+        sb.append(INDENT).append(INDENT).append("throw new IllegalArgumentException(\"Unknown enum value: \" + v);\n");
         sb.append(INDENT).append("}\n");
         
         sb.append("}\n");
@@ -175,7 +211,10 @@ public class Compiler {
         }
         
         // Imports
-        sb.append("import kafkasql.runtime.value.RecordValue;\n");
+        sb.append("import kafkasql.runtime.Record;\n");
+        sb.append("import kafkasql.io.codec.Encoder;\n");
+        sb.append("import kafkasql.io.codec.Decoder;\n");
+        sb.append("import java.io.*;\n");
         sb.append("import java.math.BigDecimal;\n");
         sb.append("import java.time.*;\n");
         sb.append("import java.util.*;\n\n");
@@ -211,7 +250,36 @@ public class Compiler {
             sb.append(INDENT).append(javaType).append(" ").append(fieldName);
         }
         
-        sb.append("\n) implements RecordValue<").append(recordName).append("> {\n}\n");
+        sb.append("\n) implements Record {\n");
+        
+        // writeTo
+        sb.append(INDENT).append("public void writeTo(OutputStream out) throws Exception {\n");
+        for (var entry : type.fields().entrySet()) {
+            String fieldName = entry.getKey();
+            StructTypeField field = entry.getValue();
+            sb.append(INDENT).append(INDENT);
+            emitStructFieldWrite(sb, fieldName, field.type(), field.nullable());
+        }
+        sb.append(INDENT).append("}\n\n");
+        
+        // readFrom
+        sb.append(INDENT).append("public static ").append(recordName).append(" readFrom(InputStream in) throws Exception {\n");
+        sb.append(INDENT).append(INDENT).append("return new ").append(recordName).append("(\n");
+        first = true;
+        for (var entry : type.fields().entrySet()) {
+            StructTypeField field = entry.getValue();
+            if (!first) {
+                sb.append(",\n");
+            }
+            first = false;
+            sb.append(INDENT).append(INDENT).append(INDENT);
+            emitStructFieldRead(sb, field.type(), field.nullable());
+        }
+        sb.append("\n");
+        sb.append(INDENT).append(INDENT).append(");\n");
+        sb.append(INDENT).append("}\n");
+        
+        sb.append("}\n");
         
         generatedFiles.put(className, sb.toString());
     }
@@ -231,12 +299,13 @@ public class Compiler {
         }
         
         // Imports
-        sb.append("import kafkasql.runtime.stream.CompiledStream;\n");
+        sb.append("import kafkasql.runtime.Record;\n");
+        sb.append("import kafkasql.io.codec.Encoder;\n");
+        sb.append("import kafkasql.io.codec.Decoder;\n");
+        sb.append("import java.io.*;\n");
         sb.append("import java.math.BigDecimal;\n");
         sb.append("import java.time.*;\n");
         sb.append("import java.util.*;\n\n");
-        
-        // Collect all permitted types for sealed interface
         StringBuilder permitsClause = new StringBuilder();
         boolean firstPermit = true;
         for (kafkasql.lang.syntax.ast.decl.StreamMemberDecl member : streamDecl.streamTypes()) {
@@ -253,13 +322,31 @@ public class Compiler {
         sb.append(" * Stream: ").append(streamName).append("\n");
         sb.append(" * Sealed interface for all message types in this stream.\n");
         sb.append(" */\n");
-        sb.append("public sealed interface ").append(streamName).append(" extends CompiledStream<").append(streamName).append(">");
+        sb.append("public sealed interface ").append(streamName).append(" extends Record");
         sb.append(" permits ").append(permitsClause).append(" {\n\n");
+        
+        // Abstract writeTo method
+        sb.append(INDENT).append("void writeTo(OutputStream out) throws Exception;\n\n");
+        
+        // Static readFrom dispatch
+        sb.append(INDENT).append("static ").append(streamName).append(" readFrom(InputStream in) throws Exception {\n");
+        sb.append(INDENT).append(INDENT).append("int memberIndex = Decoder.decodeVarInt32(in);\n");
+        sb.append(INDENT).append(INDENT).append("return switch (memberIndex) {\n");
+        int memberIdx = 0;
+        for (kafkasql.lang.syntax.ast.decl.StreamMemberDecl m : streamDecl.streamTypes()) {
+            String mName = m.name().name();
+            sb.append(INDENT).append(INDENT).append(INDENT).append("case ").append(memberIdx).append(" -> ").append(mName).append(".readFrom(in);\n");
+            memberIdx++;
+        }
+        sb.append(INDENT).append(INDENT).append(INDENT).append("default -> throw new IllegalArgumentException(\"Unknown member index: \" + memberIndex);\n");
+        sb.append(INDENT).append(INDENT).append("};\n");
+        sb.append(INDENT).append("}\n\n");
         
         // Generate static factory methods for reader/writer
         generateStreamFactoryMethods(sb, streamName, streamDecl);
         
         // Generate each member type
+        int memberIndex = 0;
         for (kafkasql.lang.syntax.ast.decl.StreamMemberDecl member : streamDecl.streamTypes()) {
             kafkasql.lang.syntax.ast.decl.TypeDecl memberTypeDecl = member.memberDecl();
             String memberName = memberTypeDecl.name().name();
@@ -286,7 +373,35 @@ public class Compiler {
                     sb.append(INDENT).append(INDENT).append(javaType).append(" ").append(fieldName);
                 }
                 
-                sb.append("\n").append(INDENT).append(") implements ").append(name.name()).append(" {}\n\n");
+                sb.append("\n").append(INDENT).append(") implements ").append(name.name()).append(" {\n");
+                
+                // writeTo
+                sb.append(INDENT).append(INDENT).append("@Override\n");
+                sb.append(INDENT).append(INDENT).append("public void writeTo(OutputStream out) throws Exception {\n");
+                sb.append(INDENT).append(INDENT).append(INDENT).append("Encoder.writeVarInt32(out, ").append(memberIndex).append(");\n");
+                for (kafkasql.lang.syntax.ast.decl.StructFieldDecl f : structDecl.fields()) {
+                    sb.append(INDENT).append(INDENT).append(INDENT);
+                    emitAstFieldWrite(sb, f.name().name(), f.type(), f.nullable().isPresent());
+                }
+                sb.append(INDENT).append(INDENT).append("}\n\n");
+                
+                // readFrom
+                sb.append(INDENT).append(INDENT).append("public static ").append(memberName).append(" readFrom(InputStream in) throws Exception {\n");
+                sb.append(INDENT).append(INDENT).append(INDENT).append("return new ").append(memberName).append("(\n");
+                boolean firstRead = true;
+                for (kafkasql.lang.syntax.ast.decl.StructFieldDecl f : structDecl.fields()) {
+                    if (!firstRead) {
+                        sb.append(",\n");
+                    }
+                    firstRead = false;
+                    sb.append(INDENT).append(INDENT).append(INDENT).append(INDENT);
+                    emitAstFieldRead(sb, f.type(), f.nullable().isPresent());
+                }
+                sb.append("\n");
+                sb.append(INDENT).append(INDENT).append(INDENT).append(");\n");
+                sb.append(INDENT).append(INDENT).append("}\n");
+                
+                sb.append(INDENT).append("}\n\n");
             } else {
                 // For external type references, check if we have a binding
                 Object boundType = model.bindings().get(memberTypeDecl);
@@ -307,10 +422,25 @@ public class Compiler {
                         sb.append(INDENT).append(" */\n");
                         sb.append(INDENT).append("record ").append(memberName).append("(\n");
                         sb.append(INDENT).append(INDENT).append(referencedTypeFqn).append(" value\n");
-                        sb.append(INDENT).append(") implements ").append(name.name()).append(" {}\n\n");
+                        sb.append(INDENT).append(") implements ").append(name.name()).append(" {\n");
+                        
+                        // writeTo
+                        sb.append(INDENT).append(INDENT).append("@Override\n");
+                        sb.append(INDENT).append(INDENT).append("public void writeTo(OutputStream out) throws Exception {\n");
+                        sb.append(INDENT).append(INDENT).append(INDENT).append("Encoder.writeVarInt32(out, ").append(memberIndex).append(");\n");
+                        sb.append(INDENT).append(INDENT).append(INDENT).append("value.writeTo(out);\n");
+                        sb.append(INDENT).append(INDENT).append("}\n\n");
+                        
+                        // readFrom
+                        sb.append(INDENT).append(INDENT).append("public static ").append(memberName).append(" readFrom(InputStream in) throws Exception {\n");
+                        sb.append(INDENT).append(INDENT).append(INDENT).append("return new ").append(memberName).append("(").append(referencedTypeFqn).append(".readFrom(in));\n");
+                        sb.append(INDENT).append(INDENT).append("}\n");
+                        
+                        sb.append(INDENT).append("}\n\n");
                     }
                 }
             }
+            memberIndex++;
         }
         
         // Close the sealed interface
@@ -335,9 +465,10 @@ public class Compiler {
         sb.append(INDENT).append("static kafkasql.runtime.stream.StreamReader<").append(streamName).append("> reader(\n");
         sb.append(INDENT).append(INDENT).append("org.apache.kafka.clients.consumer.KafkaConsumer<byte[], byte[]> consumer\n");
         sb.append(INDENT).append(") {\n");
-        sb.append(INDENT).append(INDENT).append("return kafkasql.io.kafka.KafkaStream.reader(\n");
-        sb.append(INDENT).append(INDENT).append(INDENT).append(streamName).append(".class,\n");
-        sb.append(INDENT).append(INDENT).append(INDENT).append("consumer\n");
+        sb.append(INDENT).append(INDENT).append("return new kafkasql.io.ReadStream<>(\n");
+        sb.append(INDENT).append(INDENT).append(INDENT).append("\"").append(streamName).append("\",\n");
+        sb.append(INDENT).append(INDENT).append(INDENT).append("consumer,\n");
+        sb.append(INDENT).append(INDENT).append(INDENT).append("bytes -> ").append(streamName).append(".readFrom(new java.io.ByteArrayInputStream(bytes))\n");
         sb.append(INDENT).append(INDENT).append(");\n");
         sb.append(INDENT).append("}\n\n");
         
@@ -356,9 +487,10 @@ public class Compiler {
         sb.append(INDENT).append("static kafkasql.runtime.stream.StreamWriter<").append(streamName).append("> writer(\n");
         sb.append(INDENT).append(INDENT).append("org.apache.kafka.clients.producer.KafkaProducer<byte[], byte[]> producer\n");
         sb.append(INDENT).append(") {\n");
-        sb.append(INDENT).append(INDENT).append("return kafkasql.io.kafka.KafkaStream.writer(\n");
-        sb.append(INDENT).append(INDENT).append(INDENT).append(streamName).append(".class,\n");
-        sb.append(INDENT).append(INDENT).append(INDENT).append("producer\n");
+        sb.append(INDENT).append(INDENT).append("return new kafkasql.io.WriteStream<>(\n");
+        sb.append(INDENT).append(INDENT).append(INDENT).append("\"").append(streamName).append("\",\n");
+        sb.append(INDENT).append(INDENT).append(INDENT).append("producer,\n");
+        sb.append(INDENT).append(INDENT).append(INDENT).append("msg -> { var baos = new java.io.ByteArrayOutputStream(); msg.writeTo(baos); return baos.toByteArray(); }\n");
         sb.append(INDENT).append(INDENT).append(");\n");
         sb.append(INDENT).append("}\n\n");
     }
@@ -488,5 +620,220 @@ public class Compiler {
             case BOOLEAN, INT8, INT16, INT32, INT64, FLOAT32, FLOAT64 -> true;
             default -> false;
         };
+    }
+    
+    // ========================================================================
+    // Serde Emit Helpers
+    // ========================================================================
+    
+    /**
+     * Emits an Encoder call for a primitive field: Encoder.writeXxx(out, accessor);
+     */
+    private void emitFieldWrite(StringBuilder sb, String accessor, PrimitiveType type, boolean nullable) {
+        if (nullable) {
+            sb.append("if (").append(accessor).append(" == null) { Encoder.writeBool(out, false); } else { Encoder.writeBool(out, true); ");
+            emitPrimitiveWrite(sb, accessor, type);
+            sb.append(" }\n");
+        } else {
+            emitPrimitiveWrite(sb, accessor, type);
+            sb.append("\n");
+        }
+    }
+    
+    private void emitPrimitiveWrite(StringBuilder sb, String accessor, PrimitiveType type) {
+        switch (type.kind()) {
+            case BOOLEAN -> sb.append("Encoder.writeBool(out, ").append(accessor).append(");");
+            case INT8 -> sb.append("Encoder.writeInt8(out, ").append(accessor).append(");");
+            case INT16 -> sb.append("Encoder.writeInt16(out, ").append(accessor).append(");");
+            case INT32 -> sb.append("Encoder.writeInt32(out, ").append(accessor).append(");");
+            case INT64 -> sb.append("Encoder.writeInt64(out, ").append(accessor).append(");");
+            case FLOAT32 -> sb.append("Encoder.writeFloat32(out, ").append(accessor).append(");");
+            case FLOAT64 -> sb.append("Encoder.writeFloat64(out, ").append(accessor).append(");");
+            case STRING -> sb.append("Encoder.writeString(out, ").append(accessor).append(");");
+            case BYTES -> sb.append("Encoder.writeBytes(out, ").append(accessor).append(");");
+            case UUID -> sb.append("Encoder.writeUUID(out, ").append(accessor).append(");");
+            case DECIMAL -> sb.append("Encoder.writeDecimal(out, ").append(accessor).append(");");
+            case DATE -> sb.append("Encoder.writeInt64(out, ").append(accessor).append(".toEpochDay());");
+            case TIME -> sb.append("Encoder.writeInt64(out, ").append(accessor).append(".toNanoOfDay());");
+            case TIMESTAMP -> {
+                sb.append("Encoder.writeInt64(out, ").append(accessor).append(".toEpochSecond(java.time.ZoneOffset.UTC)); ");
+                sb.append("Encoder.writeInt32(out, ").append(accessor).append(".getNano());");
+            }
+            case TIMESTAMP_TZ -> {
+                sb.append("Encoder.writeInt64(out, ").append(accessor).append(".toEpochSecond()); ");
+                sb.append("Encoder.writeInt32(out, ").append(accessor).append(".getNano()); ");
+                sb.append("Encoder.writeString(out, ").append(accessor).append(".getZone().getId());");
+            }
+        }
+    }
+    
+    /**
+     * Emits a Decoder call for a primitive field: Decoder.decodeXxx(in)
+     */
+    private void emitFieldRead(StringBuilder sb, PrimitiveType type, boolean nullable) {
+        if (nullable) {
+            sb.append("Decoder.decodeBoolean(in) ? ");
+            emitPrimitiveRead(sb, type);
+            sb.append(" : null");
+        } else {
+            emitPrimitiveRead(sb, type);
+        }
+    }
+    
+    private void emitPrimitiveRead(StringBuilder sb, PrimitiveType type) {
+        switch (type.kind()) {
+            case BOOLEAN -> sb.append("Decoder.decodeBoolean(in)");
+            case INT8 -> sb.append("Decoder.decodeInt8(in)");
+            case INT16 -> sb.append("Decoder.decodeInt16(in)");
+            case INT32 -> sb.append("Decoder.decodeInt32(in)");
+            case INT64 -> sb.append("Decoder.decodeInt64(in)");
+            case FLOAT32 -> sb.append("Decoder.decodeFloat32(in)");
+            case FLOAT64 -> sb.append("Decoder.decodeFloat64(in)");
+            case STRING -> sb.append("Decoder.decodeString(in)");
+            case BYTES -> sb.append("Decoder.decodeBytes(in)");
+            case UUID -> sb.append("Decoder.decodeUUID(in)");
+            case DECIMAL -> sb.append("new java.math.BigDecimal(new java.math.BigInteger(Decoder.decodeBytes(in)))");
+            case DATE -> sb.append("java.time.LocalDate.ofEpochDay(Decoder.decodeInt64(in))");
+            case TIME -> sb.append("java.time.LocalTime.ofNanoOfDay(Decoder.decodeInt64(in))");
+            case TIMESTAMP -> sb.append("java.time.LocalDateTime.ofEpochSecond(Decoder.decodeInt64(in), Decoder.decodeInt32(in), java.time.ZoneOffset.UTC)");
+            case TIMESTAMP_TZ -> sb.append("java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochSecond(Decoder.decodeInt64(in), Decoder.decodeInt32(in)), java.time.ZoneId.of(Decoder.decodeString(in)))");
+        }
+    }
+    
+    /**
+     * Emits a write call for a struct field (any AnyType).
+     */
+    private void emitStructFieldWrite(StringBuilder sb, String fieldName, AnyType type, boolean nullable) {
+        switch (type) {
+            case PrimitiveType pt -> emitFieldWrite(sb, fieldName, pt, nullable);
+            case ScalarType st -> emitComplexFieldWrite(sb, fieldName, nullable);
+            case EnumType et -> emitComplexFieldWrite(sb, fieldName, nullable);
+            case StructType st -> emitComplexFieldWrite(sb, fieldName, nullable);
+            case UnionType ut -> emitComplexFieldWrite(sb, fieldName, nullable);
+            default -> sb.append("// TODO: unsupported type for ").append(fieldName).append("\n");
+        }
+    }
+    
+    private void emitComplexFieldWrite(StringBuilder sb, String fieldName, boolean nullable) {
+        if (nullable) {
+            sb.append("if (").append(fieldName).append(" == null) { Encoder.writeBool(out, false); } else { Encoder.writeBool(out, true); ").append(fieldName).append(".writeTo(out); }\n");
+        } else {
+            sb.append(fieldName).append(".writeTo(out);\n");
+        }
+    }
+    
+    /**
+     * Emits a read expression for a struct field (any AnyType).
+     */
+    private void emitStructFieldRead(StringBuilder sb, AnyType type, boolean nullable) {
+        switch (type) {
+            case PrimitiveType pt -> emitFieldRead(sb, pt, nullable);
+            case ScalarType st -> emitComplexFieldRead(sb, st.fqn().toString(), nullable);
+            case EnumType et -> emitComplexFieldRead(sb, et.fqn().toString(), nullable);
+            case StructType st -> emitComplexFieldRead(sb, st.fqn().toString(), nullable);
+            case UnionType ut -> emitComplexFieldRead(sb, ut.fqn().toString(), nullable);
+            default -> sb.append("null /* TODO: unsupported type */");
+        }
+    }
+    
+    private void emitComplexFieldRead(StringBuilder sb, String typeFqn, boolean nullable) {
+        if (nullable) {
+            sb.append("Decoder.decodeBoolean(in) ? ").append(typeFqn).append(".readFrom(in) : null");
+        } else {
+            sb.append(typeFqn).append(".readFrom(in)");
+        }
+    }
+    
+    // ========================================================================
+    // AST-based Serde Emit Helpers (for stream member inline records)
+    // ========================================================================
+    
+    private void emitAstFieldWrite(StringBuilder sb, String fieldName, kafkasql.lang.syntax.ast.type.TypeNode typeNode, boolean nullable) {
+        if (typeNode instanceof kafkasql.lang.syntax.ast.type.PrimitiveTypeNode primNode) {
+            emitPrimitiveKindWrite(sb, fieldName, primNode.kind(), nullable);
+        } else if (typeNode instanceof kafkasql.lang.syntax.ast.type.ComplexTypeNode) {
+            emitComplexFieldWrite(sb, fieldName, nullable);
+        } else {
+            sb.append("// TODO: unsupported AST type for ").append(fieldName).append("\n");
+        }
+    }
+    
+    private void emitAstFieldRead(StringBuilder sb, kafkasql.lang.syntax.ast.type.TypeNode typeNode, boolean nullable) {
+        if (typeNode instanceof kafkasql.lang.syntax.ast.type.PrimitiveTypeNode primNode) {
+            emitPrimitiveKindRead(sb, primNode.kind(), nullable);
+        } else if (typeNode instanceof kafkasql.lang.syntax.ast.type.ComplexTypeNode complexNode) {
+            String typeName = mapAstTypeToJava(complexNode, false);
+            emitComplexFieldRead(sb, typeName, nullable);
+        } else {
+            sb.append("null /* TODO: unsupported AST type */");
+        }
+    }
+    
+    private void emitPrimitiveKindWrite(StringBuilder sb, String accessor, PrimitiveKind kind, boolean nullable) {
+        if (nullable) {
+            sb.append("if (").append(accessor).append(" == null) { Encoder.writeBool(out, false); } else { Encoder.writeBool(out, true); ");
+            emitPrimitiveKindWriteCall(sb, accessor, kind);
+            sb.append(" }\n");
+        } else {
+            emitPrimitiveKindWriteCall(sb, accessor, kind);
+            sb.append("\n");
+        }
+    }
+    
+    private void emitPrimitiveKindWriteCall(StringBuilder sb, String accessor, PrimitiveKind kind) {
+        switch (kind) {
+            case BOOLEAN -> sb.append("Encoder.writeBool(out, ").append(accessor).append(");");
+            case INT8 -> sb.append("Encoder.writeInt8(out, ").append(accessor).append(");");
+            case INT16 -> sb.append("Encoder.writeInt16(out, ").append(accessor).append(");");
+            case INT32 -> sb.append("Encoder.writeInt32(out, ").append(accessor).append(");");
+            case INT64 -> sb.append("Encoder.writeInt64(out, ").append(accessor).append(");");
+            case FLOAT32 -> sb.append("Encoder.writeFloat32(out, ").append(accessor).append(");");
+            case FLOAT64 -> sb.append("Encoder.writeFloat64(out, ").append(accessor).append(");");
+            case STRING -> sb.append("Encoder.writeString(out, ").append(accessor).append(");");
+            case BYTES -> sb.append("Encoder.writeBytes(out, ").append(accessor).append(");");
+            case UUID -> sb.append("Encoder.writeUUID(out, ").append(accessor).append(");");
+            case DECIMAL -> sb.append("Encoder.writeDecimal(out, ").append(accessor).append(");");
+            case DATE -> sb.append("Encoder.writeInt64(out, ").append(accessor).append(".toEpochDay());");
+            case TIME -> sb.append("Encoder.writeInt64(out, ").append(accessor).append(".toNanoOfDay());");
+            case TIMESTAMP -> {
+                sb.append("Encoder.writeInt64(out, ").append(accessor).append(".toEpochSecond(java.time.ZoneOffset.UTC)); ");
+                sb.append("Encoder.writeInt32(out, ").append(accessor).append(".getNano());");
+            }
+            case TIMESTAMP_TZ -> {
+                sb.append("Encoder.writeInt64(out, ").append(accessor).append(".toEpochSecond()); ");
+                sb.append("Encoder.writeInt32(out, ").append(accessor).append(".getNano()); ");
+                sb.append("Encoder.writeString(out, ").append(accessor).append(".getZone().getId());");
+            }
+        }
+    }
+    
+    private void emitPrimitiveKindRead(StringBuilder sb, PrimitiveKind kind, boolean nullable) {
+        if (nullable) {
+            sb.append("Decoder.decodeBoolean(in) ? ");
+            emitPrimitiveKindReadCall(sb, kind);
+            sb.append(" : null");
+        } else {
+            emitPrimitiveKindReadCall(sb, kind);
+        }
+    }
+    
+    private void emitPrimitiveKindReadCall(StringBuilder sb, PrimitiveKind kind) {
+        switch (kind) {
+            case BOOLEAN -> sb.append("Decoder.decodeBoolean(in)");
+            case INT8 -> sb.append("Decoder.decodeInt8(in)");
+            case INT16 -> sb.append("Decoder.decodeInt16(in)");
+            case INT32 -> sb.append("Decoder.decodeInt32(in)");
+            case INT64 -> sb.append("Decoder.decodeInt64(in)");
+            case FLOAT32 -> sb.append("Decoder.decodeFloat32(in)");
+            case FLOAT64 -> sb.append("Decoder.decodeFloat64(in)");
+            case STRING -> sb.append("Decoder.decodeString(in)");
+            case BYTES -> sb.append("Decoder.decodeBytes(in)");
+            case UUID -> sb.append("Decoder.decodeUUID(in)");
+            case DECIMAL -> sb.append("new java.math.BigDecimal(new java.math.BigInteger(Decoder.decodeBytes(in)))");
+            case DATE -> sb.append("java.time.LocalDate.ofEpochDay(Decoder.decodeInt64(in))");
+            case TIME -> sb.append("java.time.LocalTime.ofNanoOfDay(Decoder.decodeInt64(in))");
+            case TIMESTAMP -> sb.append("java.time.LocalDateTime.ofEpochSecond(Decoder.decodeInt64(in), Decoder.decodeInt32(in), java.time.ZoneOffset.UTC)");
+            case TIMESTAMP_TZ -> sb.append("java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochSecond(Decoder.decodeInt64(in), Decoder.decodeInt32(in)), java.time.ZoneId.of(Decoder.decodeString(in)))");
+        }
     }
 }

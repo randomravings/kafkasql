@@ -32,6 +32,10 @@ class CompilerTest {
         String code = generated.get("PersonId");
         assertTrue(code.contains("public record PersonId"));
         assertTrue(code.contains("String value"));
+        assertTrue(code.contains("writeTo"), "scalar should have writeTo");
+        assertTrue(code.contains("readFrom"), "scalar should have readFrom");
+        assertTrue(code.contains("Encoder."), "scalar writeTo should use Encoder");
+        assertTrue(code.contains("Decoder."), "scalar readFrom should use Decoder");
         System.out.println("Generated scalar:");
         System.out.println(code);
     }
@@ -58,6 +62,8 @@ class CompilerTest {
         assertTrue(code.contains("PENDING(0)"));
         assertTrue(code.contains("ACTIVE(1)"));
         assertTrue(code.contains("COMPLETED(2)"));
+        assertTrue(code.contains("writeTo"), "enum should have writeTo");
+        assertTrue(code.contains("readFrom"), "enum should have readFrom");
         System.out.println("Generated enum:");
         System.out.println(code);
     }
@@ -84,6 +90,8 @@ class CompilerTest {
         assertTrue(code.contains("String id"));
         assertTrue(code.contains("String name"));
         assertTrue(code.contains("int age"));
+        assertTrue(code.contains("writeTo"), "struct should have writeTo");
+        assertTrue(code.contains("readFrom"), "struct should have readFrom");
         System.out.println("Generated struct:");
         System.out.println(code);
     }

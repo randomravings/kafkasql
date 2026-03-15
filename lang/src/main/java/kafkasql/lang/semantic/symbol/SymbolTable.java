@@ -24,6 +24,13 @@ public final class SymbolTable {
         return true;
     }
 
+    public boolean replace(Name name, Decl decl) {
+        if (!hasKey(name))
+            return false;
+        _decl.put(name, decl);
+        return true;
+    }
+
     public Optional<TypeDecl> lookupType(Name name) {
         var v = get(name);
         if (v.isPresent() && v.get() instanceof TypeDecl t)
