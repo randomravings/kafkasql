@@ -35,7 +35,7 @@ public final class ExactCaseMemberReferenceRule implements LintRule {
     
     private static final RuleMetadata METADATA = new RuleMetadata(
         "exact-case-member-reference",
-        "Naming",
+        "naming",
         "Union member references should match the exact casing from the type definition",
         Severity.WARNING
     );

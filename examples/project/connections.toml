@@ -1,0 +1,34 @@
+# connections.toml — named Kafka cluster connections TEMPLATE
+# ─────────────────────────────────────────────────────────────────────────────
+# Place this file in the same directory as your .proj.toml file.
+# Each [connection.<name>] section describes one named Kafka cluster.
+#
+# Fields per connection:
+#   bootstrap  — Kafka bootstrap server(s), comma-separated (required)
+#   topic      — event-log topic written by the KafkaSQL engine (required)
+#
+# Connections are shown as child nodes under the project in the VS Code
+# project explorer. Expanding a connection reads the live schema model
+# directly from the configured Kafka cluster.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# ── Local / development cluster ───────────────────────────────────────────────
+
+[connection.local]
+bootstrap = "localhost:9092"
+topic     = "kafkasql-event-log"
+
+
+# ── Staging cluster ───────────────────────────────────────────────────────────
+
+# [connection.staging]
+# bootstrap = "kafka-staging.internal:9092"
+# topic     = "kafkasql-event-log"
+
+
+# ── Production cluster ────────────────────────────────────────────────────────
+
+# [connection.production]
+# bootstrap = "kafka-prod-1.internal:9092,kafka-prod-2.internal:9092"
+# topic     = "kafkasql-event-log"

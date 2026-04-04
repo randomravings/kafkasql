@@ -1,0 +1,11 @@
+INCLUDE '../customers.kafka';
+INCLUDE 'CustomerStatus.kafka';
+
+USE CONTEXT customers;
+
+CREATE TYPE Customer AS STRUCT (
+    Id     INT32,
+    Name   STRING,
+    Status customers.CustomerStatus
+)
+COMMENT 'A customer record';

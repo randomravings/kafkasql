@@ -150,7 +150,7 @@ public final class IncludeResolver {
                     input.source(),
                     inputText
                 ),
-                workingDir,
+                input.path().getParent(),   // resolve relative to the including file, not the root workingDir
                 diags
             );
 

@@ -1,0 +1,121 @@
+# kafkasql.rules.toml — compatibility ruleset TEMPLATE
+# ─────────────────────────────────────────────────────────────────────────────
+# Copy this file, uncomment and change only the rules you want to override.
+# Everything left commented (or absent) keeps its built-in default.
+#
+# Pass your customised file to the diff verb with --rules / -r:
+#
+#   kafkasql diff --rules kafkasql.rules.toml v1.kafka v2.kafka
+#
+# To start from the fully-instantiated defaults, run:
+#
+#   kafkasql rules > kafkasql.rules.toml
+#
+# Valid severities (case-insensitive): SAFE  INFO  WARNING  BREAKING
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+# ── Compatibility rules ───────────────────────────────────────────────────────
+# Controls how schema changes are classified when running `kafkasql diff`.
+
+[compatibility.statement]
+# decl_removed      = "BREAKING"
+# decl_added        = "SAFE"
+# decl_kind_changed = "BREAKING"
+# drop_added        = "BREAKING"
+# drop_removed      = "SAFE"
+# alter_added       = "WARNING"
+# alter_removed     = "INFO"
+
+
+[compatibility.struct.field]
+# Note: field name and type are immutable on the Kafka log.
+# Relaxing type_changed is allowed by the tool but physically incorrect for
+# existing consumers — do so only if you fully control all consumers.
+
+# removed                       = "BREAKING"
+# soft_dropped                  = "SAFE"
+# added_optional                = "SAFE"
+# added_required                = "WARNING"
+# type_changed                  = "BREAKING"
+
+# Nullability
+# nullable_added                = "BREAKING"   # NOT NULL → NULL (weakening)
+# nullable_removed_with_default = "SAFE"        # NULL → NOT NULL, DEFAULT present
+# nullable_removed_no_default   = "BREAKING"   # NULL → NOT NULL, no DEFAULT
+
+# Default value
+# default_added                 = "SAFE"
+# default_removed               = "WARNING"
+# default_changed               = "WARNING"
+
+# CHECK constraint
+# check_added                   = "WARNING"
+# check_removed                 = "WARNING"
+# check_changed                 = "WARNING"
+
+# Soft-drop marker
+# dropped_added                 = "SAFE"
+# dropped_removed               = "WARNING"
+
+# Metadata
+# doc_changed                   = "INFO"
+# distribute_changed            = "BREAKING"
+# timestamp_changed             = "BREAKING"
+
+# Named constraint
+# constraint_added              = "WARNING"
+# constraint_removed            = "WARNING"
+# constraint_changed            = "WARNING"
+
+
+[compatibility.enum]
+# Enum integer discriminants are baked into every message on the log.
+
+# base_type_changed    = "BREAKING"
+# symbol_removed       = "BREAKING"
+# symbol_added         = "WARNING"
+# symbol_value_changed = "BREAKING"
+# symbol_doc_changed   = "INFO"
+
+
+[compatibility.union]
+# member_removed      = "BREAKING"
+# member_added        = "WARNING"
+# member_type_changed = "BREAKING"
+# member_doc_changed  = "INFO"
+
+
+[compatibility.stream]
+# member_removed        = "BREAKING"
+# member_added          = "SAFE"
+# member_kind_changed   = "BREAKING"
+# member_struct_changed = "WARNING"
+# member_changed        = "WARNING"
+
+
+[compatibility.scalar]
+# type_changed = "BREAKING"
+# doc_changed  = "INFO"
+
+
+[compatibility.derived]
+# base_changed = "BREAKING"
+# doc_changed  = "INFO"
+
+
+[compatibility.context]
+# changed     = "INFO"
+# doc_changed = "INFO"
+
+
+# ── Lint rules ────────────────────────────────────────────────────────────────
+# Override per-rule severity or set "OFF" to disable a rule entirely.
+# Absent keys keep their built-in default severity.
+# Valid values: OFF  INFO  WARNING  ERROR  FATAL
+
+[lint.naming]
+# pascal-case-types           = "WARNING"   # type names should use PascalCase
+# pascal-case-fields          = "WARNING"   # struct fields / union members should use PascalCase
+# screaming-snake-case-enums  = "WARNING"   # enum symbols should use SCREAMING_SNAKE_CASE
+# exact-case-member-reference = "WARNING"   # union member references should match declaration case

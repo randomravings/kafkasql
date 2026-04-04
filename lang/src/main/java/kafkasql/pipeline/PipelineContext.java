@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import kafkasql.lang.input.Input;
+import kafkasql.linter.LintSettings;
 
 /**
  * Immutable context passed to each phase during pipeline execution.
@@ -15,7 +16,8 @@ public record PipelineContext(
     List<Input> inputs,
     Path workingDir,
     boolean includeResolution,
-    boolean verbose
+    boolean verbose,
+    LintSettings lintSettings
 ) {
     
     public static Builder builder() {
@@ -27,6 +29,7 @@ public record PipelineContext(
         private Path workingDir = Path.of(".");
         private boolean includeResolution = true;
         private boolean verbose = false;
+        private LintSettings lintSettings = LintSettings.defaults();
         
         public Builder inputs(List<Input> inputs) {
             this.inputs = inputs;
@@ -47,12 +50,17 @@ public record PipelineContext(
             this.verbose = enable;
             return this;
         }
+
+        public Builder lintSettings(LintSettings lintSettings) {
+            this.lintSettings = lintSettings != null ? lintSettings : LintSettings.defaults();
+            return this;
+        }
         
         public PipelineContext build() {
             if (inputs == null) {
                 throw new IllegalStateException("inputs are required");
             }
-            return new PipelineContext(inputs, workingDir, includeResolution, verbose);
+            return new PipelineContext(inputs, workingDir, includeResolution, verbose, lintSettings);
         }
     }
 }

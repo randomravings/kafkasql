@@ -1,4 +1,4 @@
-INCLUDE 'sys.kafka';
+INCLUDE '../sys.kafka';
 
 USE CONTEXT sys;
 

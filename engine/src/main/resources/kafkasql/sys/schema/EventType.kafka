@@ -1,4 +1,4 @@
-INCLUDE 'sys/schema.kafka';
+INCLUDE '../schema.kafka';
 SET VERSION = 1;
 
 USE CONTEXT sys.schema;

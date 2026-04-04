@@ -19,6 +19,8 @@ class CheckConstraintsTest {
     @Test
     void scalarWithSingleCheck() {
         String source = """
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Money AS SCALAR INT32
             CHECK (value > 0);
             """;
@@ -27,7 +29,7 @@ class CheckConstraintsTest {
         assertFalse(model.diags().hasError(), "Should have no errors");
 
         ScalarType money = (ScalarType) model.bindings().get(
-            model.symbols().lookupType(Name.of("Money")).orElseThrow()
+            model.symbols().lookupType(Name.of("test", "Money")).orElseThrow()
         );
 
         assertTrue(money.check().isPresent(), "Should have a check constraint");
@@ -40,6 +42,8 @@ class CheckConstraintsTest {
     @Test
     void scalarWithMultipleChecksShouldFail() {
         String source = """
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Money AS SCALAR INT32
             CHECK (value > 0)
             CHECK (value < 1000000);
@@ -52,6 +56,8 @@ class CheckConstraintsTest {
     @Test
     void scalarWithoutCheck() {
         String source = """
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Money AS SCALAR INT32;
             """;
 
@@ -59,7 +65,7 @@ class CheckConstraintsTest {
         assertFalse(model.diags().hasError(), "Should have no errors");
 
         ScalarType money = (ScalarType) model.bindings().get(
-            model.symbols().lookupType(Name.of("Money")).orElseThrow()
+            model.symbols().lookupType(Name.of("test", "Money")).orElseThrow()
         );
 
         assertFalse(money.check().isPresent(), "Should have no check constraint");
@@ -68,6 +74,8 @@ class CheckConstraintsTest {
     @Test
     void structWithNamedConstraints() {
         String source = """
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE DateRange AS STRUCT (
               startDate INT32,
               endDate INT32
@@ -79,7 +87,7 @@ class CheckConstraintsTest {
         assertFalse(model.diags().hasError(), "Should have no errors");
 
         StructType dateRange = (StructType) model.bindings().get(
-            model.symbols().lookupType(Name.of("DateRange")).orElseThrow()
+            model.symbols().lookupType(Name.of("test", "DateRange")).orElseThrow()
         );
 
         assertEquals(1, dateRange.constraints().size(), "Should have one constraint");
@@ -93,6 +101,8 @@ class CheckConstraintsTest {
     @Test
     void structWithMultipleNamedConstraints() {
         String source = """
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Person AS STRUCT (
               name STRING,
               age INT32,
@@ -106,7 +116,7 @@ class CheckConstraintsTest {
         assertFalse(model.diags().hasError(), "Should have no errors");
 
         StructType person = (StructType) model.bindings().get(
-            model.symbols().lookupType(Name.of("Person")).orElseThrow()
+            model.symbols().lookupType(Name.of("test", "Person")).orElseThrow()
         );
 
         assertEquals(2, person.constraints().size(), "Should have two constraints");
@@ -128,6 +138,8 @@ class CheckConstraintsTest {
     @Test
     void structWithDirectCheckShouldFail() {
         String source = """
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE DateRange AS STRUCT (
               startDate INT32,
               endDate INT32
@@ -143,6 +155,8 @@ class CheckConstraintsTest {
     @Test
     void structWithDuplicateConstraintNamesShouldFail() {
         String source = """
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Person AS STRUCT (
               age INT32,
               weight INT32
@@ -159,6 +173,8 @@ class CheckConstraintsTest {
     @Test
     void constraintReferencingUnknownFieldShouldFail() {
         String source = """
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Person AS STRUCT (
               age INT32
             )
@@ -173,6 +189,8 @@ class CheckConstraintsTest {
     @Test
     void checkMustReturnBoolean() {
         String source = """
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Money AS SCALAR INT32
             CHECK (value + 10);
             """;

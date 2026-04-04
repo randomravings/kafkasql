@@ -63,6 +63,11 @@ public final class TypeBuilder {
         
         for (Stmt stmt : script.statements()) {
             if (stmt instanceof CreateStmt ct && ct.decl() instanceof TypeDecl decl) {
+                // Skip declarations that failed resolution (not in symbol table)
+                // — a diagnostic was already emitted by DeclResolver.
+                if (symbols.nameOf(decl).isEmpty()) {
+                    continue;
+                }
                 visitor.buildRuntimeType(decl);
             }
         }

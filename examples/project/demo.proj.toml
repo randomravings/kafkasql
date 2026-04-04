@@ -1,0 +1,34 @@
+# KafkaSQL project file
+# ─────────────────────────────────────────────────────────────────────────────
+# This file uses TOML syntax.
+#
+# [project]          — required; project identity and source layout
+# [compatibility.*]  — optional; override diff/compatibility severity rules
+# [lint.naming]  — optional; per-rule lint severity overrides (OFF to disable)
+#
+# Run 'kafkasql rules' to dump all compatibility defaults you can override.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[project]
+name  = "demo-project"
+kafka = "kafka"
+
+
+# ── Compatibility overrides (all commented = use built-in defaults) ───────────
+
+# [compatibility.struct.field]
+# type_changed = "WARNING"   # relax for internal-only schemas
+
+# [compatibility.enum]
+# symbol_added = "SAFE"
+
+
+# ── Lint overrides (commented = use built-in defaults) ──────────────────────
+# Set a severity or "OFF" to disable a rule entirely.
+# Valid values: OFF  INFO  WARNING  ERROR  FATAL
+
+# [lint.naming]
+# pascal-case-types           = "WARNING"   # type names should use PascalCase
+# pascal-case-fields          = "WARNING"   # struct fields / union members should use PascalCase
+# screaming-snake-case-enums  = "WARNING"   # enum symbols should use SCREAMING_SNAKE_CASE
+# exact-case-member-reference = "WARNING"   # union member references should match declaration case

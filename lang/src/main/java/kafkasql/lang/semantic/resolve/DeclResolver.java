@@ -95,9 +95,9 @@ public final class DeclResolver {
     ) {
         Optional<Name> canonicalFqn = Optional.empty();
         
-        // Only STREAMs require an active context
-        // ContextDecl and TypeDecl can be created at global scope
-        if (stmt.decl() instanceof StreamDecl) {
+        // TYPEs and STREAMs must live inside a context (namespace)
+        // Only ContextDecl can be created at global scope
+        if (stmt.decl() instanceof TypeDecl || stmt.decl() instanceof StreamDecl) {
             canonicalFqn = requireActiveContext(scope, diags, stmt.decl());
             if (canonicalFqn.isEmpty())
                 return;

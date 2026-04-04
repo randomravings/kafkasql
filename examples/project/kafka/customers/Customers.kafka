@@ -1,0 +1,12 @@
+INCLUDE 'Customer.kafka';
+
+USE CONTEXT customers;
+
+CREATE STREAM Customers (
+    TYPE CustomerRecord AS STRUCT (
+        Key   INT32,
+        Value customers.Customer
+    )
+    DISTRIBUTE BY (Key)
+)
+COMMENT 'Main customers stream';

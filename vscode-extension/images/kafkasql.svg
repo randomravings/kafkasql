@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Stream: horizontal flow lines -->
+  <path d="M2 8 Q7 6 12 8 Q17 10 22 8"/>
+  <path d="M2 12 Q7 10 12 12 Q17 14 22 12"/>
+  <path d="M2 16 Q7 14 12 16 Q17 18 22 16"/>
+  <!-- SQL bracket hint: small vertical ticks at start -->
+  <line x1="2" y1="6" x2="2" y2="18"/>
+  <line x1="22" y1="6" x2="22" y2="18"/>
+</svg>

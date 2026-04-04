@@ -1,0 +1,6 @@
+-- Context declaration file for the 'orders' context.
+-- Lives at kafka/orders.kafka (depth 1 from kafka root — no folder constraint).
+-- Other files that need this context: INCLUDE 'orders.kafka'; USE CONTEXT orders;
+
+CREATE CONTEXT orders
+COMMENT 'Order management domain';

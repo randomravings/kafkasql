@@ -1,0 +1,8 @@
+INCLUDE '../example.kafka';
+
+USE CONTEXT com.example;
+
+CREATE TYPE Money AS SCALAR DECIMAL(18, 2)
+DEFAULT 0
+COMMENT 'Monetary value with 2 decimal places';
+

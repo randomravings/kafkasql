@@ -36,21 +36,42 @@ import kafkasql.linter.rules.ExactCaseMemberReferenceRule;
 public final class LintEngine {
     
     private final List<LintRule> rules;
+    private final LintSettings settings;
     
     /**
-     * Creates a lint engine with built-in rules.
+     * Creates a lint engine with built-in rules and default (empty) settings.
      */
     public LintEngine() {
-        this(builtInRules());
+        this(builtInRules(), LintSettings.defaults());
+    }
+
+    /**
+     * Creates a lint engine with built-in rules and the given settings.
+     *
+     * @param settings per-rule severity overrides
+     */
+    public LintEngine(LintSettings settings) {
+        this(builtInRules(), settings);
     }
     
     /**
-     * Creates a lint engine with specified rules.
+     * Creates a lint engine with specified rules and default (empty) settings.
      * 
      * @param rules list of lint rules to execute
      */
     public LintEngine(List<LintRule> rules) {
-        this.rules = List.copyOf(rules);
+        this(rules, LintSettings.defaults());
+    }
+
+    /**
+     * Creates a lint engine with specified rules and settings.
+     *
+     * @param rules    list of lint rules to execute
+     * @param settings per-rule severity overrides
+     */
+    public LintEngine(List<LintRule> rules, LintSettings settings) {
+        this.rules    = List.copyOf(rules);
+        this.settings = settings != null ? settings : LintSettings.defaults();
     }
     
     /**
@@ -79,7 +100,7 @@ public final class LintEngine {
         BindingEnv bindings
     ) {
         Diagnostics diags = new Diagnostics();
-        LintContextImpl ctx = new LintContextImpl(symbols, bindings, diags);
+        LintContextImpl ctx = new LintContextImpl(symbols, bindings, diags, settings);
         
         for (Script script : scripts) {
             visitScript(script, ctx);
@@ -177,6 +198,7 @@ public final class LintEngine {
     
     private void visitNode(AstNode node, LintContextImpl ctx) {
         for (LintRule rule : rules) {
+            if (!ctx.settings().isEnabled(rule.metadata().qualifiedId())) continue;
             ctx.setCurrentRule(rule);
             rule.analyze(node, ctx);
         }
@@ -189,12 +211,18 @@ public final class LintEngine {
         private final SymbolTable symbols;
         private final BindingEnv bindings;
         private final Diagnostics diagnostics;
+        private final LintSettings settings;
         private LintRule currentRule;
         
-        LintContextImpl(SymbolTable symbols, BindingEnv bindings, Diagnostics diagnostics) {
-            this.symbols = symbols;
-            this.bindings = bindings;
+        LintContextImpl(SymbolTable symbols, BindingEnv bindings, Diagnostics diagnostics, LintSettings settings) {
+            this.symbols     = symbols;
+            this.bindings    = bindings;
             this.diagnostics = diagnostics;
+            this.settings    = settings;
+        }
+
+        LintSettings settings() {
+            return settings;
         }
         
         void setCurrentRule(LintRule rule) {
@@ -203,7 +231,7 @@ public final class LintEngine {
         
         @Override
         public void report(Range range, String message) {
-            report(range, currentRule.metadata().defaultSeverity(), message);
+            report(range, settings.effectiveSeverity(currentRule.metadata()), message);
         }
         
         @Override

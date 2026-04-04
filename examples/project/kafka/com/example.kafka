@@ -1,0 +1,10 @@
+-- Context declaration file for the 'com.example' context.
+-- Lives at kafka/com/example.kafka (depth 1 inside com/ — no content constraint).
+-- Files inside kafka/com/example/ must declare: USE CONTEXT com.example
+
+INCLUDE '../com.kafka';
+
+USE CONTEXT com;
+
+CREATE CONTEXT example
+COMMENT 'Example sub-domain under com';

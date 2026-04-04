@@ -1,0 +1,11 @@
+INCLUDE '../customers.kafka';
+
+USE CONTEXT customers;
+
+CREATE TYPE CustomerStatus AS ENUM (
+    ACTIVE   = 0,
+    INACTIVE = 1
+)
+DEFAULT CustomerStatus::ACTIVE
+COMMENT 'Status of a customer';
+

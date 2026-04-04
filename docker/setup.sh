@@ -15,7 +15,7 @@ docker compose -f "$SCRIPT_DIR/docker-compose.yml" exec kafka \
   kafka-topics.sh --bootstrap-server localhost:9092 \
     --create \
     --if-not-exists \
-    --topic SymbolEventLog \
+    --topic kafkasql-event-log \
     --partitions 1 \
     --replication-factor 1 \
     --config cleanup.policy=compact \

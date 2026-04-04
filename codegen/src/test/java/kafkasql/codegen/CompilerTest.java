@@ -19,6 +19,8 @@ class CompilerTest {
     @Test
     void testScalarCodeGen() {
         String script = """
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE PersonId AS SCALAR STRING;
             """;
         
@@ -27,9 +29,9 @@ class CompilerTest {
         Map<String, String> generated = compiler.compile();
         
         assertEquals(1, generated.size());
-        assertTrue(generated.containsKey("PersonId"));
+        assertTrue(generated.containsKey("test/PersonId"));
         
-        String code = generated.get("PersonId");
+        String code = generated.get("test/PersonId");
         assertTrue(code.contains("public record PersonId"));
         assertTrue(code.contains("String value"));
         assertTrue(code.contains("writeTo"), "scalar should have writeTo");
@@ -43,6 +45,8 @@ class CompilerTest {
     @Test
     void testEnumCodeGen() {
         String script = """
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Status AS ENUM (
                 PENDING = 0,
                 ACTIVE = 1,
@@ -55,9 +59,9 @@ class CompilerTest {
         Map<String, String> generated = compiler.compile();
         
         assertEquals(1, generated.size());
-        assertTrue(generated.containsKey("Status"));
+        assertTrue(generated.containsKey("test/Status"));
         
-        String code = generated.get("Status");
+        String code = generated.get("test/Status");
         assertTrue(code.contains("public enum Status"));
         assertTrue(code.contains("PENDING(0)"));
         assertTrue(code.contains("ACTIVE(1)"));
@@ -71,6 +75,8 @@ class CompilerTest {
     @Test
     void testStructCodeGen() {
         String script = """
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Person AS STRUCT (
                 id STRING,
                 name STRING,
@@ -83,9 +89,9 @@ class CompilerTest {
         Map<String, String> generated = compiler.compile();
         
         assertEquals(1, generated.size());
-        assertTrue(generated.containsKey("Person"));
+        assertTrue(generated.containsKey("test/Person"));
         
-        String code = generated.get("Person");
+        String code = generated.get("test/Person");
         assertTrue(code.contains("public record Person"));
         assertTrue(code.contains("String id"));
         assertTrue(code.contains("String name"));
@@ -99,6 +105,8 @@ class CompilerTest {
     @Test
     void testComplexStructCodeGen() {
         String script = """
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Status AS ENUM (
                 PENDING = 0,
                 ACTIVE = 1
@@ -114,8 +122,8 @@ class CompilerTest {
                 id STRING,
                 name STRING,
                 age INT32,
-                status Status,
-                address Address,
+                status test.Status,
+                address test.Address,
                 tags LIST<STRING>
             );
             """;
@@ -125,19 +133,19 @@ class CompilerTest {
         Map<String, String> generated = compiler.compile();
         
         assertEquals(3, generated.size());
-        assertTrue(generated.containsKey("Status"));
-        assertTrue(generated.containsKey("Address"));
-        assertTrue(generated.containsKey("Person"));
+        assertTrue(generated.containsKey("test/Status"));
+        assertTrue(generated.containsKey("test/Address"));
+        assertTrue(generated.containsKey("test/Person"));
         
-        String personCode = generated.get("Person");
-        assertTrue(personCode.contains("Status status"));
-        assertTrue(personCode.contains("Address address"));
+        String personCode = generated.get("test/Person");
+        assertTrue(personCode.contains("test.Status status"));
+        assertTrue(personCode.contains("test.Address address"));
         assertTrue(personCode.contains("List<String> tags"));
         
         System.out.println("Generated Status:");
-        System.out.println(generated.get("Status"));
+        System.out.println(generated.get("test/Status"));
         System.out.println("\nGenerated Address:");
-        System.out.println(generated.get("Address"));
+        System.out.println(generated.get("test/Address"));
         System.out.println("\nGenerated Person:");
         System.out.println(personCode);
     }

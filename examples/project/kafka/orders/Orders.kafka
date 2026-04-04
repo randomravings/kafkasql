@@ -1,0 +1,12 @@
+INCLUDE 'Order.kafka';
+
+USE CONTEXT orders;
+
+CREATE STREAM Orders (
+    TYPE OrderRecord AS STRUCT (
+        Key   INT32,
+        Value orders.Order
+    )
+    DISTRIBUTE BY (Key)
+)
+COMMENT 'Main orders stream';

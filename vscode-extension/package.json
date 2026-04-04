@@ -6,6 +6,24 @@
   "engines": { "vscode": "^1.60.0" },
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "kafkasqlExplorer",
+          "title": "KafkaSQL",
+          "icon": "./images/kafkasql.svg"
+        }
+      ]
+    },
+    "views": {
+      "kafkasqlExplorer": [
+        {
+          "id": "kafkasqlProjectExplorer",
+          "name": "Project",
+          "icon": "./images/kafkasql.svg"
+        }
+      ]
+    },
     "languages": [
       {
         "id": "kafkasql",
@@ -20,7 +38,96 @@
         "scopeName": "source.kafkasql",
         "path": "./syntaxes/kafkasql.tmLanguage.json"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "kafkasql.startServer",
+        "title": "KafkaSQL: Start Language Server"
+      },
+      {
+        "command": "kafkasql.selectForCompare",
+        "title": "KafkaSQL: Select for Compare"
+      },
+      {
+        "command": "kafkasql.compareWithSelected",
+        "title": "KafkaSQL: Compare with Selected"
+      },
+      {
+        "command": "kafkasql.compareWithActive",
+        "title": "KafkaSQL: Compare Active File With..."
+      },
+      {
+        "command": "kafkasql.changeComparisonMode",
+        "title": "KafkaSQL: Change Comparison Mode"
+      },
+      {
+        "command": "kafkasql.explorer.refresh",
+        "title": "KafkaSQL: Refresh Project Explorer",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "kafkasql.explorer.toggleFlatContexts",
+        "title": "KafkaSQL: Toggle Flat/Nested Contexts",
+        "icon": "$(list-flat)"
+      },
+      {
+        "command": "kafkasql.explorer.expandAll",
+        "title": "KafkaSQL: Expand All",
+        "icon": "$(expand-all)"
+      },
+      {
+        "command": "kafkasql.explorer.collapseAll",
+        "title": "KafkaSQL: Collapse All",
+        "icon": "$(collapse-all)"
+      },
+      {
+        "command": "kafkasql.explorer.openFile",
+        "title": "KafkaSQL: Open File"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "kafkasql.explorer.toggleFlatContexts",
+          "when": "view == kafkasqlProjectExplorer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "kafkasql.explorer.expandAll",
+          "when": "view == kafkasqlProjectExplorer",
+          "group": "navigation@2"
+        },
+        {
+          "command": "kafkasql.explorer.collapseAll",
+          "when": "view == kafkasqlProjectExplorer",
+          "group": "navigation@3"
+        },
+        {
+          "command": "kafkasql.explorer.refresh",
+          "when": "view == kafkasqlProjectExplorer",
+          "group": "navigation@4"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "kafkasql.selectForCompare",
+          "when": "resourceExtname == .kafka || resourceExtname == .kafkasql",
+          "group": "kafkasql@1"
+        },
+        {
+          "command": "kafkasql.compareWithSelected",
+          "when": "(resourceExtname == .kafka || resourceExtname == .kafkasql) && kafkasql.compareBase",
+          "group": "kafkasql@2"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "kafkasql.compareWithActive",
+          "when": "resourceExtname == .kafka || resourceExtname == .kafkasql",
+          "group": "kafkasql@1"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "tsc -p .",
@@ -29,7 +136,7 @@
   },
   "devDependencies": {
     "typescript": "^5.5.0",
-    "vscode": "^1.1.37",
+    "@types/vscode": "^1.60.0",
     "@types/node": "^20.0.0"
   },
   "dependencies": {

@@ -1,5 +1,5 @@
-INCLUDE 'sys/schema.kafka';
-INCLUDE 'sys/schema/EventType.kafka';
+INCLUDE '../schema.kafka';
+INCLUDE 'EventType.kafka';
 SET VERSION = 1;
 
 USE CONTEXT sys.schema;

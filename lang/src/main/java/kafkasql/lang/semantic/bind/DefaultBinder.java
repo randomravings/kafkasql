@@ -52,6 +52,11 @@ public final class DefaultBinder {
             if (!(ct.decl() instanceof TypeDecl typeDecl))
                 continue;
 
+            // Skip declarations that failed resolution (not in symbol table)
+            // — a diagnostic was already emitted by DeclResolver.
+            if (symbols.nameOf(typeDecl).isEmpty())
+                continue;
+
             Name name = symbols.nameOf(typeDecl).orElseThrow(() ->
                 new IllegalStateException("TypeDecl not in symbol table")
             );

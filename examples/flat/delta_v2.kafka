@@ -1,0 +1,51 @@
+-- v2 schema (the "after" state — apply the delta to reach this)
+
+CREATE CONTEXT example;
+USE CONTEXT example;
+
+CREATE TYPE Status AS ENUM (
+    ACTIVE    = 0    COMMENT 'Active',
+    PENDING   = 1    COMMENT 'Pending',
+    SUSPENDED = 2    COMMENT 'Suspended',   -- NEW symbol
+    DISABLED  = 4096 COMMENT 'Disabled'
+)
+COMMENT 'Customer status';
+
+CREATE TYPE Address AS STRUCT (
+    Street  STRING,
+    City    STRING,
+    Zip     STRING NULL,
+    Country STRING NULL    -- NEW field
+);
+
+CREATE TYPE Customer AS STRUCT (
+    Id      INT64,
+    Name    STRING NULL DEFAULT 'Unknown',
+    -- Email removed
+    Phone   STRING NULL,               -- NEW field replacing Email
+    Status  example.Status,
+    Home    example.Address,
+    Labels  LIST<STRING>               -- NEW field
+);
+
+-- OrderId union changed members → DROP + CREATE
+CREATE TYPE OrderId AS UNION (
+    ById    INT64,
+    ByCode  STRING(32),    -- length widened  → forces DROP+CREATE (union)
+    ByUuid  UUID           -- NEW member       → forces DROP+CREATE (union)
+);
+
+CREATE STREAM OrderEvents (
+    TYPE OrderCreated AS STRUCT (
+        OrderId    example.OrderId,
+        CustomerId INT64,
+        Total      DECIMAL(18, 2)
+    )
+    DISTRIBUTE BY (CustomerId),
+    TYPE OrderShipped AS STRUCT (         -- NEW stream member
+        OrderId    example.OrderId,
+        TrackingId STRING NULL
+    )
+    DISTRIBUTE BY (OrderId)
+    TIMESTAMP BY (TrackingId)
+);

@@ -21,6 +21,8 @@ class LinterTest {
     @DisplayName("PascalCase type names should pass")
     void pascalCaseTypesShouldPass() {
         var result = lintCode("""
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE UserStatus AS ENUM (ACTIVE = 1, INACTIVE = 2);
             CREATE TYPE HTTPResponse AS STRUCT (StatusCode INT32);
             """);
@@ -32,6 +34,8 @@ class LinterTest {
     @DisplayName("Non-PascalCase type names should warn")
     void nonPascalCaseTypesShouldWarn() {
         var result = lintCode("""
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE userStatus AS ENUM (ACTIVE = 1);
             CREATE TYPE user_status AS STRUCT (Id INT32);
             """);
@@ -49,6 +53,8 @@ class LinterTest {
     @DisplayName("SCREAMING_SNAKE_CASE enum symbols should pass")
     void screamingSnakeCaseEnumsShouldPass() {
         var result = lintCode("""
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Status AS ENUM (
                 ACTIVE = 1,
                 INACTIVE = 2,
@@ -64,6 +70,8 @@ class LinterTest {
     @DisplayName("Non-SCREAMING_SNAKE_CASE enum symbols should warn")
     void nonScreamingSnakeCaseEnumsShouldWarn() {
         var result = lintCode("""
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Status AS ENUM (
                 Active = 1,
                 inactive = 2,
@@ -81,6 +89,8 @@ class LinterTest {
     @DisplayName("PascalCase fields should pass")
     void pascalCaseFieldsShouldPass() {
         var result = lintCode("""
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE User AS STRUCT (
                 FirstName STRING,
                 LastName STRING,
@@ -95,6 +105,8 @@ class LinterTest {
     @DisplayName("Non-PascalCase fields should warn")
     void nonPascalCaseFieldsShouldWarn() {
         var result = lintCode("""
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE User AS STRUCT (
                 firstName STRING,
                 last_name STRING
@@ -114,6 +126,8 @@ class LinterTest {
     @DisplayName("PascalCase union members should pass")
     void pascalCaseUnionMembersShouldPass() {
         var result = lintCode("""
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Value AS UNION (
                 IntValue INT32,
                 StringValue STRING
@@ -127,13 +141,15 @@ class LinterTest {
     @DisplayName("Exact case union member references should pass")
     void exactCaseUnionMemberReferencesShouldPass() {
         var result = lintCode("""
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Status AS ENUM (ACTIVE = 1, INACTIVE = 2);
             CREATE TYPE Value AS UNION (
                 IntValue INT32,
-                StatusValue Status
+                StatusValue test.Status
             );
             CREATE TYPE Container AS STRUCT (
-                MyValue Value DEFAULT Value$IntValue(42)
+                MyValue test.Value DEFAULT test.Value$IntValue(42)
             );
             """);
         
@@ -144,13 +160,15 @@ class LinterTest {
     @DisplayName("Wrong case union member references should warn")
     void wrongCaseUnionMemberReferencesShouldWarn() {
         var result = lintCode("""
+            CREATE CONTEXT test;
+            USE CONTEXT test;
             CREATE TYPE Status AS ENUM (ACTIVE = 1, INACTIVE = 2);
             CREATE TYPE Value AS UNION (
                 IntValue INT32,
-                StatusValue Status
+                StatusValue test.Status
             );
             CREATE TYPE Container AS STRUCT (
-                MyValue Value DEFAULT Value$intValue(42)
+                MyValue test.Value DEFAULT test.Value$intValue(42)
             );
             """);
         

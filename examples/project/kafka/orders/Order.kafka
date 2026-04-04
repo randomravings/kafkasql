@@ -1,0 +1,10 @@
+INCLUDE '../orders.kafka';
+INCLUDE 'OrderStatus.kafka';
+
+USE CONTEXT orders;
+
+CREATE TYPE Order AS STRUCT (
+    Id     INT32,
+    Status orders.OrderStatus
+)
+COMMENT 'An order record';

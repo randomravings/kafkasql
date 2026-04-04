@@ -1,0 +1,12 @@
+INCLUDE 'Money.kafka';
+
+USE CONTEXT com.example;
+
+CREATE STREAM Payments (
+    TYPE PaymentRecord AS STRUCT (
+        Key   INT32,
+        Value com.example.Money
+    )
+    DISTRIBUTE BY (Key)
+)
+COMMENT 'Payments stream for the example domain';

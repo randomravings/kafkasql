@@ -3,6 +3,7 @@ package kafkasql.pipeline.phases;
 import kafkasql.runtime.diagnostics.Diagnostics;
 import kafkasql.lang.semantic.SemanticModel;
 import kafkasql.linter.LintEngine;
+import kafkasql.linter.LintSettings;
 import kafkasql.pipeline.Phase;
 import kafkasql.pipeline.PhaseResult;
 import kafkasql.pipeline.PipelineContext;
@@ -13,18 +14,12 @@ import kafkasql.pipeline.PipelineModel;
  * 
  * <p>Produces lint warnings but does not stop pipeline execution.
  * Warnings are advisory only.
+ *
+ * <p>Lint rule severities are read from {@link PipelineContext#lintSettings()},
+ * so callers can customise or disable individual rules without rebuilding the
+ * pipeline.
  */
 public final class LintPhase implements Phase {
-    
-    private final LintEngine linter;
-    
-    public LintPhase() {
-        this.linter = new LintEngine();
-    }
-    
-    public LintPhase(LintEngine linter) {
-        this.linter = linter;
-    }
     
     @Override
     public String name() {
@@ -43,6 +38,7 @@ public final class LintPhase implements Phase {
             throw new IllegalStateException("SemanticPhase must run before LintPhase");
         }
         
+        LintEngine linter = new LintEngine(context.lintSettings());
         var parseResult = model.parseResult();
         
         Diagnostics lintDiags = linter.lint(

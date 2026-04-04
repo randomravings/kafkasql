@@ -1,0 +1,13 @@
+INCLUDE '../orders.kafka';
+
+USE CONTEXT orders;
+
+CREATE TYPE OrderStatus AS ENUM (
+    PENDING   = 0,
+    SHIPPED   = 1,
+    DELIVERED = 2,
+    CANCELLED = 3
+)
+DEFAULT OrderStatus::PENDING
+COMMENT 'Status of an order';
+

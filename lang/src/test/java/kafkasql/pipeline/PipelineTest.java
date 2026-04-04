@@ -27,6 +27,8 @@ class PipelineTest {
         
         var context = PipelineContext.builder()
             .inputs(List.of(new StringInput("test", """
+                CREATE CONTEXT test;
+                USE CONTEXT test;
                 CREATE TYPE Status AS ENUM (ACTIVE = 1, INACTIVE = 2);
                 """)))
             .workingDir(Paths.get("."))
@@ -73,6 +75,8 @@ class PipelineTest {
         
         var context = PipelineContext.builder()
             .inputs(List.of(new StringInput("test", """
+                CREATE CONTEXT test;
+                USE CONTEXT test;
                 CREATE TYPE Test AS STRUCT (
                     Field UnknownType
                 );
@@ -99,6 +103,8 @@ class PipelineTest {
         
         var context = PipelineContext.builder()
             .inputs(List.of(new StringInput("test", """
+                CREATE CONTEXT test;
+                USE CONTEXT test;
                 CREATE TYPE userStatus AS ENUM (Active = 1);
                 """)))
             .workingDir(Paths.get("."))

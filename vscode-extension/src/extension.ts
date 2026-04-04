@@ -4,10 +4,20 @@ import * as path from 'path';
 import { LanguageClient, StreamInfo } from 'vscode-languageclient/node';
 import * as fs from 'fs';
 import os = require('os');
+import { KafkaSqlProjectExplorer } from './kafkaSqlProjectExplorer';
 
 let client: LanguageClient | null = null;
 let serverProc: ChildProcess | null = null;
 let includeDiagnostics: vscode.DiagnosticCollection;
+let diffDiagnostics: vscode.DiagnosticCollection;
+
+// URI stored by "Select for Compare"
+let compareBaseUri: vscode.Uri | undefined;
+
+// ── Comparison mode state ────────────────────────────────────────────────────
+type ComparisonMode = 'none' | 'git';
+let currentMode: ComparisonMode = 'git';
+let modeStatusBar: vscode.StatusBarItem;
 
 function findBuiltServerJar(workspaceRoot: string): string | null {
   try {
@@ -113,7 +123,9 @@ async function startServer(context: vscode.ExtensionContext) {
 
   client = new LanguageClient('kafkasql', 'KafkaSQL Language Server', serverOptions, clientOptions);
   context.subscriptions.push(client);
-  client.start();
+  await client.start();
+  // Sync current comparison mode to newly started LSP server
+  sendModeToLsp(currentMode);
   vscode.window.showInformationMessage('KafkaSQL language server started');
 }
 
@@ -148,12 +160,195 @@ async function collectAllIncludes(entryPath: string, workspaceRoot: string, seen
 //   byUri.computeIfAbsent(uri, k -> new ArrayList<>()).add(d);
 // }
 
+// ── Semantic diff types (mirror of Java DiffEntry serialized by Gson) ────────
+
+interface DiffPos   { ln: number; ch: number; }
+interface DiffRange { source: string; from: DiffPos; to: DiffPos; }
+interface DiffEntryResponse {
+  kind: string;       // LEFT_ONLY | RIGHT_ONLY | MODIFIED | UNCHANGED
+  severity: string;   // BREAKING | WARNING | SAFE | INFO
+  leftRange:  DiffRange | null;
+  rightRange: DiffRange | null;
+  aspect: string;
+  message: string;
+}
+
+/** Call the LSP semanticDiff command and show results as diagnostics on rightUri. */
+async function runSemanticDiff(leftUri: vscode.Uri, rightUri: vscode.Uri): Promise<void> {
+  if (!client) return;
+  diffDiagnostics.delete(rightUri);
+  try {
+    const result = await client.sendRequest('workspace/executeCommand', {
+      command: 'kafkasql.semanticDiff',
+      arguments: [leftUri.fsPath, rightUri.fsPath]
+    });
+
+    if (!Array.isArray(result)) {
+      if (result && typeof result === 'object' && 'error' in (result as object)) {
+        vscode.window.showErrorMessage(`KafkaSQL diff error: ${(result as { error: string }).error}`);
+      }
+      return;
+    }
+
+    const entries = result as DiffEntryResponse[];
+    const diags: vscode.Diagnostic[] = [];
+
+    for (const entry of entries) {
+      // For removed items (LEFT_ONLY) there is no rightRange; show at top of right file
+      const rng = entry.rightRange ?? entry.leftRange;
+      if (!rng) continue;
+
+      // Java Pos uses 1-based lines; VS Code uses 0-based
+      const start = new vscode.Position(Math.max(0, rng.from.ln - 1), Math.max(0, rng.from.ch));
+      const end   = new vscode.Position(Math.max(0, rng.to.ln - 1),   Math.max(0, rng.to.ch));
+      const diag  = new vscode.Diagnostic(new vscode.Range(start, end), entry.message, mapSeverity(entry.severity));
+      diag.source = 'kafkasql-diff';
+      diag.code   = entry.aspect;
+      diags.push(diag);
+    }
+
+    diffDiagnostics.set(rightUri, diags);
+
+    if (diags.length === 0) {
+      vscode.window.showInformationMessage('KafkaSQL: no compatibility issues detected');
+    } else {
+      const breaking = diags.filter(d => d.severity === vscode.DiagnosticSeverity.Error).length;
+      const msg = breaking > 0
+        ? `KafkaSQL: ${breaking} breaking change(s), ${diags.length} total — see Problems panel`
+        : `KafkaSQL: ${diags.length} change(s) — see Problems panel`;
+      vscode.window.showInformationMessage(msg);
+    }
+  } catch (err: unknown) {
+    console.error('KafkaSQL semanticDiff failed:', err);
+  }
+}
+
+function mapSeverity(s: string): vscode.DiagnosticSeverity {
+  switch (s) {
+    case 'BREAKING': return vscode.DiagnosticSeverity.Error;
+    case 'WARNING':  return vscode.DiagnosticSeverity.Warning;
+    case 'SAFE':     return vscode.DiagnosticSeverity.Information;
+    default:         return vscode.DiagnosticSeverity.Hint;
+  }
+}
+
+function modeLabel(mode: ComparisonMode): string {
+  switch (mode) {
+    case 'none': return '$(circle-slash) Compat: Off';
+    case 'git':  return '$(git-compare) Compat: Git HEAD';
+  }
+}
+
+async function sendModeToLsp(mode: ComparisonMode): Promise<void> {
+  if (!client) return;
+  try {
+    await client.sendRequest('workspace/executeCommand', {
+      command: 'kafkasql.setComparisonMode',
+      arguments: [mode.toUpperCase(), null]
+    });
+  } catch (err) {
+    console.error('kafkasql.setComparisonMode failed:', err);
+  }
+}
+
+// Quick-pick items carry the mode in the description tag so we can avoid
+// depending on QuickPickItem.detail which was missing in older vscode API types.
+interface ModeItem extends vscode.QuickPickItem {
+  mode: ComparisonMode;
+}
+
+async function pickComparisonMode(): Promise<void> {
+  const items: ModeItem[] = [
+    { label: '$(git-compare) Git HEAD',    description: 'Compare against the last committed version', mode: 'git'  },
+    { label: '$(circle-slash) Off',        description: 'Disable compatibility checking',             mode: 'none' },
+  ];
+
+  const picked = await vscode.window.showQuickPick<ModeItem>(items, {
+    placeHolder: 'KafkaSQL: select compatibility check mode'
+  });
+  if (!picked) return;
+
+  const mode = picked.mode;
+
+  currentMode = mode;
+  modeStatusBar.text = modeLabel(currentMode);
+  await sendModeToLsp(currentMode);
+
+  vscode.window.showInformationMessage(
+    `KafkaSQL compatibility mode: ${modeStatusBar.text.replace(/\$\([^)]+\) /, '')}`
+  );
+}
+
 export function activate(context: vscode.ExtensionContext) {
   includeDiagnostics = vscode.languages.createDiagnosticCollection('kafkasql-includes');
   context.subscriptions.push(includeDiagnostics);
 
+  diffDiagnostics = vscode.languages.createDiagnosticCollection('kafkasql-diff');
+  context.subscriptions.push(diffDiagnostics);
+
   context.subscriptions.push(
     vscode.commands.registerCommand('kafkasql.startServer', () => startServer(context))
+  );
+
+  // ── Compare commands ──────────────────────────────────────────────────────
+
+  // Step 1: right-click a .kafka file → remember it as the left side
+  context.subscriptions.push(
+    vscode.commands.registerCommand('kafkasql.selectForCompare', (uri: vscode.Uri) => {
+      compareBaseUri = uri;
+      // Expose the context key so the "Compare with Selected" menu item becomes visible
+      vscode.commands.executeCommand('setContext', 'kafkasql.compareBase', true);
+      vscode.window.showInformationMessage(
+        `KafkaSQL: selected ${path.basename(uri.fsPath)} as compare base`
+      );
+    })
+  );
+
+  // Step 2: right-click another .kafka file → open native diff editor
+  context.subscriptions.push(
+    vscode.commands.registerCommand('kafkasql.compareWithSelected', (uri: vscode.Uri) => {
+      if (!compareBaseUri) {
+        vscode.window.showErrorMessage('KafkaSQL: no base file selected — use "Select for Compare" first');
+        return;
+      }
+      const left  = compareBaseUri;
+      const right = uri;
+      const title = `${path.basename(left.fsPath)} ↔ ${path.basename(right.fsPath)}`;
+      vscode.commands.executeCommand('vscode.diff', left, right, title);
+      runSemanticDiff(left, right);
+    })
+  );
+
+  // Bonus: from the active editor, open a file picker to choose the right side
+  context.subscriptions.push(
+    vscode.commands.registerCommand('kafkasql.compareWithActive', async (uri?: vscode.Uri) => {
+      const leftUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+      if (!leftUri) {
+        vscode.window.showErrorMessage('KafkaSQL: no active file to compare');
+        return;
+      }
+      const picks = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        filters: { 'KafkaSQL files': ['kafka', 'kafkasql'] }
+      });
+      if (!picks || picks.length === 0) return;
+      const rightUri = picks[0];
+      const title = `${path.basename(leftUri.fsPath)} ↔ ${path.basename(rightUri.fsPath)}`;
+      vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
+      runSemanticDiff(leftUri, rightUri);
+    })
+  );
+
+  // ── Comparison mode status bar ─────────────────────────────────────────────
+  modeStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  modeStatusBar.command = 'kafkasql.changeComparisonMode';
+  modeStatusBar.tooltip  = 'KafkaSQL: click to change compatibility check mode';
+  modeStatusBar.text     = modeLabel(currentMode);
+  modeStatusBar.show();
+  context.subscriptions.push(modeStatusBar);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('kafkasql.changeComparisonMode', () => pickComparisonMode())
   );
 
   const out = vscode.window.createOutputChannel('KafkaSQL Debug');
@@ -173,6 +368,48 @@ export function activate(context: vscode.ExtensionContext) {
     if (active) out.appendLine(`[ext] active editor: ${active.document.uri.toString()}`);
   });
   context.subscriptions.push(diagListener);
+
+  // ── Project explorer tree view ───────────────────────────────────────────────────
+  const sendLspCommand = (cmd: string, args: any[]): Promise<any> => {
+    if (!client) return Promise.reject(new Error('LSP not ready'));
+    return client.sendRequest('workspace/executeCommand', { command: cmd, arguments: args });
+  };
+  const explorer = new KafkaSqlProjectExplorer(context, sendLspCommand);
+  const treeView = vscode.window.createTreeView('kafkasqlProjectExplorer', {
+    treeDataProvider: explorer,
+    showCollapseAll: false,
+  });
+  context.subscriptions.push(treeView);
+
+  // Watch connections.toml files and refresh the explorer
+  const connectionsWatcher = vscode.workspace.createFileSystemWatcher('**/connections.toml');
+  const doExplorerRefresh = () => explorer.refresh().catch(console.error);
+  connectionsWatcher.onDidChange(doExplorerRefresh);
+  connectionsWatcher.onDidCreate(doExplorerRefresh);
+  connectionsWatcher.onDidDelete(doExplorerRefresh);
+  context.subscriptions.push(connectionsWatcher);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('kafkasql.explorer.refresh', () => explorer.refresh()),
+    vscode.commands.registerCommand('kafkasql.explorer.toggleFlatContexts', () => explorer.toggleFlatContexts()),
+    vscode.commands.registerCommand('kafkasql.explorer.expandAll', async () => {
+      for (const node of explorer.getProjectNodes()) {
+        await treeView.reveal(node, { expand: 5 });
+      }
+    }),
+    vscode.commands.registerCommand('kafkasql.explorer.collapseAll', () => {
+      vscode.commands.executeCommand('workbench.actions.treeView.kafkasqlProjectExplorer.collapseAll');
+    }),
+    vscode.commands.registerCommand(
+      'kafkasql.explorer.openFile',
+      (filePath: string, line: number) => {
+        vscode.window.showTextDocument(vscode.Uri.file(filePath), {
+          selection: new vscode.Range(line, 0, line, 0),
+          preview: false,
+        });
+      }
+    )
+  );
 
   startServer(context).catch(err => {
     console.error('Failed to start KafkaSQL LSP:', err);

@@ -1,0 +1,39 @@
+-- v1 schema (the "before" state)
+
+CREATE CONTEXT example;
+USE CONTEXT example;
+
+CREATE TYPE Status AS ENUM (
+    ACTIVE   = 0 COMMENT 'Active',
+    PENDING  = 1 COMMENT 'Pending',
+    DISABLED = 4096 COMMENT 'Disabled'
+)
+COMMENT 'Customer status';
+
+CREATE TYPE Address AS STRUCT (
+    Street STRING,
+    City   STRING,
+    Zip    STRING NULL
+);
+
+CREATE TYPE Customer AS STRUCT (
+    Id     INT64,
+    Name   STRING NULL DEFAULT 'Unknown',
+    Email  STRING NULL,
+    Status example.Status,
+    Home   example.Address
+);
+
+CREATE TYPE OrderId AS UNION (
+    ById   INT64,
+    ByCode STRING(16)
+);
+
+CREATE STREAM OrderEvents (
+    TYPE OrderCreated AS STRUCT (
+        OrderId    example.OrderId,
+        CustomerId INT64,
+        Total      DECIMAL(18, 2)
+    )
+    DISTRIBUTE BY (CustomerId)
+);

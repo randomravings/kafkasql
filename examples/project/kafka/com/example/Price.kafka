@@ -1,0 +1,6 @@
+INCLUDE 'Money.kafka';
+
+USE CONTEXT com.example;
+
+CREATE TYPE Price AS com.example.Money
+COMMENT 'Alias for Money used in pricing contexts';

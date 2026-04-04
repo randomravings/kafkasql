@@ -1,0 +1,9 @@
+INCLUDE 'Money.kafka';
+
+USE CONTEXT com.example;
+
+CREATE TYPE Amount AS UNION (
+    Absolute  com.example.Money,
+    Relative  DECIMAL(5, 2)
+)
+COMMENT 'A fixed monetary amount or a percentage';
