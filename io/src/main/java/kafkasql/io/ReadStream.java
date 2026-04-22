@@ -15,6 +15,10 @@ import java.util.Iterator;
  * Polls a Kafka topic for {@code byte[]} values and deserializes them via
  * a caller-supplied {@link Deserializer}. Does not own the consumer — the
  * caller manages its lifecycle.
+ * <p>
+ * This is a general-purpose streaming consumer intended for use by
+ * generated stream classes. For full-replay-from-beginning semantics
+ * (e.g. event-sourced state reconstruction) use {@link ReplayStream}.
  *
  * @param <T> The type of messages read from the stream
  */
@@ -37,10 +41,10 @@ public final class ReadStream<T> implements StreamReader<T> {
         Deserializer<T> deserializer,
         Duration pollTimeout
     ) {
-        this.streamName = streamName;
-        this.consumer = consumer;
+        this.streamName   = streamName;
+        this.consumer     = consumer;
         this.deserializer = deserializer;
-        this.pollTimeout = pollTimeout != null ? pollTimeout : Duration.ofMillis(100);
+        this.pollTimeout  = pollTimeout != null ? pollTimeout : Duration.ofMillis(100);
         consumer.subscribe(Collections.singletonList(streamName));
     }
 
@@ -62,16 +66,12 @@ public final class ReadStream<T> implements StreamReader<T> {
         if (currentBatch != null && currentBatch.hasNext()) {
             return deserializer.deserialize(currentBatch.next().value());
         }
-
         ConsumerRecords<byte[], byte[]> records = consumer.poll(pollTimeout);
         if (records.isEmpty()) {
             return null;
         }
-
         currentBatch = records.iterator();
-        if (currentBatch.hasNext()) {
-            return deserializer.deserialize(currentBatch.next().value());
-        }
-        return null;
+        return deserializer.deserialize(currentBatch.next().value());
     }
 }
+

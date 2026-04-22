@@ -498,15 +498,20 @@ public final class ExpressionBinder {
     // ---------------------------------------------------------------------
 
     private boolean isNumeric(AnyType t) {
-        return t instanceof PrimitiveType pt &&
+        AnyType base = t instanceof ScalarType s ? s.primitive() : t;
+        return base instanceof PrimitiveType pt &&
             (pt.isIntegerKind() || pt.isNumericKind());
     }
 
     private boolean areComparable(AnyType a, AnyType b) {
         if (a == b) return true;
         if (a == null || b == null) return false;
-        if (isNumeric(a) && isNumeric(b)) return true;
-        if (a.getClass().equals(b.getClass())) return true;
+        // Unwrap scalar types to their underlying primitive for comparability
+        AnyType ua = a instanceof ScalarType s ? s.primitive() : a;
+        AnyType ub = b instanceof ScalarType s ? s.primitive() : b;
+        if (isNumeric(ua) && isNumeric(ub)) return true;
+        if (ua instanceof PrimitiveType pa && ub instanceof PrimitiveType pb && pa.kind() == pb.kind()) return true;
+        if (ua.getClass().equals(ub.getClass())) return true;
         return false;
     }
 

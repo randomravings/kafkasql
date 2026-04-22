@@ -449,7 +449,20 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         @Override
         public Identifier visitIdentifier(SqlStreamParser.IdentifierContext ctx) {
-            if (ctx.ID() == null) {
+            // ID is the common case; keyword alternatives are soft-keywords used
+            // as identifiers (e.g. a field named "End" or "Group").
+            org.antlr.v4.runtime.tree.TerminalNode token =
+                ctx.ID() != null         ? ctx.ID()         :
+                ctx.END() != null        ? ctx.END()        :
+                ctx.GROUP() != null      ? ctx.GROUP()      :
+                ctx.BEGINNING() != null  ? ctx.BEGINNING()  :
+                ctx.OFFSETS() != null    ? ctx.OFFSETS()    :
+                ctx.TIMESTAMPS() != null ? ctx.TIMESTAMPS() :
+                ctx.AFTER() != null      ? ctx.AFTER()      :
+                ctx.RECORDS() != null    ? ctx.RECORDS()    :
+                ctx.SECONDS() != null    ? ctx.SECONDS()    :
+                ctx.IDLE() != null       ? ctx.IDLE()       : null;
+            if (token == null) {
                 Range range = range(ctx);
                 _diags.syntaxError(
                     range,
@@ -457,7 +470,7 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
                 );
                 return new Identifier(range, "<error>");
             }
-            return new Identifier(range(ctx), ctx.ID().getText());
+            return new Identifier(range(ctx), token.getText());
         }
 
         @Override
@@ -993,8 +1006,129 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         public ReadStmt visitReadStmt(SqlStreamParser.ReadStmtContext ctx) {
             Range range = range(ctx);
             QName stream = visitQname(ctx.qname());
+            AstOptionalNode<ReadMode> mode = ctx.readConsumer() != null
+                ? AstOptionalNode.of(visitReadConsumer(ctx.readConsumer()), ReadMode.class)
+                : AstOptionalNode.empty(ReadMode.class);
+            AstOptionalNode<StopAfter> stopAfter = ctx.stopAfter() != null
+                ? AstOptionalNode.of(visitStopAfter(ctx.stopAfter()), StopAfter.class)
+                : AstOptionalNode.empty(StopAfter.class);
             AstListNode<ReadTypeBlock> blocks = visitReadBlockList(ctx.readBlockList());
-            return new ReadStmt(range, stream, blocks);
+            return new ReadStmt(range, stream, mode, stopAfter, blocks);
+        }
+
+        public ReadMode visitReadConsumer(SqlStreamParser.ReadConsumerContext ctx) {
+            Range range = range(ctx);
+            return switch (ctx) {
+                case SqlStreamParser.FromGroupConsumerContext jg -> {
+                    if (jg.GROUP() == null || jg.STRING_LIT() == null) {
+                        reportSyntaxError(range, "Expected: FROM GROUP '<group-name>'");
+                        yield new ReadMode.FromGroup(range, "<error>", Optional.empty());
+                    }
+                    String groupId = unquote(jg.STRING_LIT().getText());
+                    Optional<Boolean> reset = Optional.empty();
+                    if (jg.groupReset() != null)
+                        reset = Optional.of(jg.groupReset().BEGINNING() != null);
+                    yield new ReadMode.FromGroup(range, groupId, reset);
+                }
+                case SqlStreamParser.FromConsumerContext fc -> visitFromBound(fc.fromBound());
+                default -> throw new IllegalStateException("Unknown readConsumer alternative: " + ctx.getClass());
+            };
+        }
+
+        public ReadMode visitFromBound(SqlStreamParser.FromBoundContext ctx) {
+            Range range = range(ctx);
+            return switch (ctx) {
+                case SqlStreamParser.FromBeginningContext ignored ->
+                    new ReadMode.FromBeginning(range);
+                case SqlStreamParser.FromEndContext ignored ->
+                    new ReadMode.FromEnd(range);
+                case SqlStreamParser.FromTimestampContext ft -> {
+                    if (ft.STRING_LIT() == null) {
+                        reportSyntaxError(range, "Expected: FROM '<iso-timestamp>'");
+                        yield new ReadMode.FromTimestamp(range, "<error>");
+                    }
+                    yield new ReadMode.FromTimestamp(range, unquote(ft.STRING_LIT().getText()));
+                }
+                case SqlStreamParser.FromOffsetsContext fo -> {
+                    AstListNode<ReadMode.OffsetSpec> specs = new AstListNode<>(ReadMode.OffsetSpec.class);
+                    for (SqlStreamParser.OffsetSpecContext osc : fo.offsetSpec())
+                        specs.add(visitOffsetSpec(osc));
+                    yield new ReadMode.FromOffsets(range, specs);
+                }
+                case SqlStreamParser.FromTimestampsContext fts -> {
+                    AstListNode<ReadMode.TimestampSpec> specs = new AstListNode<>(ReadMode.TimestampSpec.class);
+                    for (SqlStreamParser.TimestampSpecContext tsc : fts.timestampSpec())
+                        specs.add(visitTimestampSpec(tsc));
+                    yield new ReadMode.FromTimestamps(range, specs);
+                }
+                default -> throw new IllegalStateException("Unknown fromBound alternative: " + ctx.getClass());
+            };
+        }
+
+        public ReadMode.OffsetSpec visitOffsetSpec(SqlStreamParser.OffsetSpecContext ctx) {
+            Range range = range(ctx);
+            if (ctx.NUMBER_LIT() == null || ctx.offsetPosition() == null) {
+                reportSyntaxError(range, "Expected <partition_index>: <offset>");
+                return new ReadMode.OffsetSpec(range, -1, new ReadMode.OffsetPosition.Beginning(range));
+            }
+            int partition = Integer.parseInt(ctx.NUMBER_LIT().getText());
+            ReadMode.OffsetPosition pos = visitOffsetPosition(ctx.offsetPosition());
+            return new ReadMode.OffsetSpec(range, partition, pos);
+        }
+
+        public ReadMode.OffsetPosition visitOffsetPosition(SqlStreamParser.OffsetPositionContext ctx) {
+            Range range = range(ctx);
+            return switch (ctx) {
+                case SqlStreamParser.OffsetBeginningContext ignored ->
+                    new ReadMode.OffsetPosition.Beginning(range);
+                case SqlStreamParser.OffsetEndContext ignored ->
+                    new ReadMode.OffsetPosition.End(range);
+                case SqlStreamParser.OffsetNumContext on ->
+                    new ReadMode.OffsetPosition.Offset(range, Long.parseLong(on.NUMBER_LIT().getText()));
+                default -> throw new IllegalStateException("Unknown offsetPosition alternative: " + ctx.getClass());
+            };
+        }
+
+        public ReadMode.TimestampSpec visitTimestampSpec(SqlStreamParser.TimestampSpecContext ctx) {
+            Range range = range(ctx);
+            if (ctx.NUMBER_LIT() == null || ctx.STRING_LIT() == null) {
+                reportSyntaxError(range, "Expected <partition_index>: '<iso-timestamp>'");
+                return new ReadMode.TimestampSpec(range, -1, "<error>");
+            }
+            int partition = Integer.parseInt(ctx.NUMBER_LIT().getText());
+            String ts = unquote(ctx.STRING_LIT().getText());
+            return new ReadMode.TimestampSpec(range, partition, ts);
+        }
+
+        public StopAfter visitStopAfter(SqlStreamParser.StopAfterContext ctx) {
+            Range range = range(ctx);
+            return switch (ctx) {
+                case SqlStreamParser.StopRecordsContext sr -> {
+                    if (sr.NUMBER_LIT() == null) {
+                        reportSyntaxError(range, "STOP AFTER requires a positive integer");
+                        yield new StopAfter.Records(range, 0);
+                    }
+                    yield new StopAfter.Records(range, Long.parseLong(sr.NUMBER_LIT().getText()));
+                }
+                case SqlStreamParser.StopSecondsContext ss -> {
+                    if (ss.NUMBER_LIT() == null) {
+                        reportSyntaxError(range, "STOP AFTER requires a positive integer");
+                        yield new StopAfter.Seconds(range, 0);
+                    }
+                    yield new StopAfter.Seconds(range, Long.parseLong(ss.NUMBER_LIT().getText()));
+                }
+                case SqlStreamParser.StopSecondsIdleContext si -> {
+                    if (si.NUMBER_LIT() == null) {
+                        reportSyntaxError(range, "STOP AFTER requires a positive integer");
+                        yield new StopAfter.SecondsIdle(range, 0);
+                    }
+                    yield new StopAfter.SecondsIdle(range, Long.parseLong(si.NUMBER_LIT().getText()));
+                }
+                default -> {
+                    reportSyntaxError(range, "Unrecognised STOP AFTER variant");
+                    yield new StopAfter.Records(range, 0);
+                }
+            };
         }
 
         @Override
@@ -1510,7 +1644,10 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
 
         private Range range(ParserRuleContext c) {
             var start = c.getStart();
-            var stop = c.getStop();
+            var stop  = c.getStop();
+            // ANTLR contract: stop is null when a rule matches zero tokens.
+            // Use start as the end position to produce a zero-width range.
+            if (stop == null) stop = start;
             return new Range(
                     _source,
                     new Pos(start.getLine(), start.getCharPositionInLine()),

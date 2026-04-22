@@ -1,0 +1,12 @@
+-- read-test.kafka
+-- Tests reading records from each stream in the demo project.
+-- Run this with the Execute Statement button against a live cluster.
+
+-- ── customers.Customers — all active customers ────────────────────────────────
+
+READ FROM customers.Customers
+  FROM BEGINNING
+  STOP AFTER 10 SECONDS
+  TYPE CustomerRecord *
+  WHERE Value.Status = customers.CustomerStatus::ACTIVE;
+

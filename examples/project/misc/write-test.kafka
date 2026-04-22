@@ -1,0 +1,31 @@
+-- write-test.kafka
+-- Tests writing records to each stream in the demo project.
+-- Run this with the Execute Statement button against a live cluster.
+
+-- ── customers.Customers ──────────────────────────────────────────────────────
+
+WRITE TO customers.Customers
+  TYPE CustomerRecord
+  VALUES
+    ({ Key: 1, Value: { Id: 1, Name: 'Alice',   Status: customers.CustomerStatus::ACTIVE   } },
+    { Key: 2, Value: { Id: 2, Name: 'Bob',     Status: customers.CustomerStatus::INACTIVE } },
+    { Key: 3, Value: { Id: 3, Name: 'Charlie', Status: customers.CustomerStatus::ACTIVE   } });
+
+-- ── orders.Orders ────────────────────────────────────────────────────────────
+
+WRITE TO orders.Orders
+  TYPE OrderRecord
+  VALUES
+    ({ Key: 101, Value: { Id: 101, Status: orders.OrderStatus::PENDING   } },
+    { Key: 102, Value: { Id: 102, Status: orders.OrderStatus::SHIPPED   } },
+    { Key: 103, Value: { Id: 103, Status: orders.OrderStatus::DELIVERED } },
+    { Key: 104, Value: { Id: 104, Status: orders.OrderStatus::CANCELLED } });
+
+-- ── com.example.Payments ──────────────────────────────────────────────────────
+
+WRITE TO com.example.Payments
+  TYPE PaymentRecord
+  VALUES
+    ({ Key: 1001, Value: 29.99  },
+    { Key: 1002, Value: 149.00 },
+    { Key: 1003, Value: 0.01   });

@@ -77,7 +77,45 @@ explainStmt
 
 /* ─────────────────────── Read Statements ─────────────────── */
 readStmt
-  : READ FROM qname readBlockList
+  : READ FROM qname readConsumer? stopAfter? readBlockList
+  ;
+
+stopAfter
+  : STOP AFTER NUMBER_LIT RECORDS         # StopRecords
+  | STOP AFTER NUMBER_LIT SECONDS IDLE    # StopSecondsIdle
+  | STOP AFTER NUMBER_LIT SECONDS         # StopSeconds
+  ;
+
+readConsumer
+  : FROM GROUP STRING_LIT groupReset?                                       # FromGroupConsumer
+  | FROM fromBound                                                         # FromConsumer
+  ;
+
+groupReset
+  : BEGINNING
+  | END
+  ;
+
+fromBound
+  : BEGINNING                                                              # FromBeginning
+  | END                                                                    # FromEnd
+  | STRING_LIT                                                             # FromTimestamp
+  | OFFSETS LPAREN offsetSpec (COMMA offsetSpec)* RPAREN                  # FromOffsets
+  | TIMESTAMPS LPAREN timestampSpec (COMMA timestampSpec)* RPAREN         # FromTimestamps
+  ;
+
+offsetSpec
+  : NUMBER_LIT COLON offsetPosition
+  ;
+
+offsetPosition
+  : BEGINNING    # OffsetBeginning
+  | END          # OffsetEnd
+  | NUMBER_LIT   # OffsetNum
+  ;
+
+timestampSpec
+  : NUMBER_LIT COLON STRING_LIT
   ;
 
 readBlockList
@@ -503,4 +541,13 @@ dotPrefix
 
 identifier
   : ID
+  | END
+  | GROUP
+  | BEGINNING
+  | OFFSETS
+  | TIMESTAMPS
+  | AFTER
+  | RECORDS
+  | SECONDS
+  | IDLE
   ;

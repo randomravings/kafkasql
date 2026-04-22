@@ -102,6 +102,17 @@ public final class KafkaSqlProject {
      *   <li>{@code project/other/Order.kafka}                 → empty (outside kafka root)</li>
      * </ul>
      */
+    /**
+     * Returns {@code true} when the given file lives <em>outside</em> this project's
+     * kafka/model root — i.e. it is a misc / interactive script.  In that mode the
+     * editor grays out INCLUDE statements and symbol resolution is deferred to the
+     * live Kafka cluster rather than the local source tree.
+     */
+    public boolean isInteractiveFile(Path absoluteFilePath) {
+        Path file = absoluteFilePath.toAbsolutePath().normalize();
+        return !file.startsWith(kafkaRoot);
+    }
+
     public Optional<String> expectedContext(Path absoluteFilePath) {
         Path file = absoluteFilePath.toAbsolutePath().normalize();
         if (!file.startsWith(kafkaRoot)) return Optional.empty();

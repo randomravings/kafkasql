@@ -11,7 +11,7 @@
 
 [project]
 name  = "demo-project"
-kafka = "kafka"
+kafka = "model"
 
 
 # ── Compatibility overrides (all commented = use built-in defaults) ───────────

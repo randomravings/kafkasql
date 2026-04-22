@@ -83,6 +83,26 @@
       {
         "command": "kafkasql.explorer.openFile",
         "title": "KafkaSQL: Open File"
+      },
+      {
+        "command": "kafkasql.diffWithCluster",
+        "title": "KafkaSQL: Diff with Cluster",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "kafkasql.deployToCluster",
+        "title": "KafkaSQL: Deploy to Cluster",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "kafkasql.deployProjectToCluster",
+        "title": "KafkaSQL: Deploy to...",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "kafkasql.executeStatement",
+        "title": "KafkaSQL: Execute Statement",
+        "icon": "$(play)"
       }
     ],
     "menus": {
@@ -108,6 +128,20 @@
           "group": "navigation@4"
         }
       ],
+      "editor/title": [
+        {
+          "command": "kafkasql.executeStatement",
+          "when": "resourceExtname == .kafka || resourceExtname == .kafkasql",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "kafkasql.executeStatement",
+          "when": "resourceExtname == .kafka || resourceExtname == .kafkasql",
+          "group": "kafkasql@1"
+        }
+      ],
       "explorer/context": [
         {
           "command": "kafkasql.selectForCompare",
@@ -125,6 +159,23 @@
           "command": "kafkasql.compareWithActive",
           "when": "resourceExtname == .kafka || resourceExtname == .kafkasql",
           "group": "kafkasql@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "kafkasql.deployProjectToCluster",
+          "when": "view == kafkasqlProjectExplorer && viewItem == kafkasqlProject",
+          "group": "kafkasql@1"
+        },
+        {
+          "command": "kafkasql.diffWithCluster",
+          "when": "view == kafkasqlProjectExplorer && viewItem == kafkasqlConnection",
+          "group": "kafkasql@1"
+        },
+        {
+          "command": "kafkasql.deployToCluster",
+          "when": "view == kafkasqlProjectExplorer && viewItem == kafkasqlConnection",
+          "group": "kafkasql@2"
         }
       ]
     }

@@ -36,19 +36,26 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
-const child_process_1 = require("child_process");
 const path = __importStar(require("path"));
 const node_1 = require("vscode-languageclient/node");
 const fs = __importStar(require("fs"));
 const kafkaSqlProjectExplorer_1 = require("./kafkaSqlProjectExplorer");
 let client = null;
-let serverProc = null;
+let lspOutput; // module-level so startServer + commands can share it
+let resultsChannel;
 let includeDiagnostics;
 let diffDiagnostics;
+let clusterDiffDiagnostics;
 // URI stored by "Select for Compare"
 let compareBaseUri;
 let currentMode = 'git';
 let modeStatusBar;
+// ── File mode status bar ────────────────────────────────────────────────────
+let fileModeStatusBar;
+let executionStatusBar;
+// Per-file mode overrides set by the user: uri.toString() → 'file' | 'interactive'
+// Absent = auto-detect from file path.
+const fileModeOverrides = new Map();
 function findBuiltServerJar(workspaceRoot) {
     try {
         // walk upwards from workspaceRoot looking for lsp/build/libs/*.jar
@@ -75,75 +82,69 @@ function findBuiltServerJar(workspaceRoot) {
         return null;
     }
 }
-async function startServer(context) {
+async function startServer(context, onReady) {
     if (client) {
-        vscode.window.showInformationMessage('KafkaSQL language server already running');
+        lspOutput.appendLine('[kafkasql-lsp] server already running');
         return;
     }
-    const ws = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+    const ws = vscode.workspace.workspaceFolders?.[0];
     if (!ws) {
-        vscode.window.showErrorMessage('Open the workspace root to start the KafkaSQL language server.');
+        lspOutput.appendLine('[kafkasql-lsp][error] No workspace folder open — cannot start language server.');
         return;
     }
-    const openedFolder = ws.uri.fsPath;
-    const projectRoot = openedFolder;
-    if (projectRoot !== openedFolder) {
-        // opened a subfolder (examples). prefer the detected Gradle project root
-        vscode.window.showInformationMessage(`Using Gradle project root: ${projectRoot} (opened folder: ${openedFolder})`);
-    }
-    const dir = path.dirname(openedFolder);
-    const wsFolders = vscode.workspace.workspaceFolders;
-    const workspaceRoot = wsFolders && wsFolders.length > 0 ? wsFolders[0].uri.fsPath : dir;
-    // create output channel for server logs
-    const output = vscode.window.createOutputChannel('KafkaSQL LSP');
-    context.subscriptions.push(output);
-    // prefer the project/toolchain JAVA_HOME if available; fall back to process.env
-    const defaultJavaHome = process.env.JAVA_HOME || '/opt/homebrew/Cellar/openjdk@21/21.0.8/libexec/openjdk.jdk/Contents/Home';
-    const env = Object.assign({}, process.env, {
-        JAVA_HOME: defaultJavaHome
-    });
-    output.appendLine(`Using JAVA_HOME=${env.JAVA_HOME}`);
-    output.show(true);
-    // Prefer running the built language-server jar directly. Do not run Gradle/build tasks from the extension.
+    const workspaceRoot = ws.uri.fsPath;
     const serverJar = findBuiltServerJar(workspaceRoot);
     if (!serverJar) {
         const msg = 'Language server jar not found. Please build the project (produce lsp/build/libs/*.jar) and retry.';
-        output.appendLine(`[kafkasql-lsp][error] ${msg}`);
+        lspOutput.appendLine(`[kafkasql-lsp][error] ${msg}`);
         vscode.window.showErrorMessage(msg);
         return;
     }
-    output.appendLine(`Launching language server jar: ${serverJar}`);
-    const javaHome = env.JAVA_HOME || process.env.JAVA_HOME || '';
+    const defaultJavaHome = process.env.JAVA_HOME || '/opt/homebrew/Cellar/openjdk@21/21.0.8/libexec/openjdk.jdk/Contents/Home';
+    const env = { ...process.env, JAVA_HOME: defaultJavaHome };
+    const javaHome = env.JAVA_HOME || '';
     const javaBin = javaHome ? path.join(javaHome, 'bin', process.platform === 'win32' ? 'java.exe' : 'java') : 'java';
     const javaExe = fs.existsSync(javaBin) ? javaBin : 'java';
-    serverProc = (0, child_process_1.spawn)(javaExe, ['-jar', serverJar], { cwd: workspaceRoot, shell: false, env });
-    serverProc.on('error', (err) => {
-        output.appendLine('[kafkasql-lsp][error] Failed to spawn language server: ' + err.message);
-        vscode.window.showErrorMessage('Failed to spawn language server: ' + err.message);
-    });
-    serverProc.stderr?.on('data', (chunk) => {
-        // surface server stderr to output channel
-        output.appendLine('[kafkasql-lsp][stderr] ' + chunk.toString());
-        console.error('[kafkasql-lsp] ' + chunk.toString());
-    });
-    serverProc.stdout?.on('data', (chunk) => {
-        output.appendLine('[kafkasql-lsp][stdout] ' + chunk.toString());
-    });
-    serverProc.on('exit', (code, signal) => {
-        output.appendLine(`[kafkasql-lsp] language server process exited with code=${code} signal=${signal}`);
-    });
-    // prepare LanguageClient over stdio streams
-    const serverOptions = () => Promise.resolve({ reader: serverProc.stdout, writer: serverProc.stdin });
+    lspOutput.appendLine(`[kafkasql-lsp] Using JAVA_HOME=${env.JAVA_HOME}`);
+    lspOutput.appendLine(`[kafkasql-lsp] Launching jar: ${serverJar}`);
+    // Let vscode-languageclient own the process lifecycle — this avoids the
+    // manual-spawn race conditions and routes server stderr to lspOutput.
+    const serverOptions = {
+        run: { command: javaExe, args: ['-jar', serverJar], transport: node_1.TransportKind.stdio, options: { cwd: workspaceRoot, env } },
+        debug: { command: javaExe, args: ['-jar', serverJar], transport: node_1.TransportKind.stdio, options: { cwd: workspaceRoot, env } },
+    };
     const clientOptions = {
         documentSelector: [{ scheme: 'file', language: 'kafkasql' }],
-        outputChannelName: 'KafkaSQL LSP'
+        outputChannel: lspOutput,
+        revealOutputChannelOn: node_1.RevealOutputChannelOn.Never,
+        errorHandler: {
+            error(error, _message, _count) {
+                lspOutput.appendLine(`[kafkasql-lsp][error] ${error?.message ?? String(error)}`);
+                return { action: node_1.ErrorAction.Continue, handled: true };
+            },
+            closed() {
+                lspOutput.appendLine('[kafkasql-lsp] Server connection closed.');
+                return { action: node_1.CloseAction.DoNotRestart, handled: true };
+            },
+        },
     };
     client = new node_1.LanguageClient('kafkasql', 'KafkaSQL Language Server', serverOptions, clientOptions);
     context.subscriptions.push(client);
-    await client.start();
-    // Sync current comparison mode to newly started LSP server
-    sendModeToLsp(currentMode);
-    vscode.window.showInformationMessage('KafkaSQL language server started');
+    client.start().then(() => {
+        lspOutput.appendLine('[kafkasql-lsp] Server ready.');
+        sendModeToLsp(currentMode);
+        // Stream individual records to the output channel as they arrive from the server.
+        client.onNotification('kafkasql/record', (row) => {
+            const fieldStr = Object.entries(row.fields)
+                .map(([k, v]) => `${k}: ${JSON.stringify(v)}`)
+                .join(', ');
+            resultsChannel.appendLine(`  ${row.typeName} { ${fieldStr} }`);
+        });
+        onReady?.();
+    }).catch((err) => {
+        lspOutput.appendLine(`[kafkasql-lsp][error] Client start failed: ${err}`);
+        client = null;
+    });
 }
 async function collectAllIncludes(entryPath, workspaceRoot, seen = new Set()) {
     const absPath = path.isAbsolute(entryPath) ? entryPath : path.join(workspaceRoot, entryPath);
@@ -232,7 +233,7 @@ async function sendModeToLsp(mode) {
         });
     }
     catch (err) {
-        console.error('kafkasql.setComparisonMode failed:', err);
+        lspOutput?.appendLine(`[kafkasql-lsp] setComparisonMode failed: ${err}`);
     }
 }
 async function pickComparisonMode() {
@@ -251,22 +252,160 @@ async function pickComparisonMode() {
     await sendModeToLsp(currentMode);
     vscode.window.showInformationMessage(`KafkaSQL compatibility mode: ${modeStatusBar.text.replace(/\$\([^)]+\) /, '')}`);
 }
+/** Walks upward from `startDir` looking for a `connections.toml` file. */
+function findConnectionsToml(startDir) {
+    let dir = startDir;
+    while (true) {
+        const candidate = path.join(dir, 'connections.toml');
+        if (fs.existsSync(candidate))
+            return candidate;
+        const parent = path.dirname(dir);
+        if (parent === dir)
+            return null;
+        dir = parent;
+    }
+}
+/** Parses the TOML subset used by connections.toml. */
+function parseConnectionsToml(tomlPath) {
+    const lines = fs.readFileSync(tomlPath, 'utf8').split('\n');
+    const result = [];
+    let current = null;
+    const flush = () => {
+        if (current?.name && current.bootstrapServers && current.topic) {
+            result.push(current);
+        }
+        current = null;
+    };
+    for (const raw of lines) {
+        const line = raw.trim();
+        if (!line || line.startsWith('#'))
+            continue;
+        const headerMatch = line.match(/^\[connection\.(.+)\]$/);
+        if (headerMatch) {
+            flush();
+            current = { name: headerMatch[1] };
+            continue;
+        }
+        if (!current)
+            continue;
+        const kvMatch = line.match(/^(\w+)\s*=\s*"([^"]*)"/)
+            || line.match(/^(\w+)\s*=\s*([^#\s]+)/);
+        if (!kvMatch)
+            continue;
+        const [, k, v] = kvMatch;
+        if (k === 'bootstrap')
+            current.bootstrapServers = v;
+        if (k === 'topic')
+            current.topic = v;
+    }
+    flush();
+    return result;
+}
+/** Walks upward from `startDir` looking for the first `*.proj.toml` file. */
+function findProjToml(startDir) {
+    let dir = startDir;
+    while (true) {
+        try {
+            const entries = fs.readdirSync(dir);
+            const found = entries.find(e => e.endsWith('.proj.toml'));
+            if (found)
+                return path.join(dir, found);
+        }
+        catch { /* unreadable dir */ }
+        const parent = path.dirname(dir);
+        if (parent === dir)
+            return null;
+        dir = parent;
+    }
+}
+/** Reads the `kafka` key from the `[project]` section of a `.proj.toml` file. */
+function readKafkaDirFromProjToml(tomlPath) {
+    const lines = fs.readFileSync(tomlPath, 'utf8').split('\n');
+    let kafkaDir = 'model'; // project default
+    let inProjectSection = false;
+    for (const raw of lines) {
+        const line = raw.trim();
+        if (!line || line.startsWith('#'))
+            continue;
+        if (line.startsWith('[')) {
+            const section = line.replace(/^\[/, '').replace(/\].*$/, '').trim();
+            inProjectSection = section === 'project';
+            continue;
+        }
+        if (!inProjectSection)
+            continue;
+        const eq = line.indexOf('=');
+        if (eq < 0)
+            continue;
+        const key = line.substring(0, eq).trim().toLowerCase();
+        if (key === 'kafka') {
+            let val = line.substring(eq + 1).trim();
+            if (val.startsWith('"')) {
+                const close = val.indexOf('"', 1);
+                val = close >= 0 ? val.substring(1, close) : val.substring(1);
+            }
+            else {
+                const ci = val.indexOf('#');
+                if (ci >= 0)
+                    val = val.substring(0, ci).trim();
+            }
+            kafkaDir = val;
+        }
+    }
+    return kafkaDir;
+}
+/**
+ * Returns `true` when the file should be treated as interactive mode.
+ * Priority: explicit per-file override → path-based auto-detection.
+ */
+function isInteractiveMode(filePath, fileDir, uriKey) {
+    if (uriKey && fileModeOverrides.has(uriKey)) {
+        return fileModeOverrides.get(uriKey) === 'interactive';
+    }
+    const projTomlPath = findProjToml(fileDir);
+    if (!projTomlPath)
+        return false; // no project → file mode
+    const projDir = path.dirname(projTomlPath);
+    const kafkaDir = readKafkaDirFromProjToml(projTomlPath);
+    const modelRoot = path.normalize(path.join(projDir, kafkaDir));
+    const normalized = path.normalize(filePath);
+    return !normalized.startsWith(modelRoot + path.sep) && normalized !== modelRoot;
+}
 function activate(context) {
+    // Create the output channel first — used by startServer and command handlers.
+    lspOutput = vscode.window.createOutputChannel('KafkaSQL LSP');
+    context.subscriptions.push(lspOutput);
+    resultsChannel = vscode.window.createOutputChannel('KafkaSQL');
+    context.subscriptions.push(resultsChannel);
     includeDiagnostics = vscode.languages.createDiagnosticCollection('kafkasql-includes');
     context.subscriptions.push(includeDiagnostics);
     diffDiagnostics = vscode.languages.createDiagnosticCollection('kafkasql-diff');
     context.subscriptions.push(diffDiagnostics);
-    context.subscriptions.push(vscode.commands.registerCommand('kafkasql.startServer', () => startServer(context)));
+    clusterDiffDiagnostics = vscode.languages.createDiagnosticCollection('kafkasql-cluster-diff');
+    context.subscriptions.push(clusterDiffDiagnostics);
+    // ── Register commands (idempotent — safe to call again after unclean host restart) ─
+    // vscode.commands.registerCommand throws if a command id is already registered.
+    // That can happen when the extension host crashes without calling deactivate().
+    // We catch the error so the rest of activate() proceeds normally.
+    function reg(id, handler) {
+        try {
+            context.subscriptions.push(vscode.commands.registerCommand(id, handler));
+        }
+        catch {
+            lspOutput.appendLine(`[kafkasql-ext] Note: command '${id}' already registered (stale from previous session); handler not updated until next full reload.`);
+        }
+    }
+    reg('kafkasql.startServer', () => startServer(context));
     // ── Compare commands ──────────────────────────────────────────────────────
     // Step 1: right-click a .kafka file → remember it as the left side
-    context.subscriptions.push(vscode.commands.registerCommand('kafkasql.selectForCompare', (uri) => {
+    reg('kafkasql.selectForCompare', (uri) => {
         compareBaseUri = uri;
         // Expose the context key so the "Compare with Selected" menu item becomes visible
         vscode.commands.executeCommand('setContext', 'kafkasql.compareBase', true);
         vscode.window.showInformationMessage(`KafkaSQL: selected ${path.basename(uri.fsPath)} as compare base`);
-    }));
+    });
     // Step 2: right-click another .kafka file → open native diff editor
-    context.subscriptions.push(vscode.commands.registerCommand('kafkasql.compareWithSelected', (uri) => {
+    reg('kafkasql.compareWithSelected', (uri) => {
         if (!compareBaseUri) {
             vscode.window.showErrorMessage('KafkaSQL: no base file selected — use "Select for Compare" first');
             return;
@@ -276,9 +415,9 @@ function activate(context) {
         const title = `${path.basename(left.fsPath)} ↔ ${path.basename(right.fsPath)}`;
         vscode.commands.executeCommand('vscode.diff', left, right, title);
         runSemanticDiff(left, right);
-    }));
+    });
     // Bonus: from the active editor, open a file picker to choose the right side
-    context.subscriptions.push(vscode.commands.registerCommand('kafkasql.compareWithActive', async (uri) => {
+    reg('kafkasql.compareWithActive', async (uri) => {
         const leftUri = uri ?? vscode.window.activeTextEditor?.document.uri;
         if (!leftUri) {
             vscode.window.showErrorMessage('KafkaSQL: no active file to compare');
@@ -294,7 +433,7 @@ function activate(context) {
         const title = `${path.basename(leftUri.fsPath)} ↔ ${path.basename(rightUri.fsPath)}`;
         vscode.commands.executeCommand('vscode.diff', leftUri, rightUri, title);
         runSemanticDiff(leftUri, rightUri);
-    }));
+    });
     // ── Comparison mode status bar ─────────────────────────────────────────────
     modeStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     modeStatusBar.command = 'kafkasql.changeComparisonMode';
@@ -302,7 +441,113 @@ function activate(context) {
     modeStatusBar.text = modeLabel(currentMode);
     modeStatusBar.show();
     context.subscriptions.push(modeStatusBar);
-    context.subscriptions.push(vscode.commands.registerCommand('kafkasql.changeComparisonMode', () => pickComparisonMode()));
+    reg('kafkasql.changeComparisonMode', () => pickComparisonMode());
+    // ── LSP command helper ──────────────────────────────────────────────────
+    const sendLspCommand = (cmd, args) => {
+        if (!client)
+            return Promise.reject(new Error('LSP not ready'));
+        return client.sendRequest('workspace/executeCommand', { command: cmd, arguments: args });
+    };
+    // ── File mode status bar ────────────────────────────────────────────────────
+    // Shows whether the active .kafka file is in File mode or Interactive mode.
+    // Click to override the auto-detected mode for this file.
+    fileModeStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 101);
+    fileModeStatusBar.command = 'kafkasql.pickFileMode';
+    context.subscriptions.push(fileModeStatusBar);
+    // ── Execution stop status bar ──────────────────────────────────────────────
+    executionStatusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 102);
+    executionStatusBar.command = 'kafkasql.cancelExecution';
+    executionStatusBar.text = '$(stop-circle) Stop';
+    executionStatusBar.tooltip = 'KafkaSQL: cancel the running query';
+    executionStatusBar.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+    context.subscriptions.push(executionStatusBar);
+    function updateFileModeStatusBar(editor) {
+        const doc = editor?.document;
+        const isKafka = doc && (doc.languageId === 'kafkasql'
+            || doc.fileName.endsWith('.kafka')
+            || doc.fileName.endsWith('.kafkasql'));
+        if (!isKafka) {
+            fileModeStatusBar.hide();
+            return;
+        }
+        const uriKey = doc.uri.toString();
+        const fileDir = path.dirname(doc.fileName);
+        const overridden = fileModeOverrides.has(uriKey);
+        const interactive = isInteractiveMode(doc.fileName, fileDir, uriKey);
+        const pin = overridden ? ' $(pinned)' : '';
+        if (interactive) {
+            fileModeStatusBar.text = `$(symbol-event) Interactive${pin}`;
+            fileModeStatusBar.tooltip = `KafkaSQL: Interactive mode${overridden ? ' (manually set)' : ' (auto-detected)'}\n`
+                + 'INCLUDE statements are ignored; types are resolved from the live Kafka cluster.\n'
+                + 'Click to change.';
+        }
+        else {
+            fileModeStatusBar.text = `$(file-code) File mode${pin}`;
+            fileModeStatusBar.tooltip = `KafkaSQL: File mode${overridden ? ' (manually set)' : ' (auto-detected)'}\n`
+                + 'Types are resolved from local model sources.\n'
+                + 'Click to change.';
+        }
+        fileModeStatusBar.show();
+    }
+    reg('kafkasql.pickFileMode', async () => {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor)
+            return;
+        const doc = editor.document;
+        const isKafka = doc.languageId === 'kafkasql'
+            || doc.fileName.endsWith('.kafka')
+            || doc.fileName.endsWith('.kafkasql');
+        if (!isKafka)
+            return;
+        const uriKey = doc.uri.toString();
+        const fileDir = path.dirname(doc.fileName);
+        const currentInteractive = isInteractiveMode(doc.fileName, fileDir, uriKey);
+        const isOverridden = fileModeOverrides.has(uriKey);
+        const items = [
+            {
+                label: '$(symbol-event) Interactive mode',
+                description: 'Semantic model backed by the live Kafka cluster',
+                detail: currentInteractive && !isOverridden ? '$(check) current (auto-detected)' : (currentInteractive && isOverridden ? '$(check) current (manually set)' : undefined),
+                value: 'interactive',
+            },
+            {
+                label: '$(file-code) File mode',
+                description: 'Types resolved from local model sources',
+                detail: !currentInteractive && !isOverridden ? '$(check) current (auto-detected)' : (!currentInteractive && isOverridden ? '$(check) current (manually set)' : undefined),
+                value: 'file',
+            },
+            {
+                label: '$(sync) Auto-detect',
+                description: 'Infer from file location (model root = File, misc/ = Interactive)',
+                detail: !isOverridden ? '$(check) current' : undefined,
+                value: 'auto',
+            },
+        ];
+        const picked = await vscode.window.showQuickPick(items, {
+            placeHolder: `KafkaSQL mode for ${path.basename(doc.fileName)}`,
+        });
+        if (!picked)
+            return;
+        if (picked.value === 'auto') {
+            fileModeOverrides.delete(uriKey);
+        }
+        else {
+            fileModeOverrides.set(uriKey, picked.value);
+        }
+        updateFileModeStatusBar(editor);
+        // Also update the execute-statement mode so it matches what diagnostics are using.
+        // Tell the LSP to re-run diagnostics with the new mode.
+        if (client) {
+            try {
+                await sendLspCommand('kafkasql.setFileMode', [uriKey, picked.value]);
+            }
+            catch (err) {
+                lspOutput?.appendLine(`[kafkasql-ext] setFileMode failed: ${err}`);
+            }
+        }
+    });
+    updateFileModeStatusBar(vscode.window.activeTextEditor);
+    context.subscriptions.push(vscode.window.onDidChangeActiveTextEditor(updateFileModeStatusBar));
     const out = vscode.window.createOutputChannel('KafkaSQL Debug');
     context.subscriptions.push(out);
     // log diagnostics that VS Code receives (helpful to verify message matching)
@@ -321,11 +566,8 @@ function activate(context) {
     });
     context.subscriptions.push(diagListener);
     // ── Project explorer tree view ───────────────────────────────────────────────────
-    const sendLspCommand = (cmd, args) => {
-        if (!client)
-            return Promise.reject(new Error('LSP not ready'));
-        return client.sendRequest('workspace/executeCommand', { command: cmd, arguments: args });
-    };
+    // sendLspCommand is defined above (before the file mode status bar) so that
+    // the pickFileMode command handler can use it.
     const explorer = new kafkaSqlProjectExplorer_1.KafkaSqlProjectExplorer(context, sendLspCommand);
     const treeView = vscode.window.createTreeView('kafkasqlProjectExplorer', {
         treeDataProvider: explorer,
@@ -339,19 +581,277 @@ function activate(context) {
     connectionsWatcher.onDidCreate(doExplorerRefresh);
     connectionsWatcher.onDidDelete(doExplorerRefresh);
     context.subscriptions.push(connectionsWatcher);
-    context.subscriptions.push(vscode.commands.registerCommand('kafkasql.explorer.refresh', () => explorer.refresh()), vscode.commands.registerCommand('kafkasql.explorer.toggleFlatContexts', () => explorer.toggleFlatContexts()), vscode.commands.registerCommand('kafkasql.explorer.expandAll', async () => {
+    reg('kafkasql.explorer.refresh', () => explorer.refresh());
+    reg('kafkasql.explorer.toggleFlatContexts', () => explorer.toggleFlatContexts());
+    reg('kafkasql.explorer.expandAll', async () => {
         for (const node of explorer.getProjectNodes()) {
             await treeView.reveal(node, { expand: 5 });
         }
-    }), vscode.commands.registerCommand('kafkasql.explorer.collapseAll', () => {
+    });
+    reg('kafkasql.explorer.collapseAll', () => {
         vscode.commands.executeCommand('workbench.actions.treeView.kafkasqlProjectExplorer.collapseAll');
-    }), vscode.commands.registerCommand('kafkasql.explorer.openFile', (filePath, line) => {
+    });
+    reg('kafkasql.explorer.openFile', (filePath, line) => {
         vscode.window.showTextDocument(vscode.Uri.file(filePath), {
             selection: new vscode.Range(line, 0, line, 0),
             preview: false,
         });
-    }));
-    startServer(context).catch(err => {
+    });
+    // ── Cluster diff / deploy commands ────────────────────────────────────────
+    reg('kafkasql.diffWithCluster', async (node) => {
+        if (!node)
+            return;
+        const picks = await vscode.window.showOpenDialog({
+            canSelectMany: false,
+            filters: { 'KafkaSQL files': ['kafka', 'kafkasql'] },
+            title: `Pick local schema file to diff against cluster "${node.label}"`
+        });
+        if (!picks || picks.length === 0)
+            return;
+        const localUri = picks[0];
+        clusterDiffDiagnostics.delete(localUri);
+        let result;
+        try {
+            result = await sendLspCommand('kafkasql.diffWithCluster', [node.projectFile, node.label, localUri.fsPath]);
+        }
+        catch (err) {
+            vscode.window.showErrorMessage(`Diff with cluster failed: ${err}`);
+            return;
+        }
+        if (!Array.isArray(result)) {
+            if (result && typeof result === 'object' && 'error' in result) {
+                vscode.window.showErrorMessage(`Diff with cluster failed: ${result.error}`);
+            }
+            return;
+        }
+        const entries = result;
+        const diags = [];
+        for (const entry of entries) {
+            const rng = entry.rightRange ?? entry.leftRange;
+            if (!rng)
+                continue;
+            const start = new vscode.Position(Math.max(0, rng.from.ln - 1), Math.max(0, rng.from.ch));
+            const end = new vscode.Position(Math.max(0, rng.to.ln - 1), Math.max(0, rng.to.ch));
+            const diag = new vscode.Diagnostic(new vscode.Range(start, end), entry.message, mapSeverity(entry.severity));
+            diag.source = 'kafkasql-cluster-diff';
+            diag.code = entry.aspect;
+            diags.push(diag);
+        }
+        clusterDiffDiagnostics.set(localUri, diags);
+        if (diags.length === 0) {
+            vscode.window.showInformationMessage(`KafkaSQL: local schema matches cluster "${node.label}"`);
+        }
+        else {
+            const breaking = diags.filter(d => d.severity === vscode.DiagnosticSeverity.Error).length;
+            const msg = breaking > 0
+                ? `KafkaSQL: ${breaking} breaking difference(s) vs cluster "${node.label}" — see Problems panel`
+                : `KafkaSQL: ${diags.length} difference(s) vs cluster "${node.label}" — see Problems panel`;
+            vscode.window.showInformationMessage(msg);
+        }
+    }),
+        vscode.commands.registerCommand('kafkasql.deployToCluster', async (node) => {
+            if (!node)
+                return;
+            const picks = await vscode.window.showOpenDialog({
+                canSelectMany: false,
+                filters: { 'KafkaSQL files': ['kafka', 'kafkasql'] },
+                title: `Pick local schema file to deploy to cluster "${node.label}"`
+            });
+            if (!picks || picks.length === 0)
+                return;
+            const localUri = picks[0];
+            // Run a quick diff first to show the change count in the confirmation dialog
+            let diffCount = 0;
+            try {
+                const diffResult = await sendLspCommand('kafkasql.diffWithCluster', [node.projectFile, node.label, localUri.fsPath]);
+                if (Array.isArray(diffResult)) {
+                    diffCount = diffResult
+                        .filter(e => e.kind !== 'UNCHANGED').length;
+                }
+            }
+            catch { /* ignore — deploy will surface any connection errors */ }
+            const confirm = await vscode.window.showWarningMessage(`Deploy ${diffCount} change(s) to cluster "${node.label}" (${node.bootstrapServers})?`, { modal: true }, 'Deploy');
+            if (confirm !== 'Deploy')
+                return;
+            let result;
+            try {
+                result = await sendLspCommand('kafkasql.deployToCluster', [node.projectFile, node.label, localUri.fsPath]);
+            }
+            catch (err) {
+                vscode.window.showErrorMessage(`Deploy to cluster failed: ${err}`);
+                return;
+            }
+            if (result && typeof result === 'object' && 'error' in result) {
+                vscode.window.showErrorMessage(`Deploy to cluster failed: ${result.error}`);
+                return;
+            }
+            if (result && typeof result === 'object' && 'deployed' in result) {
+                const r = result;
+                vscode.window.showInformationMessage(`KafkaSQL: deployed ${r.deployed} event(s) to cluster "${node.label}"`);
+            }
+        });
+    // ── Deploy project to a chosen connection ─────────────────────────────────
+    // Right-click a ProjectNode → "Deploy to..." → pick connection → deploy all
+    // kafka files in the project as a single atomic operation.
+    reg('kafkasql.deployProjectToCluster', async (node) => {
+        if (!node)
+            return;
+        const connections = explorer.getConnectionsForProject(node.label);
+        if (connections.length === 0) {
+            vscode.window.showErrorMessage(`KafkaSQL: project "${node.label}" has no connections defined in connections.toml`);
+            return;
+        }
+        const items = connections.map(c => ({
+            label: c.name,
+            description: c.bootstrapServers,
+            detail: `topic: ${c.topic}`,
+            name: c.name,
+        }));
+        const picked = await vscode.window.showQuickPick(items, {
+            placeHolder: `Deploy project "${node.label}" to which cluster?`,
+            matchOnDescription: true,
+        });
+        if (!picked)
+            return;
+        // Dry-run diff to show change count in confirmation
+        let diffCount = 0;
+        try {
+            const diffResult = await sendLspCommand('kafkasql.diffProjectWithCluster', [node.projectFile, picked.name]);
+            if (Array.isArray(diffResult)) {
+                diffCount = diffResult.filter(e => e.kind !== 'UNCHANGED').length;
+            }
+        }
+        catch { /* ignore — deploy will surface any real errors */ }
+        const confirm = await vscode.window.showWarningMessage(`Deploy project "${node.label}" (${diffCount} change(s)) to cluster "${picked.name}" (${picked.description})?`, { modal: true }, 'Deploy');
+        if (confirm !== 'Deploy')
+            return;
+        let result;
+        try {
+            result = await sendLspCommand('kafkasql.deployProjectToCluster', [node.projectFile, picked.name]);
+        }
+        catch (err) {
+            vscode.window.showErrorMessage(`Deploy project to cluster failed: ${err}`);
+            return;
+        }
+        if (result && typeof result === 'object' && 'error' in result) {
+            vscode.window.showErrorMessage(`Deploy project to cluster failed: ${result.error}`);
+            return;
+        }
+        if (result && typeof result === 'object' && 'deployed' in result) {
+            const r = result;
+            vscode.window.showInformationMessage(`KafkaSQL: deployed ${r.deployed} event(s) from project "${node.label}" to cluster "${picked.name}"`);
+        }
+    });
+    // ── Cancel Execution ───────────────────────────────────────────────────────
+    reg('kafkasql.cancelExecution', async () => {
+        if (!client)
+            return;
+        await sendLspCommand('kafkasql.cancelExecution', []);
+    });
+    // ── Execute Statement ─────────────────────────────────────────────────────
+    // Runs the selected text (or entire document) against a chosen connection.
+    reg('kafkasql.executeStatement', async (uri) => {
+        const editor = vscode.window.activeTextEditor;
+        const activeUri = uri ?? editor?.document.uri;
+        if (!activeUri) {
+            vscode.window.showErrorMessage('KafkaSQL: open a .kafka file first');
+            return;
+        }
+        if (!client) {
+            vscode.window.showErrorMessage('KafkaSQL: language server is not running');
+            return;
+        }
+        // Get selected text or fall back to full document
+        const doc = editor?.document ?? await vscode.workspace.openTextDocument(activeUri);
+        const selection = editor?.selection;
+        const text = (selection && !selection.isEmpty)
+            ? doc.getText(selection)
+            : doc.getText();
+        if (!text.trim()) {
+            vscode.window.showWarningMessage('KafkaSQL: nothing to execute');
+            return;
+        }
+        // Find connections.toml relative to the active file
+        const activeDir = path.dirname(activeUri.fsPath);
+        const tomlPath = findConnectionsToml(activeDir);
+        if (!tomlPath) {
+            vscode.window.showErrorMessage('KafkaSQL: no connections.toml found — add one alongside your .proj.toml');
+            return;
+        }
+        const connections = parseConnectionsToml(tomlPath);
+        if (connections.length === 0) {
+            vscode.window.showErrorMessage('KafkaSQL: connections.toml has no valid connections');
+            return;
+        }
+        const items = connections.map(c => ({
+            label: c.name,
+            description: c.bootstrapServers,
+            detail: `topic: ${c.topic}`,
+            name: c.name,
+        }));
+        const picked = connections.length === 1
+            ? items[0]
+            : await vscode.window.showQuickPick(items, {
+                placeHolder: 'Execute against which cluster?',
+                matchOnDescription: true,
+            });
+        if (!picked)
+            return;
+        resultsChannel.show(true);
+        const mode = isInteractiveMode(activeUri.fsPath, activeDir, activeUri.toString()) ? 'interactive' : 'file';
+        const modeTag = mode === 'interactive' ? ' [interactive]' : '';
+        resultsChannel.appendLine(`\n── Execute on "${picked.name}" (${picked.description})${modeTag} ──`);
+        resultsChannel.appendLine(new Date().toISOString());
+        let result;
+        executionStatusBar.show();
+        try {
+            result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `KafkaSQL: reading from "${picked.name}"…`, cancellable: true }, async (_progress, token) => {
+                token.onCancellationRequested(() => sendLspCommand('kafkasql.cancelExecution', []).catch(() => { }));
+                return sendLspCommand('kafkasql.executeStatement', [activeUri.fsPath, picked.name, text, mode]);
+            });
+        }
+        catch (err) {
+            resultsChannel.appendLine(`ERROR: ${err}`);
+            vscode.window.showErrorMessage(`KafkaSQL execute failed: ${err}`);
+            return;
+        }
+        finally {
+            executionStatusBar.hide();
+        }
+        if (result && typeof result === 'object' && 'error' in result) {
+            const msg = result.error;
+            resultsChannel.appendLine(`ERROR: ${msg}`);
+            vscode.window.showErrorMessage(`KafkaSQL execute: ${msg}`);
+            return;
+        }
+        if (result && typeof result === 'object' && 'executed' in result) {
+            const r = result;
+            for (const op of r.operations) {
+                resultsChannel.appendLine(`  ${op}`);
+            }
+            if ('records' in r) {
+                // Records were already streamed to the channel via kafkasql/record notifications.
+                // Just show the summary line.
+                const count = (r.records ?? []).length;
+                resultsChannel.appendLine(`\n${count} record(s) returned.`);
+                if (count > 0) {
+                    vscode.window.showInformationMessage(`KafkaSQL: ${count} record(s) returned from "${picked.name}"`);
+                }
+                else {
+                    vscode.window.showInformationMessage(`KafkaSQL: no matching records on "${picked.name}"`);
+                }
+            }
+            else if (r.executed > 0) {
+                resultsChannel.appendLine(`\n${r.executed} event(s) written.`);
+                vscode.window.showInformationMessage(`KafkaSQL: ${r.executed} event(s) written to "${picked.name}"`);
+            }
+            else {
+                resultsChannel.appendLine(`\nnothing to write — schema already up to date.`);
+                vscode.window.showInformationMessage(`KafkaSQL: nothing to write — schema already up to date on "${picked.name}"`);
+            }
+        }
+    });
+    startServer(context, () => explorer.refresh()).catch(err => {
         console.error('Failed to start KafkaSQL LSP:', err);
     });
 }
@@ -359,13 +859,6 @@ function deactivate() {
     if (client) {
         const stopPromise = client.stop();
         client = null;
-        if (serverProc) {
-            try {
-                serverProc.kill();
-            }
-            catch { /* ignore */ }
-            serverProc = null;
-        }
         return stopPromise;
     }
     return undefined;

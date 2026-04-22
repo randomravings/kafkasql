@@ -495,8 +495,93 @@ public final class AstPrinter extends Printer {
         writeClass(r.getClass());
         branch("fqn", indent, false);
         writeQName(r.stream(), indent + 1);
+        if (r.mode().isPresent()) {
+            branch("mode", indent, false);
+            writeReadConsumer(r.mode().get(), indent + 1);
+        }
+        if (r.stopAfter().isPresent()) {
+            branch("stopAfter", indent, false);
+            writeStopAfter(r.stopAfter().get(), indent + 1);
+        }
         branch("blocks", indent, true);
         forEach(r.blocks(), "block", this::writeReadBlock, indent + 1, ReadTypeBlock.class);
+    }
+
+    private void writeReadConsumer(ReadMode c, int indent) throws IOException {
+        switch (c) {
+            case ReadMode.FromGroup jg -> {
+                writeClass(jg.getClass());
+                branch("group", indent, jg.resetToBeginning().isEmpty());
+                write("'" + jg.groupId() + "'");
+                if (jg.resetToBeginning().isPresent()) {
+                    branch("reset", indent, true);
+                    write(jg.resetToBeginning().get() ? "BEGINNING" : "END");
+                }
+            }
+            case ReadMode.FromBeginning ignored -> {
+                writeClass(ignored.getClass());
+                branch("bound", indent, true);
+                write("BEGINNING");
+            }
+            case ReadMode.FromEnd ignored -> {
+                writeClass(ignored.getClass());
+                branch("bound", indent, true);
+                write("END");
+            }
+            case ReadMode.FromTimestamp ft -> {
+                writeClass(ft.getClass());
+                branch("timestamp", indent, true);
+                write("'" + ft.timestamp() + "'");
+            }
+            case ReadMode.FromOffsets fo -> {
+                writeClass(fo.getClass());
+                branch("specs", indent, true);
+                for (ReadMode.OffsetSpec spec : fo.specs()) {
+                    branch("partition", indent + 1, false);
+                    write(String.valueOf(spec.partition()));
+                    branch("position", indent + 1, true);
+                    writeOffsetPosition(spec.position());
+                }
+            }
+            case ReadMode.FromTimestamps fts -> {
+                writeClass(fts.getClass());
+                branch("specs", indent, true);
+                for (ReadMode.TimestampSpec spec : fts.specs()) {
+                    branch("partition", indent + 1, false);
+                    write(String.valueOf(spec.partition()));
+                    branch("timestamp", indent + 1, true);
+                    write("'" + spec.timestamp() + "'");
+                }
+            }
+        }
+    }
+
+    private void writeOffsetPosition(ReadMode.OffsetPosition pos) throws IOException {
+        switch (pos) {
+            case ReadMode.OffsetPosition.Beginning ignored -> write("BEGINNING");
+            case ReadMode.OffsetPosition.End ignored       -> write("END");
+            case ReadMode.OffsetPosition.Offset o          -> write(String.valueOf(o.offset()));
+        }
+    }
+
+    private void writeStopAfter(StopAfter s, int indent) throws IOException {
+        switch (s) {
+            case StopAfter.Records r -> {
+                writeClass(r.getClass());
+                branch("count", indent, true);
+                write(String.valueOf(r.count()));
+            }
+            case StopAfter.Seconds sec -> {
+                writeClass(sec.getClass());
+                branch("seconds", indent, true);
+                write(String.valueOf(sec.seconds()));
+            }
+            case StopAfter.SecondsIdle si -> {
+                writeClass(si.getClass());
+                branch("seconds", indent, true);
+                write(String.valueOf(si.seconds()));
+            }
+        }
     }
 
     private void writeReadBlock(ReadTypeBlock b, int indent) throws IOException {

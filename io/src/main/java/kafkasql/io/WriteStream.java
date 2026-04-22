@@ -20,18 +20,35 @@ public final class WriteStream<T> implements StreamWriter<T> {
         byte[] serialize(T data) throws Exception;
     }
 
+    @FunctionalInterface
+    public interface KeyExtractor<T> {
+        byte[] extractKey(T data);
+    }
+
     private final String streamName;
     private final KafkaProducer<byte[], byte[]> producer;
     private final Serializer<T> serializer;
+    private final KeyExtractor<T> keyExtractor;
+
+    public WriteStream(
+        String streamName,
+        KafkaProducer<byte[], byte[]> producer,
+        Serializer<T> serializer,
+        KeyExtractor<T> keyExtractor
+    ) {
+        this.streamName    = streamName;
+        this.producer      = producer;
+        this.serializer    = serializer;
+        this.keyExtractor  = keyExtractor;
+    }
 
     public WriteStream(
         String streamName,
         KafkaProducer<byte[], byte[]> producer,
         Serializer<T> serializer
     ) {
-        this.streamName = streamName;
-        this.producer = producer;
-        this.serializer = serializer;
+        this(streamName, producer, serializer,
+             msg -> msg.getClass().getSimpleName().getBytes());
     }
 
     @Override
@@ -42,7 +59,7 @@ public final class WriteStream<T> implements StreamWriter<T> {
     @Override
     public void write(T message) throws Exception {
         byte[] valueBytes = serializer.serialize(message);
-        byte[] keyBytes = message.getClass().getSimpleName().getBytes();
+        byte[] keyBytes   = keyExtractor.extractKey(message);
         ProducerRecord<byte[], byte[]> record = new ProducerRecord<>(streamName, keyBytes, valueBytes);
         producer.send(record).get();
     }

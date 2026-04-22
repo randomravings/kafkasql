@@ -79,6 +79,17 @@ SET           : [Ss][Ee][Tt] ;
 VERSION       : [Vv][Ee][Rr][Ss][Ii][Oo][Nn] ;
 LATEST        : [Ll][Aa][Tt][Ee][Ss][Tt] ;
 
+GROUP         : [Gg][Rr][Oo][Uu][Pp] ;
+BEGINNING     : [Bb][Ee][Gg][Ii][Nn][Nn][Ii][Nn][Gg] ;
+END           : [Ee][Nn][Dd] ;
+OFFSETS       : [Oo][Ff][Ff][Ss][Ee][Tt][Ss] ;
+TIMESTAMPS    : [Tt][Ii][Mm][Ee][Ss][Tt][Aa][Mm][Pp][Ss] ;
+STOP          : [Ss][Tt][Oo][Pp] ;
+AFTER         : [Aa][Ff][Tt][Ee][Rr] ;
+RECORDS       : [Rr][Ee][Cc][Oo][Rr][Dd][Ss] ;
+SECONDS       : [Ss][Ee][Cc][Oo][Nn][Dd][Ss] ;
+IDLE          : [Ii][Dd][Ll][Ee] ;
+
 // Punctuation / operators
 COMMA         : ',' ;
 DOT           : '.' ;

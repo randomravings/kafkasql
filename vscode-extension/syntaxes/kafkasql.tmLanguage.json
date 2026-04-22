@@ -242,6 +242,7 @@
       "patterns": [
         { "include": "#comments" },
         {
+          "comment": "FROM <stream>",
           "begin": "(?i)\\b(FROM)\\b",
           "beginCaptures": {
             "1": { "name": "keyword.control.clause.kafkasql" }
@@ -254,7 +255,10 @@
             { "include": "#comments" }
           ]
         },
+        { "include": "#read-mode-clause" },
+        { "include": "#stop-after-clause" },
         {
+          "comment": "TYPE <name>",
           "begin": "(?i)\\b(TYPE)\\b",
           "beginCaptures": {
             "1": { "name": "keyword.control.clause.kafkasql" }
@@ -271,6 +275,114 @@
         { "include": "#as-alias" },
         { "include": "#expression-patterns" }
       ]
+    },
+    "read-mode-clause": {
+      "patterns": [
+        { "include": "#read-mode-from-group" },
+        { "include": "#read-mode-from-offsets" },
+        { "include": "#read-mode-from-timestamps" },
+        { "include": "#read-mode-from-timestamp" },
+        { "include": "#read-mode-from-bound" }
+      ]
+    },
+    "read-mode-from-group": {
+      "comment": "FROM GROUP '<name>' [BEGINNING|END]",
+      "begin": "(?i)\\b(FROM)\\s+(GROUP)\\b",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.clause.kafkasql" },
+        "2": { "name": "keyword.control.clause.kafkasql" }
+      },
+      "end": "(?i)(?=\\b(?:TYPE|WHERE|FROM)\\b)|(?=;)",
+      "patterns": [
+        { "include": "#string-literal" },
+        {
+          "match": "(?i)\\b(BEGINNING|END)\\b",
+          "name": "keyword.control.clause.kafkasql"
+        }
+      ]
+    },
+    "read-mode-from-bound": {
+      "comment": "FROM BEGINNING | FROM END  (after the stream name)",
+      "match": "(?i)\\b(FROM)\\s+(BEGINNING|END)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.clause.kafkasql" },
+        "2": { "name": "keyword.control.clause.kafkasql" }
+      }
+    },
+    "read-mode-from-timestamp": {
+      "comment": "FROM 'timestamp'  (was AS OF)",
+      "begin": "(?i)\\b(FROM)\\s+(?=')",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.clause.kafkasql" }
+      },
+      "end": "(?<=')(?!')",
+      "patterns": [
+        { "include": "#string-literal" }
+      ]
+    },
+    "read-mode-from-offsets": {
+      "comment": "FROM OFFSETS (idx: BEGINNING|END|number, ...)",
+      "begin": "(?i)\\b(FROM)\\s+(OFFSETS)\\s*(\\()",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.clause.kafkasql" },
+        "2": { "name": "keyword.control.clause.kafkasql" },
+        "3": { "name": "punctuation.section.parens.begin.kafkasql" }
+      },
+      "end": "\\)",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.parens.end.kafkasql" }
+      },
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "match": "\\b(\\d+)\\s*(:)",
+          "captures": {
+            "1": { "name": "constant.numeric.kafkasql" },
+            "2": { "name": "punctuation.separator.kafkasql" }
+          }
+        },
+        {
+          "match": "(?i)\\b(BEGINNING|END)\\b",
+          "name": "keyword.control.clause.kafkasql"
+        },
+        { "include": "#number-literal" },
+        { "match": ",", "name": "punctuation.separator.comma.kafkasql" }
+      ]
+    },
+    "read-mode-from-timestamps": {
+      "comment": "FROM TIMESTAMPS (idx: 'timestamp', ...)",
+      "begin": "(?i)\\b(FROM)\\s+(TIMESTAMPS)\\s*(\\()",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.clause.kafkasql" },
+        "2": { "name": "keyword.control.clause.kafkasql" },
+        "3": { "name": "punctuation.section.parens.begin.kafkasql" }
+      },
+      "end": "\\)",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.parens.end.kafkasql" }
+      },
+      "patterns": [
+        { "include": "#comments" },
+        {
+          "match": "\\b(\\d+)\\s*(:)",
+          "captures": {
+            "1": { "name": "constant.numeric.kafkasql" },
+            "2": { "name": "punctuation.separator.kafkasql" }
+          }
+        },
+        { "include": "#string-literal" },
+        { "match": ",", "name": "punctuation.separator.comma.kafkasql" }
+      ]
+    },
+    "stop-after-clause": {
+      "comment": "STOP AFTER n RECORDS | SECONDS | SECONDS IDLE",
+      "match": "(?i)\\b(STOP)\\s+(AFTER)\\s+(\\d+)\\s+(RECORDS|SECONDS(?:\\s+IDLE)?)",
+      "captures": {
+        "1": { "name": "keyword.control.clause.kafkasql" },
+        "2": { "name": "keyword.control.clause.kafkasql" },
+        "3": { "name": "constant.numeric.kafkasql" },
+        "4": { "name": "keyword.control.clause.kafkasql" }
+      }
     },
     "write-statement": {
       "begin": "(?i)\\b(WRITE)\\b",

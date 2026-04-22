@@ -17,6 +17,7 @@ export class ProjectNode {
   constructor(
     public readonly label: string,
     public readonly kafkaRoot: string,
+    public readonly projectFile: string,
   ) {}
 }
 
@@ -140,6 +141,12 @@ export type KafkaSqlTreeNode =
 
 // ── Parsed project data ───────────────────────────────────────────────────────
 
+export interface ParsedConnection {
+  name: string;
+  bootstrapServers: string;
+  topic: string;
+}
+
 interface KafkaSqlObject {
   name: string;
   kind: ObjectKind;
@@ -152,12 +159,6 @@ interface ParsedContext {
   declaredInFile: string;
   declaredAtLine: number; // 0-based
   objects: KafkaSqlObject[];
-}
-
-interface ParsedConnection {
-  name: string;
-  bootstrapServers: string;
-  topic: string;
 }
 
 interface ParsedProject {
@@ -187,7 +188,7 @@ interface ProjFile {
 function parseProjectFile(filePath: string): ProjFile | null {
   const stem = path.basename(filePath, '.proj.toml');
   let name: string | null = null;
-  let kafkaDir = 'kafka';
+  let kafkaDir = 'model';
   let inProjectSection = false;
   let hasProjectSection = false;
   for (const raw of fs.readFileSync(filePath, 'utf8').split('\n')) {
@@ -209,7 +210,7 @@ function parseProjectFile(filePath: string): ProjFile | null {
     // Strip quotes and inline comments
     if (val.startsWith('"') && val.includes('"', 1)) val = val.slice(1, val.indexOf('"', 1));
     else { const ci = val.indexOf('#'); if (ci >= 0) val = val.slice(0, ci).trim(); }
-    if (key === 'name')  name = val || null;
+      if (key === 'name')  name = val || null;
     if (key === 'kafka') kafkaDir = val;
   }
   if (!hasProjectSection) {
@@ -423,7 +424,11 @@ export class KafkaSqlProjectExplorer
   }
 
   getProjectNodes(): ProjectNode[] {
-    return this.projects.map(p => new ProjectNode(p.name, p.kafkaRoot));
+    return this.projects.map(p => new ProjectNode(p.name, p.kafkaRoot, p.projectFile));
+  }
+
+  getConnectionsForProject(projectName: string): ParsedConnection[] {
+    return this.projects.find(p => p.name === projectName)?.connections ?? [];
   }
 
   constructor(
@@ -655,7 +660,7 @@ export class KafkaSqlProjectExplorer
       // ── ProjectsRoot → one ProjectNode per .proj.toml ────────────────────
       if (node.kind === 'projectsRoot') {
         if (this.projects.length === 0) return [new NoProjectNode()];
-        return this.projects.map(p => new ProjectNode(p.name, p.kafkaRoot));
+        return this.projects.map(p => new ProjectNode(p.name, p.kafkaRoot, p.projectFile));
       }
 
       // ── ClustersRoot → all connections from all projects ─────────────────
@@ -705,7 +710,12 @@ export class KafkaSqlProjectExplorer
         if (cached === 'loading') return [new LoadingNode()];
         if ('error' in cached) return [new LiveErrorNode(cached.error)];
         const contexts = cached as Map<string, ParsedContext>;
-        return [...contexts.values()]
+        if (contexts.size === 0) return [new EmptyNode()];
+        // Flat: all contexts alphabetically. Nested: root contexts only (children nest inside).
+        const visible = this.flatContexts
+          ? [...contexts.values()]
+          : [...contexts.values()].filter(c => isRootContext(c, contexts));
+        return visible
           .sort((a, b) => a.name.localeCompare(b.name))
           .map(c => new LiveContextNode(c.name, node.connectionKey));
       }
@@ -723,19 +733,26 @@ export class KafkaSqlProjectExplorer
             .sort((a, b) => a.name.localeCompare(b.name))
             .map(o => new LiveObjectNode(o.name, o.kind, node.label, node.connectionKey));
         }
+        const childCount  = getDirectChildContexts(node.label, contexts).length;
         const typeCount   = ctx.objects.filter(o => o.kind !== 'STREAM').length;
         const streamCount = ctx.objects.filter(o => o.kind === 'STREAM').length;
         const folders: LiveCategoryNode[] = [];
-        if (typeCount > 0)   folders.push(new LiveCategoryNode('Types',   node.label, node.connectionKey, typeCount));
-        if (streamCount > 0) folders.push(new LiveCategoryNode('Streams', node.label, node.connectionKey, streamCount));
+        if (childCount > 0)  folders.push(new LiveCategoryNode('Contexts', node.label, node.connectionKey, childCount));
+        if (typeCount > 0)   folders.push(new LiveCategoryNode('Types',    node.label, node.connectionKey, typeCount));
+        if (streamCount > 0) folders.push(new LiveCategoryNode('Streams',  node.label, node.connectionKey, streamCount));
         return folders;
       }
 
-      // ── LiveCategory → live objects ────────────────────────────────────────
+      // ── LiveCategory → live objects or child live contexts ────────────────
       if (node.kind === 'liveCategory') {
         const cached = this.liveCache.get(node.connectionKey);
         if (!cached || cached === 'loading' || 'error' in cached) return [];
         const contexts = cached as Map<string, ParsedContext>;
+        if (node.category === 'Contexts') {
+          return getDirectChildContexts(node.contextName, contexts)
+            .sort((a, b) => a.name.localeCompare(b.name))
+            .map(c => new LiveContextNode(c.name, node.connectionKey));
+        }
         const ctx = contexts.get(node.contextName);
         if (!ctx) return [];
         const isStream = node.category === 'Streams';
@@ -823,12 +840,12 @@ export class KafkaSqlProjectExplorer
         const proj = this.projects.find(
           p => p.contexts.size === 0 && p.rootObjects.length === 0
         );
-        return proj ? new ProjectNode(proj.name, proj.kafkaRoot) : null;
+        return proj ? new ProjectNode(proj.name, proj.kafkaRoot, proj.projectFile) : null;
       }
       case 'category': {
         // contextName is either a project name or a context FQN
         const proj = this.projects.find(p => p.name === node.contextName);
-        if (proj) return new ProjectNode(proj.name, proj.kafkaRoot);
+        if (proj) return new ProjectNode(proj.name, proj.kafkaRoot, proj.projectFile);
         const ctx = this.findContext(node.contextName);
         if (ctx) return new ContextNode(ctx.name, ctx.declaredInFile, ctx.declaredAtLine);
         return null;
@@ -838,7 +855,7 @@ export class KafkaSqlProjectExplorer
         const proj = this.projects.find(p => p.contexts.has(node.label));
         if (!proj) return null;
         if (this.flatContexts) {
-          return new ProjectNode(proj.name, proj.kafkaRoot);
+          return new ProjectNode(proj.name, proj.kafkaRoot, proj.projectFile);
         }
         const ctx = proj.contexts.get(node.label)!;
         if (isRootContext(ctx, proj.contexts)) {
@@ -866,10 +883,26 @@ export class KafkaSqlProjectExplorer
         return new ClustersRootNode();
       }
       case 'liveContext': {
-        // extract projectName from connectionKey = "projectName/connectionName"
-        const slash = node.connectionKey.indexOf('/');
-        const projName = slash >= 0 ? node.connectionKey.slice(0, slash) : node.connectionKey;
-        const connName = slash >= 0 ? node.connectionKey.slice(slash + 1) : '';
+        const key = node.connectionKey;
+        const cached = this.liveCache.get(key);
+        const contexts = (cached && cached !== 'loading' && !('error' in cached))
+          ? cached as Map<string, ParsedContext>
+          : null;
+        // In nested mode: if this context has a parent in the live map, its parent
+        // is the Contexts category of that parent context; otherwise it's the connection.
+        if (!this.flatContexts && contexts) {
+          const lastDot = node.label.lastIndexOf('.');
+          if (lastDot >= 0) {
+            const parentName = node.label.slice(0, lastDot);
+            if (contexts.has(parentName)) {
+              return new LiveCategoryNode('Contexts', parentName, key, 0);
+            }
+          }
+        }
+        // Flat mode or root context: parent is the ConnectionNode.
+        const slash = key.indexOf('/');
+        const projName = slash >= 0 ? key.slice(0, slash) : key;
+        const connName = slash >= 0 ? key.slice(slash + 1) : '';
         const proj = this.projects.find(p => p.name === projName);
         if (!proj) return null;
         const conn = proj.connections.find(c => c.name === connName);
@@ -913,8 +946,10 @@ export class KafkaSqlProjectExplorer
     const contexts = new Map<string, ParsedContext>();
     for (const entry of result) {
       if (entry.kind === 'CONTEXT') {
-        if (!contexts.has(entry.name)) {
-          contexts.set(entry.name, { name: entry.name, declaredInFile: '', declaredAtLine: -1, objects: [] });
+        // Use the full qualified name as key (context.name or just name if root)
+        const fullName = entry.context ? `${entry.context}.${entry.name}` : entry.name;
+        if (!contexts.has(fullName)) {
+          contexts.set(fullName, { name: fullName, declaredInFile: '', declaredAtLine: -1, objects: [] });
         }
         continue;
       }

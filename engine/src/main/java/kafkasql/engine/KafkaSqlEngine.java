@@ -20,12 +20,15 @@ import kafkasql.lang.semantic.symbol.SymbolTable;
 import kafkasql.lang.syntax.ast.Script;
 import kafkasql.lang.syntax.ast.stmt.*;
 import kafkasql.lang.syntax.ast.decl.Decl;
+import kafkasql.lang.syntax.ast.expr.*;
+import kafkasql.lang.syntax.ast.fragment.WhereNode;
+import kafkasql.lang.syntax.ast.literal.*;
 import kafkasql.lang.syntax.ast.show.ShowTarget;
-import kafkasql.lang.syntax.ast.literal.StructLiteralNode;
 import kafkasql.runtime.Name;
 import kafkasql.runtime.diagnostics.Range;
 import kafkasql.runtime.type.SchemaResolver;
 import kafkasql.runtime.type.StructType;
+import kafkasql.runtime.value.EnumValue;
 import kafkasql.runtime.value.StructValue;
 
 /**
@@ -214,17 +217,15 @@ public abstract class KafkaSqlEngine {
         // Execute statements using bindings
         BindingEnv bindings = model.bindings();
         
-        // Count total statements to know which is the last one
-        int totalStatements = parseResult.scripts().stream()
-            .mapToInt(script -> script.statements().size())
-            .sum();
-        int currentStatement = 0;
+        // Capture results for all statements in the last script only.
+        // Earlier scripts (e.g. remote schema context) must not emit output.
+        List<Script> orderedScripts = new ArrayList<>(parseResult.scripts());
+        int lastScriptIdx = orderedScripts.size() - 1;
         
-        for (Script scriptNode : parseResult.scripts()) {
-            for (Stmt stmt : scriptNode.statements()) {
-                currentStatement++;
-                boolean isLastStatement = (currentStatement == totalStatements);
-                executeStatement(stmt, bindings, isLastStatement);
+        for (int si = 0; si < orderedScripts.size(); si++) {
+            boolean captureResults = (si == lastScriptIdx);
+            for (Stmt stmt : orderedScripts.get(si).statements()) {
+                executeStatement(stmt, bindings, captureResults);
             }
         }
     }
@@ -282,7 +283,6 @@ public abstract class KafkaSqlEngine {
         
         // Get all records from the stream
         List<StreamRecord> allRecords = readRecords(streamName);
-        
         // Filter by type if specific types are requested
         List<StreamRecord> filteredRecords;
         if (read.blocks().isEmpty()) {
@@ -317,10 +317,168 @@ public abstract class KafkaSqlEngine {
                 .toList();
         }
         
-        // TODO: Apply WHERE clauses and projections
+        // Apply WHERE clauses per type block
+        if (!read.blocks().isEmpty()) {
+            Map<String, Optional<WhereNode>> whereByType = new HashMap<>();
+            for (ReadTypeBlock block : read.blocks()) {
+                whereByType.put(block.alias().name(),
+                    block.where().isPresent() ? Optional.of(block.where().get()) : Optional.empty());
+            }
+            filteredRecords = filteredRecords.stream()
+                .filter(record -> {
+                    Optional<WhereNode> wOpt = whereByType.get(record.typeName());
+                    if (wOpt == null || wOpt.isEmpty()) return true;
+                    return matchesWhere(wOpt.get().expr(), record);
+                })
+                .toList();
+        }
+
         if (captureResults) {
             handleQueryResult(filteredRecords);
         }
+    }
+
+    // ── WHERE filter helpers ─────────────────────────────────────────────────
+
+    private static boolean matchesWhere(Expr expr, StreamRecord record) {
+        Map<String, Object> env = buildRecordEnv(record.typeName(), record.value());
+        try {
+            Object result = evalWhereExpr(expr, env);
+            return Boolean.TRUE.equals(result);
+        } catch (Exception e) {
+            return true; // keep record when expression cannot be evaluated
+        }
+    }
+
+    /** Builds a flat env map for WHERE expression evaluation.
+     *  - Each struct field is added under its own name.
+     *  - Enum fields are normalised to their symbol name (String).
+     *  - Nested StructValues are converted to sub-maps.
+     *  - "Value" and the type name are added as aliases for the whole record
+     *    so expressions like {@code Value.Status} and {@code CustomerRecord.Status}
+     *    both resolve correctly. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> buildRecordEnv(String typeName, StructValue value) {
+        Map<String, Object> flat = new java.util.LinkedHashMap<>();
+        for (var e : value.fields().entrySet()) {
+            flat.put(e.getKey(), normaliseWhereValue(e.getValue()));
+        }
+        // Allow TypeName.Field member access syntax alongside bare Field access
+        flat.put(typeName, new java.util.LinkedHashMap<>(flat));
+        return flat;
+    }
+
+    private static Object normaliseWhereValue(Object v) {
+        if (v instanceof EnumValue ev) return ev.symbolName();
+        if (v instanceof StructValue sv) {
+            Map<String, Object> nested = new java.util.LinkedHashMap<>();
+            for (var e : sv.fields().entrySet()) nested.put(e.getKey(), normaliseWhereValue(e.getValue()));
+            return nested;
+        }
+        return v;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object evalWhereExpr(Expr expr, Map<String, Object> env) {
+        return switch (expr) {
+            case LiteralExpr lit    -> evalWhereLiteral(lit.literal());
+            case IdentifierExpr id  -> env.get(id.name().name());
+            case InfixExpr inf      -> evalWhereInfix(inf, env);
+            case PrefixExpr pre     -> evalWherePrefix(pre, env);
+            case PostfixExpr post   -> evalWherePostfix(post, env);
+            case TrifixExpr tri     -> evalWhereTrifix(tri, env);
+            case ParenExpr paren    -> evalWhereExpr(paren.inner(), env);
+            case MemberExpr mem     -> evalWhereMember(mem, env);
+            case IndexExpr idx -> null; // not supported in WHERE
+        };
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object evalWhereMember(MemberExpr mem, Map<String, Object> env) {
+        Object target = evalWhereExpr(mem.target(), env);
+        if (target instanceof Map<?, ?> map) {
+            return ((Map<String, Object>) map).get(mem.name().name());
+        }
+        return null;
+    }
+
+    private static Object evalWhereLiteral(LiteralNode lit) {        return switch (lit) {
+            case BoolLiteralNode   b -> b.value();
+            case StringLiteralNode s -> s.value();
+            case NullLiteralNode   n -> null;
+            case EnumLiteralNode   e -> e.symbol().name(); // compare by symbol name
+            case ListLiteralNode   l -> l.elements().stream().map(KafkaSqlEngine::evalWhereLiteral).toList();
+            case NumberLiteralNode n -> {
+                String t = n.text().replace("_", "");
+                if (t.contains(".") || t.toLowerCase().contains("e")) yield Double.parseDouble(t);
+                long val = Long.parseLong(t);
+                // Use explicit if/else to avoid ternary type-promotion (int→long)
+                if (val >= Integer.MIN_VALUE && val <= Integer.MAX_VALUE) yield (int) val;
+                yield val;
+            }
+            default -> null;
+        };
+    }
+
+    private static Object evalWhereInfix(InfixExpr inf, Map<String, Object> env) {
+        // Short-circuit AND/OR
+        if (inf.op() == InfixOp.AND) {
+            Object l = evalWhereExpr(inf.left(), env);
+            return Boolean.TRUE.equals(l) && Boolean.TRUE.equals(evalWhereExpr(inf.right(), env));
+        }
+        if (inf.op() == InfixOp.OR) {
+            Object l = evalWhereExpr(inf.left(), env);
+            return Boolean.TRUE.equals(l) || Boolean.TRUE.equals(evalWhereExpr(inf.right(), env));
+        }
+        Object left  = evalWhereExpr(inf.left(),  env);
+        Object right = evalWhereExpr(inf.right(), env);
+        return switch (inf.op()) {
+            case EQ   -> (left instanceof Number nl && right instanceof Number nr)
+                             ? Double.compare(nl.doubleValue(), nr.doubleValue()) == 0
+                             : java.util.Objects.equals(left, right);
+            case NEQ  -> (left instanceof Number nl && right instanceof Number nr)
+                             ? Double.compare(nl.doubleValue(), nr.doubleValue()) != 0
+                             : !java.util.Objects.equals(left, right);
+            case LT   -> whereCompare(left, right) < 0;
+            case LTE  -> whereCompare(left, right) <= 0;
+            case GT   -> whereCompare(left, right) > 0;
+            case GTE  -> whereCompare(left, right) >= 0;
+            case IN   -> right instanceof List<?> list && list.contains(left);
+            case CONCAT -> String.valueOf(left) + String.valueOf(right);
+            default   -> null;
+        };
+    }
+
+    private static Object evalWherePrefix(PrefixExpr pre, Map<String, Object> env) {
+        Object val = evalWhereExpr(pre.expr(), env);
+        return switch (pre.op()) {
+            case NOT -> !Boolean.TRUE.equals(val);
+            case NEG -> val instanceof Number n ? -n.doubleValue() : null;
+        };
+    }
+
+    private static Object evalWherePostfix(PostfixExpr post, Map<String, Object> env) {
+        Object val = evalWhereExpr(post.expr(), env);
+        return switch (post.op()) {
+            case IS_NULL     -> val == null;
+            case IS_NOT_NULL -> val != null;
+        };
+    }
+
+    private static Object evalWhereTrifix(TrifixExpr tri, Map<String, Object> env) {
+        Object v   = evalWhereExpr(tri.left(),   env);
+        Object low = evalWhereExpr(tri.middle(),  env);
+        Object hi  = evalWhereExpr(tri.right(),   env);
+        return whereCompare(v, low) >= 0 && whereCompare(v, hi) <= 0;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static int whereCompare(Object a, Object b) {
+        if (a instanceof Number na && b instanceof Number nb)
+            return Double.compare(na.doubleValue(), nb.doubleValue());
+        if (a instanceof Comparable ca && b instanceof Comparable cb)
+            return ca.compareTo(cb);
+        return 0;
     }
     
     /**

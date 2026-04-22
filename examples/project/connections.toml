@@ -17,18 +17,18 @@
 
 [connection.local]
 bootstrap = "localhost:9092"
-topic     = "kafkasql-event-log"
+topic     = "_kafkasql_log"
 
 
 # ── Staging cluster ───────────────────────────────────────────────────────────
 
 # [connection.staging]
 # bootstrap = "kafka-staging.internal:9092"
-# topic     = "kafkasql-event-log"
+# topic     = "_kafkasql_log"
 
 
 # ── Production cluster ────────────────────────────────────────────────────────
 
 # [connection.production]
 # bootstrap = "kafka-prod-1.internal:9092,kafka-prod-2.internal:9092"
-# topic     = "kafkasql-event-log"
+# topic     = "_kafkasql_log"

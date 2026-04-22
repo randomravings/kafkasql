@@ -22,6 +22,7 @@ import kafkasql.pipeline.phases.SemanticPhase;
 
 import org.eclipse.lsp4j.*;
 import org.eclipse.lsp4j.services.*;
+import org.eclipse.lsp4j.DiagnosticTag;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -37,6 +38,31 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
 
   private volatile ComparisonMode comparisonMode = ComparisonMode.GIT;
   private volatile String         comparisonFilePath = null; // only used when mode == FILE
+
+  /**
+   * Called from the workspace executeCommand handler when the user explicitly chooses a
+   * diagnostics mode for a specific file.
+   *
+   * @param uri  the document URI
+   * @param mode {@code "interactive"}, {@code "file"}, or {@code "auto"} (clears the override)
+   */
+  void setFileMode(String uri, String mode) {
+    switch (mode.toLowerCase()) {
+      case "interactive" -> fileModeOverrides.put(uri, Boolean.TRUE);
+      case "file"        -> fileModeOverrides.put(uri, Boolean.FALSE);
+      default            -> fileModeOverrides.remove(uri);   // "auto" — revert to path detection
+    }
+    System.err.println("[kafkasql-lsp] setFileMode " + uri + " -> " + mode);
+    // Re-run diagnostics immediately so the editor reflects the new mode
+    String text = openDocumentText.get(uri);
+    if (text != null) {
+      try {
+        parseAndPublishDiagnostics(uri, text);
+      } catch (Throwable t) {
+        System.err.println("[kafkasql-lsp] refresh after setFileMode failed: " + t.getMessage());
+      }
+    }
+  }
 
   /** Called from the workspace executeCommand handler when the user changes the mode. */
   void setComparisonMode(String mode, String filePath) {
@@ -62,16 +88,32 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
 
   private LanguageClient client;
   private String workspaceRoot = null;
+  /** Full pipeline: parse + semantic analysis + lint. Used for model files inside the project root. */
   private final Pipeline pipeline;
+  /**
+   * Interactive pipeline: parse only. Used for misc/interactive scripts that live outside the
+   * project's model root.  Semantic analysis is intentionally skipped because objects are not
+   * defined locally — they are resolved from the live Kafka cluster at execution time.
+   */
+  private final Pipeline interactivePipeline;
   /** Last-seen text per open URI — used to re-run diagnostics when the comparison mode changes. */
   private final Map<String, String> openDocumentText = new ConcurrentHashMap<>();
+  /**
+   * Per-URI mode overrides set by the user via the status bar command.
+   * {@code null} / absent  → auto-detect from file path
+   * {@code Boolean.TRUE}   → forced interactive mode
+   * {@code Boolean.FALSE}  → forced file mode
+   */
+  private final Map<String, Boolean> fileModeOverrides = new ConcurrentHashMap<>();
 
   public KafkaSqlTextDocumentService() {
-    // Build pipeline once and reuse for all document changes
     this.pipeline = Pipeline.builder()
         .addPhase(new ParsePhase())
         .addPhase(new SemanticPhase())
         .addPhase(new LintPhase())
+        .build();
+    this.interactivePipeline = Pipeline.builder()
+        .addPhase(new ParsePhase())
         .build();
   }
 
@@ -181,22 +223,41 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
       filePath = null;
     }
 
+    // Determine interactive vs file mode.
+    // Priority: explicit per-file override (set by the user via status bar) → path-based auto-detection.
+    boolean interactive;
+    if (fileModeOverrides.containsKey(uri)) {
+      interactive = fileModeOverrides.get(uri);
+      System.err.println("[kafkasql-lsp]   interactive=" + interactive + " (override)");
+    } else {
+      interactive = false;
+      if (filePath != null) {
+        Optional<KafkaSqlProject> projOpt = KafkaSqlProject.findFor(filePath);
+        if (projOpt.isPresent()) {
+          interactive = projOpt.get().isInteractiveFile(filePath);
+        }
+      }
+      System.err.println("[kafkasql-lsp]   interactive=" + interactive + " (auto)");
+    }
+
     Input currentInput = new StringInput(uri, text);
     
     // Load lint settings from .proj.toml (if in a project) or kafkasql.rules.toml (if present)
     LintSettings lintSettings = loadLintSettings(filePath, workingDir);
 
-    // Build pipeline context
+    // Build pipeline context; interactive files skip INCLUDE resolution so that
+    // missing model files don't cause file-not-found errors during parsing.
     PipelineContext context = PipelineContext.builder()
         .inputs(List.of(currentInput))
         .workingDir(workingDir)
-        .includeResolution(true)
+        .includeResolution(!interactive)
         .verbose(false)
         .lintSettings(lintSettings)
         .build();
-    
-    // Execute pipeline
-    PipelineResult result = pipeline.execute(context);
+
+    // In interactive mode use the parse-only pipeline so that "object not found" and other
+    // semantic errors are not reported — the semantic model lives on the live cluster.
+    PipelineResult result = (interactive ? interactivePipeline : pipeline).execute(context);
     System.err.println("[kafkasql-lsp]   pipeline: errors=" + result.diagnostics().hasError()
         + ", warnings=" + result.diagnostics().hasWarning()
         + ", diags=" + result.diagnostics().all().size());
@@ -204,23 +265,59 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
     // Start with parse/semantic/lint diagnostics
     List<org.eclipse.lsp4j.Diagnostic> lspDiags = buildPipelineDiagnostics(result.diagnostics());
 
-    // Project-convention check (folder must align with declared context) — always run
-    lspDiags.addAll(buildProjectConventionDiagnostics(uri, text));
-
-    // Project object-count check (one CREATE per file) — always run
-    lspDiags.addAll(buildProjectObjectCountDiagnostics(uri, text));
-
-    // If the file parsed cleanly, also run a compatibility diff against git HEAD
-    if (!result.diagnostics().hasError()) {
-      lspDiags.addAll(buildCompatibilityDiagnostics(uri, text, workingDir));
+    if (interactive) {
+      // Gray out any INCLUDE statements — they are ignored in interactive mode.
+      lspDiags.addAll(buildInteractiveIncludeHints(text));
     } else {
-      System.err.println("[kafkasql-lsp]   skipping compat diff (parse/semantic errors present)");
+      // Project-convention check (folder must align with declared context)
+      lspDiags.addAll(buildProjectConventionDiagnostics(uri, text));
+
+      // Project object-count check (one CREATE per file)
+      lspDiags.addAll(buildProjectObjectCountDiagnostics(uri, text));
+
+      // Compatibility diff against git HEAD (only when parsed cleanly)
+      if (!result.diagnostics().hasError()) {
+        lspDiags.addAll(buildCompatibilityDiagnostics(uri, text, workingDir));
+      } else {
+        System.err.println("[kafkasql-lsp]   skipping compat diff (parse/semantic errors present)");
+      }
     }
 
     System.err.println("[kafkasql-lsp]   publishing " + lspDiags.size() + " diagnostic(s) total");
     if (client != null) {
       client.publishDiagnostics(new PublishDiagnosticsParams(uri, lspDiags));
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Interactive mode: gray-out INCLUDE hints
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  private static final Pattern INCLUDE_LINE_PATTERN =
+      Pattern.compile("(?im)^(\\s*INCLUDE\\s+[^;\\n]+;?)");
+
+  /**
+   * In interactive mode, INCLUDE statements are ignored — all types are resolved
+   * from the live cluster.  This method emits a {@code Hint/Unnecessary} diagnostic
+   * on each INCLUDE line so VS Code dims the text, making it clear those lines have
+   * no effect.
+   */
+  private List<org.eclipse.lsp4j.Diagnostic> buildInteractiveIncludeHints(String text) {
+    List<org.eclipse.lsp4j.Diagnostic> diags = new ArrayList<>();
+    Matcher m = INCLUDE_LINE_PATTERN.matcher(text);
+    while (m.find()) {
+      Position start = offsetToPosition(text, m.start(1));
+      Position end   = offsetToPosition(text, m.end(1));
+      var diag = new org.eclipse.lsp4j.Diagnostic(
+          new Range(start, end),
+          "INCLUDE is ignored in interactive mode — symbols are resolved from the live cluster.",
+          DiagnosticSeverity.Hint,
+          "kafkasql-interactive"
+      );
+      diag.setTags(List.of(DiagnosticTag.Unnecessary));
+      diags.add(diag);
+    }
+    return diags;
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

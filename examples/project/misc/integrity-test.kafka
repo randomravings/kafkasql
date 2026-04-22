@@ -1,0 +1,46 @@
+-- integrity-test.kafka
+-- Tests that constraint boundaries, enum validity, and struct field
+-- presence are enforced correctly by the integrity/ module.
+-- Each WRITE block documents the expected outcome.
+
+-- ── VALID: all constraints satisfied ─────────────────────────────────────────
+
+-- Expected: PASS — all values within declared domain
+WRITE TO customers.Customers
+  TYPE CustomerRecord
+  VALUES
+    ({ Key: 1, Value: { Id: 1, Name: 'Valid Customer', Status: customers.CustomerStatus::ACTIVE } });
+
+-- ── VALID: status transitions ─────────────────────────────────────────────────
+
+-- Expected: PASS — OrderStatus covers full lifecycle
+WRITE TO orders.Orders
+  TYPE OrderRecord
+  VALUES
+    ({ Key: 10, Value: { Id: 10, Status: orders.OrderStatus::PENDING   } },
+    { Key: 10, Value: { Id: 10, Status: orders.OrderStatus::SHIPPED   } },
+    { Key: 10, Value: { Id: 10, Status: orders.OrderStatus::DELIVERED } });
+
+-- ── VALID: union alternatives ─────────────────────────────────────────────────
+-- (Amount is a union of Absolute:Money and Relative:DECIMAL(5,2))
+
+-- Read back to verify union discriminator is preserved
+READ FROM com.example.Payments
+  TYPE PaymentRecord
+    Key   AS PaymentId,
+    Value AS Amount
+  WHERE Value > 0.00;
+
+-- ── BOUNDARY: empty name string ───────────────────────────────────────────────
+-- Expected: depends on whether Name has a CHECK constraint (currently none)
+WRITE TO customers.Customers
+  TYPE CustomerRecord
+  VALUES
+    ({ Key: 99, Value: { Id: 99, Name: '', Status: customers.CustomerStatus::ACTIVE } });
+
+-- ── BOUNDARY: zero-value decimal payment ─────────────────────────────────────
+-- Expected: depends on whether Money has a CHECK constraint (currently none)
+WRITE TO com.example.Payments
+  TYPE PaymentRecord
+  VALUES
+    ({ Key: 99, Value: 0.00 });

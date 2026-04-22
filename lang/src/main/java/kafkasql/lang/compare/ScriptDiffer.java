@@ -6,11 +6,17 @@ import kafkasql.lang.ParseResult;
 import kafkasql.lang.input.FileInput;
 import kafkasql.lang.input.Input;
 import kafkasql.lang.input.StringInput;
+import kafkasql.lang.syntax.ast.AstListNode;
 import kafkasql.lang.syntax.ast.Script;
+import kafkasql.lang.syntax.ast.misc.Include;
+import kafkasql.lang.syntax.ast.misc.VersionPragma;
+import kafkasql.lang.syntax.ast.stmt.Stmt;
+import kafkasql.runtime.diagnostics.Range;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -155,9 +161,24 @@ public final class ScriptDiffer {
             boolean resolveIncludes,
             RuleSet rules) {
 
-        Script leftScript  = parseString(leftContent,  leftUri,  workingDir, resolveIncludes);
-        Script rightScript = parseString(rightContent, rightUri, workingDir, resolveIncludes);
+        // Empty content is valid (e.g. a cluster with no deployed schema).
+        // Handle at the boundary so internal helpers never receive blank input.
+        Script leftScript  = isBlank(leftContent)  ? emptyScript(leftUri)  : parseString(leftContent,  leftUri,  workingDir, resolveIncludes);
+        Script rightScript = isBlank(rightContent) ? emptyScript(rightUri) : parseString(rightContent, rightUri, workingDir, resolveIncludes);
         return diff(leftScript, rightScript, rules);
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    private static Script emptyScript(String uri) {
+        return new Script(
+            Range.NONE,
+            new AstListNode<>(Include.class),
+            Optional.empty(),
+            new AstListNode<>(Stmt.class)
+        );
     }
 
     // -------------------------------------------------------------------------
