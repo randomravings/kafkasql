@@ -13,7 +13,7 @@ The project will go into three phases:
 Here is taste of what is currently targetted for the syntax.
 
 - `CREATE`, `ALTER`, `DROP` for resource management.
-- `SHOW`, `EXPLAIN` for explioing resources.
+- `SHOW`, `EXPLAIN` for explioing resources (`SHOW <target> '<glob-filter>'` and `SHOW USERS` are supported).
 - `READ`, `WRITE` for IO operations.
 - `SET`, `USE` for session management.
 

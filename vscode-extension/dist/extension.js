@@ -57,6 +57,21 @@ let executionStatusBar;
 // Absent = auto-detect from file path.
 const fileModeOverrides = new Map();
 const pinnedConnections = new Map();
+const TOML_UNSAFE_CHARS = /["\\\r\n]/;
+function validateTomlSafe(fieldName, value, required = true) {
+    const trimmed = value.trim();
+    if (required && !trimmed)
+        return 'Required';
+    if (trimmed && TOML_UNSAFE_CHARS.test(trimmed)) {
+        return `${fieldName} cannot contain quotes, backslashes, or newlines`;
+    }
+    return null;
+}
+function maybeWarnOnStoredCredentials(fields) {
+    if (fields.username && fields.password) {
+        vscode.window.showWarningMessage('KafkaSQL: credentials are stored in plaintext in connections.toml. Use local-only files and keep them out of source control.');
+    }
+}
 function findBuiltServerJar(workspaceRoot) {
     try {
         // walk upwards from workspaceRoot looking for lsp/build/libs/*.jar
@@ -362,7 +377,10 @@ function removeConnectionBlock(tomlText, name) {
 /** Replace an existing [connection.<name>] block, or append it if not present. */
 function upsertConnectionBlock(tomlText, name, block) {
     const cleaned = removeConnectionBlock(tomlText, name);
-    return cleaned.trimEnd() + '\n\n' + block + '\n';
+    const base = cleaned.trimEnd();
+    if (!base)
+        return block + '\n';
+    return base + '\n\n' + block + '\n';
 }
 /** Multi-step input box sequence to collect / edit connection fields. */
 async function promptConnectionFields(defaults, nameReadonly = false) {
@@ -385,7 +403,7 @@ async function promptConnectionFields(defaults, nameReadonly = false) {
         title: 'KafkaSQL — Bootstrap servers',
         prompt: 'Kafka bootstrap server(s), comma-separated (e.g. localhost:9092)',
         value: defaults?.bootstrap ?? 'localhost:9092',
-        validateInput: s => s.trim() ? null : 'Required',
+        validateInput: s => validateTomlSafe('Bootstrap servers', s),
     });
     if (bootstrap === undefined)
         return undefined;
@@ -393,7 +411,7 @@ async function promptConnectionFields(defaults, nameReadonly = false) {
         title: 'KafkaSQL — Event-log topic',
         prompt: 'KafkaSQL event-log topic name',
         value: defaults?.topic ?? '_kafkasql_log',
-        validateInput: s => s.trim() ? null : 'Required',
+        validateInput: s => validateTomlSafe('Topic', s),
     });
     if (topic === undefined)
         return undefined;
@@ -401,6 +419,7 @@ async function promptConnectionFields(defaults, nameReadonly = false) {
         title: 'KafkaSQL — Username (optional)',
         prompt: 'SASL/SCRAM-SHA-256 username — leave empty for PLAINTEXT',
         value: defaults?.username ?? '',
+        validateInput: s => validateTomlSafe('Username', s, false),
     });
     if (username === undefined)
         return undefined;
@@ -411,7 +430,7 @@ async function promptConnectionFields(defaults, nameReadonly = false) {
             prompt: 'SASL/SCRAM-SHA-256 password',
             value: defaults?.password ?? '',
             password: true,
-            validateInput: s => s.trim() ? null : 'Required when username is set',
+            validateInput: s => validateTomlSafe('Password', s),
         });
         if (pw === undefined)
             return undefined;
@@ -874,6 +893,18 @@ function activate(context) {
         await vscode.window.showTextDocument(doc, { preview: false });
         vscode.window.setStatusBarMessage(`KafkaSQL: new query on "${node.label}" (${node.bootstrapServers})`, 4000);
     });
+    context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(doc => {
+        pinnedConnections.delete(doc.uri.toString());
+    }));
+    context.subscriptions.push(vscode.workspace.onDidRenameFiles(event => {
+        for (const file of event.files) {
+            const existing = pinnedConnections.get(file.oldUri.toString());
+            if (existing) {
+                pinnedConnections.delete(file.oldUri.toString());
+                pinnedConnections.set(file.newUri.toString(), existing);
+            }
+        }
+    }));
     // ── Add Connection ────────────────────────────────────────────────────────
     // Can be invoked from the Clusters root toolbar button or from the command palette.
     reg('kafkasql.addConnection', async () => {
@@ -908,6 +939,7 @@ function activate(context) {
         const fields = await promptConnectionFields();
         if (!fields)
             return;
+        maybeWarnOnStoredCredentials(fields);
         const existing = fs.existsSync(targetToml) ? fs.readFileSync(targetToml, 'utf8') : '';
         // Guard against duplicate names
         if (existing.includes(`[connection.${fields.name}]`)) {
@@ -938,6 +970,7 @@ function activate(context) {
         }, /* nameReadonly */ true);
         if (!fields)
             return;
+        maybeWarnOnStoredCredentials(fields);
         const raw = fs.readFileSync(tomlPath, 'utf8');
         const block = serializeConnectionBlock(fields.name, fields.bootstrap, fields.topic, fields.username || undefined, fields.password || undefined);
         const updated = upsertConnectionBlock(raw, fields.name, block);
