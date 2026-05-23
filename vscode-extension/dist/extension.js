@@ -57,13 +57,13 @@ let executionStatusBar;
 // Absent = auto-detect from file path.
 const fileModeOverrides = new Map();
 const pinnedConnections = new Map();
-const TOML_UNSAFE_CHARS = /["\\\r\n]/;
+const TOML_UNSAFE_CHARS = /["\\\x00-\x1f\x7f]/;
 function validateTomlSafe(fieldName, value, required = true) {
     const trimmed = value.trim();
     if (required && !trimmed)
         return 'Required';
     if (trimmed && TOML_UNSAFE_CHARS.test(trimmed)) {
-        return `${fieldName} cannot contain quotes, backslashes, or newlines`;
+        return `${fieldName} cannot contain quotes, backslashes, or control characters`;
     }
     return null;
 }
