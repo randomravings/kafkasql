@@ -10,3 +10,4 @@ out/
 .DS_Store
 .antlr/
 node_modules/
+connections.toml

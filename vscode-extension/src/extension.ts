@@ -31,6 +31,24 @@ const fileModeOverrides = new Map<string, 'file' | 'interactive'>();
 interface PinnedConnection { connectionName: string; projectFile: string; bootstrapServers: string; }
 const pinnedConnections = new Map<string, PinnedConnection>();
 
+const TOML_UNSAFE_CHARS = /["\\\r\n]/;
+
+function validateTomlSafe(fieldName: string, value: string, required = true): string | null {
+  const trimmed = value.trim();
+  if (required && !trimmed) return 'Required';
+  if (trimmed && TOML_UNSAFE_CHARS.test(trimmed)) {
+    return `${fieldName} cannot contain quotes, backslashes, or newlines`;
+  }
+  return null;
+}
+
+function maybeWarnOnStoredCredentials(fields: ConnectionFormFields): void {
+  if (fields.username && fields.password) {
+    vscode.window.showWarningMessage(
+      'KafkaSQL: credentials are stored in plaintext in connections.toml. Use local-only files and keep them out of source control.');
+  }
+}
+
 function findBuiltServerJar(workspaceRoot: string): string | null {
   try {
     // walk upwards from workspaceRoot looking for lsp/build/libs/*.jar
@@ -384,7 +402,9 @@ function removeConnectionBlock(tomlText: string, name: string): string {
 /** Replace an existing [connection.<name>] block, or append it if not present. */
 function upsertConnectionBlock(tomlText: string, name: string, block: string): string {
   const cleaned = removeConnectionBlock(tomlText, name);
-  return cleaned.trimEnd() + '\n\n' + block + '\n';
+  const base = cleaned.trimEnd();
+  if (!base) return block + '\n';
+  return base + '\n\n' + block + '\n';
 }
 
 interface ConnectionFormFields {
@@ -414,7 +434,7 @@ async function promptConnectionFields(
     title: 'KafkaSQL — Bootstrap servers',
     prompt: 'Kafka bootstrap server(s), comma-separated (e.g. localhost:9092)',
     value: defaults?.bootstrap ?? 'localhost:9092',
-    validateInput: s => s.trim() ? null : 'Required',
+    validateInput: s => validateTomlSafe('Bootstrap servers', s),
   });
   if (bootstrap === undefined) return undefined;
 
@@ -422,7 +442,7 @@ async function promptConnectionFields(
     title: 'KafkaSQL — Event-log topic',
     prompt: 'KafkaSQL event-log topic name',
     value: defaults?.topic ?? '_kafkasql_log',
-    validateInput: s => s.trim() ? null : 'Required',
+    validateInput: s => validateTomlSafe('Topic', s),
   });
   if (topic === undefined) return undefined;
 
@@ -430,6 +450,7 @@ async function promptConnectionFields(
     title: 'KafkaSQL — Username (optional)',
     prompt: 'SASL/SCRAM-SHA-256 username — leave empty for PLAINTEXT',
     value: defaults?.username ?? '',
+    validateInput: s => validateTomlSafe('Username', s, false),
   });
   if (username === undefined) return undefined;
 
@@ -440,7 +461,7 @@ async function promptConnectionFields(
       prompt: 'SASL/SCRAM-SHA-256 password',
       value: defaults?.password ?? '',
       password: true,
-      validateInput: s => s.trim() ? null : 'Required when username is set',
+      validateInput: s => validateTomlSafe('Password', s),
     });
     if (pw === undefined) return undefined;
     password = pw;
@@ -943,6 +964,20 @@ export function activate(context: vscode.ExtensionContext) {
       `KafkaSQL: new query on "${node.label}" (${node.bootstrapServers})`, 4000);
   });
 
+  context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(doc => {
+    pinnedConnections.delete(doc.uri.toString());
+  }));
+
+  context.subscriptions.push(vscode.workspace.onDidRenameFiles(event => {
+    for (const file of event.files) {
+      const existing = pinnedConnections.get(file.oldUri.toString());
+      if (existing) {
+        pinnedConnections.delete(file.oldUri.toString());
+        pinnedConnections.set(file.newUri.toString(), existing);
+      }
+    }
+  }));
+
   // ── Add Connection ────────────────────────────────────────────────────────
   // Can be invoked from the Clusters root toolbar button or from the command palette.
   reg('kafkasql.addConnection', async () => {
@@ -974,6 +1009,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const fields = await promptConnectionFields();
     if (!fields) return;
+    maybeWarnOnStoredCredentials(fields);
 
     const existing = fs.existsSync(targetToml) ? fs.readFileSync(targetToml, 'utf8') : '';
     // Guard against duplicate names
@@ -1002,6 +1038,7 @@ export function activate(context: vscode.ExtensionContext) {
       password:  node.password ?? '',
     }, /* nameReadonly */ true);
     if (!fields) return;
+    maybeWarnOnStoredCredentials(fields);
 
     const raw     = fs.readFileSync(tomlPath, 'utf8');
     const block   = serializeConnectionBlock(fields.name, fields.bootstrap, fields.topic, fields.username || undefined, fields.password || undefined);

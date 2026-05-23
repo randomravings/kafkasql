@@ -27,11 +27,11 @@ bootstrap = "localhost:9092"
 topic     = "_kafkasql_log"
 
 # ── Local / development cluster (SASL/SCRAM, port 9094) ──────────────────────
-# Default admin credentials — created automatically by docker/setup.sh.
-# Override via KAFKA_ADMIN_USER / KAFKA_ADMIN_PASSWORD env vars before running setup.sh.
+# Replace these placeholders with your own local credentials.
+# Do not commit real secrets in this file.
 
 [connection.local-admin]
 bootstrap = "localhost:9094"
 topic     = "_kafkasql_log"
-username  = "admin"
-password  = "admin-secret"
+username  = "<set-via-env-or-local-secret>"
+password  = "<set-via-env-or-local-secret>"

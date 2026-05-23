@@ -28,14 +28,22 @@ public record ConnectionConfig(
     public Properties baseProperties() {
         Properties props = new Properties();
         props.put("bootstrap.servers", bootstrapServers);
+        if (username.isPresent() != password.isPresent()) {
+            throw new IllegalStateException(
+                "Connection '" + name + "' must set both username and password for SASL/SCRAM");
+        }
         if (username.isPresent() && password.isPresent()) {
             props.put("security.protocol", "SASL_PLAINTEXT");
             props.put("sasl.mechanism", "SCRAM-SHA-256");
             props.put("sasl.jaas.config",
                 "org.apache.kafka.common.security.scram.ScramLoginModule required "
-                + "username=\"" + username.get() + "\" "
-                + "password=\"" + password.get() + "\";");
+                + "username=\"" + jaasEscape(username.get()) + "\" "
+                + "password=\"" + jaasEscape(password.get()) + "\";");
         }
         return props;
+    }
+
+    private static String jaasEscape(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 }

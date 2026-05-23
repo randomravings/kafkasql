@@ -540,6 +540,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
       // Parse the statement text; interactive mode skips INCLUDE resolution
       Path root = Path.of(activeFilePath).normalize().getParent();
       Map<Name, Decl> localDecls = buildLocalDecls(statementText, "<editor>", root, !interactive);
+      StatementKinds statementKinds = parseStatementKinds(statementText);
 
       Properties producerProps = conn.baseProperties();
       producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,   ByteArraySerializer.class.getName());
@@ -588,7 +589,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
         logWriter.flush();
 
         // Handle WRITE TO and/or READ FROM statements via the execution engine
-        if (hasWriteStatements(statementText) || hasReadStatements(statementText) || hasUserStatements(statementText)) {
+        if (statementKinds.hasWrite() || statementKinds.hasRead() || statementKinds.hasUserOrAcl()) {
           String remoteScript = buildRemoteScript(stateMap);
           int[] writeCount = {0};
           Map<String, Integer> streamWriteCounts = new LinkedHashMap<>();
@@ -610,19 +611,20 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
         // Extract consumer clauses keyed by stream name for use in readRecords
           Map<String, ReadMode> consumerByStream = new LinkedHashMap<>();
           Map<String, StopAfter> stopAfterByStream = new LinkedHashMap<>();
-          try {
-            StringInput si2 = new StringInput("<editor>", statementText);
-            KafkaSqlArgs args2 = new KafkaSqlArgs(Path.of(""), false, false);
-            ParseResult pr2 = KafkaSqlParser.parse(List.of(si2), args2);
-            for (Script sc2 : pr2.scripts())
-              for (Stmt st2 : sc2.statements())
+          if (statementKinds.parseResult() != null) {
+            for (Script sc2 : statementKinds.parseResult().scripts()) {
+              for (Stmt st2 : sc2.statements()) {
                 if (st2 instanceof ReadStmt rs) {
-                  if (rs.mode().isPresent())
+                  if (rs.mode().isPresent()) {
                     consumerByStream.put(rs.stream().fullName(), rs.mode().get());
-                  if (rs.stopAfter().isPresent())
+                  }
+                  if (rs.stopAfter().isPresent()) {
                     stopAfterByStream.put(rs.stream().fullName(), rs.stopAfter().get());
+                  }
                 }
-          } catch (Exception ignored) {}
+              }
+            }
+          }
 
           KafkaSqlEngine engine = new KafkaSqlEngine() {
             @Override
@@ -931,7 +933,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
           for (var we : streamWriteCounts.entrySet()) {
             operations.add("WRITE " + we.getValue() + " record(s) to " + we.getKey());
           }
-          if (hasReadStatements(statementText)) {
+          if (statementKinds.hasRead()) {
             return Map.of("executed", eventCount, "operations", operations, "records", queryRecords);
           }
         }
@@ -1256,23 +1258,34 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
     return decls;
   }
 
+  private record StatementKinds(boolean hasWrite, boolean hasRead, boolean hasUserOrAcl,
+                                ParseResult parseResult) {}
+
   /**
-   * Returns true if the given script text contains at least one WRITE TO statement.
-   * Uses a no-include parse so it doesn't traverse the file system.
+   * Parses the script once (without INCLUDE resolution) and reports whether it
+   * contains WRITE, READ, and USER/ACL statements.
    */
-  private boolean hasWriteStatements(String content) {
+  private StatementKinds parseStatementKinds(String content) {
     try {
       StringInput input = new StringInput("<editor>", content);
       KafkaSqlArgs args = new KafkaSqlArgs(Path.of(""), false, false);
       ParseResult result = KafkaSqlParser.parse(List.of(input), args);
+      boolean hasWrite = false;
+      boolean hasRead = false;
+      boolean hasUserOrAcl = false;
       for (Script script : result.scripts()) {
         for (Stmt stmt : script.statements()) {
-          if (stmt instanceof WriteStmt) return true;
+          if (stmt instanceof WriteStmt) hasWrite = true;
+          if (stmt instanceof ReadStmt) hasRead = true;
+          if (stmt instanceof kafkasql.lang.syntax.ast.stmt.UserStmt
+              || stmt instanceof kafkasql.lang.syntax.ast.stmt.AclStmt) {
+            hasUserOrAcl = true;
+          }
         }
       }
-      return false;
+      return new StatementKinds(hasWrite, hasRead, hasUserOrAcl, result);
     } catch (Exception e) {
-      return false;
+      return new StatementKinds(false, false, false, null);
     }
   }
 
@@ -1315,42 +1328,6 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
       return lspDeserializeRecord(rec);
     } catch (Exception e) {
       return lspDeserializeRecord(rec);
-    }
-  }
-
-  /**
-   * Returns true if the given script text contains at least one READ FROM statement.
-   */
-  private boolean hasReadStatements(String content) {
-    try {
-      StringInput input = new StringInput("<editor>", content);
-      KafkaSqlArgs args = new KafkaSqlArgs(Path.of(""), false, false);
-      ParseResult result = KafkaSqlParser.parse(List.of(input), args);
-      for (Script script : result.scripts()) {
-        for (Stmt stmt : script.statements()) {
-          if (stmt instanceof ReadStmt) return true;
-        }
-      }
-      return false;
-    } catch (Exception e) {
-      return false;
-    }
-  }
-
-  private boolean hasUserStatements(String content) {
-    try {
-      StringInput input = new StringInput("<editor>", content);
-      KafkaSqlArgs args = new KafkaSqlArgs(Path.of(""), false, false);
-      ParseResult result = KafkaSqlParser.parse(List.of(input), args);
-      for (Script script : result.scripts()) {
-        for (Stmt stmt : script.statements()) {
-          if (stmt instanceof kafkasql.lang.syntax.ast.stmt.UserStmt) return true;
-          if (stmt instanceof kafkasql.lang.syntax.ast.stmt.AclStmt) return true;
-        }
-      }
-      return false;
-    } catch (Exception e) {
-      return false;
     }
   }
 

@@ -13,6 +13,7 @@ import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.MountableFile;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import java.time.Duration;
 import java.util.*;
@@ -42,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 @Testcontainers
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@EnabledIfSystemProperty(named = "kafkasql.it.fixedPorts", matches = "true")
 class AclEnforcementIT {
 
     /** PLAINTEXT bootstrap port (admin / super-user connections). */
