@@ -809,8 +809,14 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
                 java.util.function.Predicate<String> namePredicate;
                 if (filter.isPresent()) {
                   String pattern = filter.get();
-                  // Convert glob * to regex .* (case-insensitive)
-                  String regex = java.util.regex.Pattern.quote(pattern).replace("\\*", "\\E.*\\Q");
+                  // Convert glob * to regex .* (case-insensitive) by quoting each segment
+                  String[] segments = pattern.split("\\*", -1);
+                  StringBuilder regexBuilder = new StringBuilder();
+                  for (int i = 0; i < segments.length; i++) {
+                    if (i > 0) regexBuilder.append(".*");
+                    if (!segments[i].isEmpty()) regexBuilder.append(java.util.regex.Pattern.quote(segments[i]));
+                  }
+                  String regex = regexBuilder.toString();
                   java.util.regex.Pattern compiled = java.util.regex.Pattern.compile(
                       regex, java.util.regex.Pattern.CASE_INSENSITIVE);
                   namePredicate = name -> compiled.matcher(name).matches();
