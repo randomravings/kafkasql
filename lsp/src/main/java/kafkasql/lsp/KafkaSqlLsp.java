@@ -888,7 +888,9 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
                   case MODIFY -> List.of(org.apache.kafka.common.acl.AclOperation.ALTER);
                   case ALL    -> List.of(
                       org.apache.kafka.common.acl.AclOperation.READ,
-                      org.apache.kafka.common.acl.AclOperation.WRITE);
+                      org.apache.kafka.common.acl.AclOperation.WRITE,
+                      org.apache.kafka.common.acl.AclOperation.CREATE,
+                      org.apache.kafka.common.acl.AclOperation.ALTER);
                 };
 
                 var resourcePattern = new org.apache.kafka.common.resource.ResourcePattern(
