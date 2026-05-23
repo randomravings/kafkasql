@@ -307,16 +307,26 @@ function parseConnectionsToml(tomlPath) {
     return result;
 }
 // ── connections.toml write helpers ───────────────────────────────────────────
+/** Escape a string value for use inside a TOML basic (double-quoted) string. */
+function tomlEscape(value) {
+    return value
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\t/g, '\\t')
+        .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, c => `\\u${c.codePointAt(0).toString(16).padStart(4, '0')}`);
+}
 /** Serialize a single [connection.*] block (no trailing newline). */
 function serializeConnectionBlock(name, bootstrap, topic, username, password) {
     const lines = [`[connection.${name}]`];
-    lines.push(`bootstrap = "${bootstrap}"`);
-    lines.push(`topic     = "${topic}"`);
+    lines.push(`bootstrap = "${tomlEscape(bootstrap)}"`);
+    lines.push(`topic     = "${tomlEscape(topic)}"`);
     if (username) {
-        lines.push(`username  = "${username}"`);
+        lines.push(`username  = "${tomlEscape(username)}"`);
     }
     if (password) {
-        lines.push(`password  = "${password}"`);
+        lines.push(`password  = "${tomlEscape(password)}"`);
     }
     return lines.join('\n');
 }
