@@ -548,8 +548,17 @@ public abstract class KafkaSqlEngine {
             return name -> true;
         }
         String pattern = filter.get();
-        // Convert glob pattern to regex: escape regex metacharacters, then replace * with .*
-        String regex = java.util.regex.Pattern.quote(pattern).replace("\\*", "\\E.*\\Q");
+        // Convert glob pattern to regex by quoting segments between wildcard separators.
+        StringBuilder regexBuilder = new StringBuilder();
+        int start = 0;
+        int wildcard;
+        while ((wildcard = pattern.indexOf('*', start)) >= 0) {
+            regexBuilder.append(java.util.regex.Pattern.quote(pattern.substring(start, wildcard)));
+            regexBuilder.append(".*");
+            start = wildcard + 1;
+        }
+        regexBuilder.append(java.util.regex.Pattern.quote(pattern.substring(start)));
+        String regex = regexBuilder.toString();
         java.util.regex.Pattern compiled = java.util.regex.Pattern.compile(regex, java.util.regex.Pattern.CASE_INSENSITIVE);
         return name -> compiled.matcher(name).matches();
     }
