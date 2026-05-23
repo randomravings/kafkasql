@@ -46,6 +46,8 @@ statement
   | createStmt
   | alterStmt
   | dropStmt
+  | userStmt
+  | grantStmt
   ;
 
 /* ─────────────────────── Use Statement ─────────────────── */
@@ -60,14 +62,14 @@ contextUse
 /* ─────────────────────── Show Statements ─────────────────── */
 showStmt
   : SHOW CURRENT CONTEXT                       # ShowCurrentStmt
-  | SHOW ALL showTarget                        # ShowAllStmt
-  | SHOW showTarget qname?                     # ShowContextualStmt
+  | SHOW showTarget STRING_LIT?                # ShowContextualStmt
   ;
 
 showTarget
   : CONTEXTS
   | TYPES
   | STREAMS
+  | USERS
   ;
 
 /* ─────────────────────── Explain Statement ─────────────────── */
@@ -192,6 +194,32 @@ dropTarget
   : CONTEXT qname                              # DropContext
   | TYPE qname                                 # DropType
   | STREAM qname                               # DropStream
+  ;
+
+/* ─────────────────────── User Statements ─────────────────────── */
+userStmt
+  : CREATE USER identifier (WITH? PASSWORD STRING_LIT)?   # CreateUser
+  | ALTER USER identifier WITH? PASSWORD STRING_LIT       # AlterUser
+  | DROP USER identifier                                  # DropUser
+  ;
+
+/* ─────────────────────── Grant/Revoke Statements ─────────────────────── */
+grantStmt
+  : GRANT privilege ON grantTarget qname TO STRING_LIT    # GrantPrivilege
+  | REVOKE privilege ON grantTarget qname FROM STRING_LIT # RevokePrivilege
+  ;
+
+privilege
+  : READ
+  | WRITE
+  | CREATE
+  | MODIFY
+  | ALL
+  ;
+
+grantTarget
+  : STREAM
+  | CONTEXT
   ;
 
 decl
@@ -550,4 +578,6 @@ identifier
   | RECORDS
   | SECONDS
   | IDLE
+  | USER
+  | PASSWORD
   ;

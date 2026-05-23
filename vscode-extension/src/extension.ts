@@ -27,6 +27,10 @@ let executionStatusBar: vscode.StatusBarItem;
 // Absent = auto-detect from file path.
 const fileModeOverrides = new Map<string, 'file' | 'interactive'>();
 
+// Connections pinned to a specific document (opened via "New Query" from the sidebar).
+interface PinnedConnection { connectionName: string; projectFile: string; bootstrapServers: string; }
+const pinnedConnections = new Map<string, PinnedConnection>();
+
 function findBuiltServerJar(workspaceRoot: string): string | null {
   try {
     // walk upwards from workspaceRoot looking for lsp/build/libs/*.jar
@@ -289,7 +293,7 @@ function findConnectionsToml(startDir: string): string | null {
   }
 }
 
-interface ConnectionEntry { name: string; bootstrapServers: string; topic: string; }
+interface ConnectionEntry { name: string; bootstrapServers: string; topic: string; username?: string; password?: string; }
 
 /** Parses the TOML subset used by connections.toml. */
 function parseConnectionsToml(tomlPath: string): ConnectionEntry[] {
@@ -316,9 +320,120 @@ function parseConnectionsToml(tomlPath: string): ConnectionEntry[] {
     const [, k, v] = kvMatch;
     if (k === 'bootstrap') current.bootstrapServers = v;
     if (k === 'topic')     current.topic = v;
+    if (k === 'username')  current.username = v;
+    if (k === 'password')  current.password = v;
   }
   flush();
   return result;
+}
+
+// ── connections.toml write helpers ───────────────────────────────────────────
+
+/** Serialize a single [connection.*] block (no trailing newline). */
+function serializeConnectionBlock(
+  name: string, bootstrap: string, topic: string,
+  username?: string, password?: string,
+): string {
+  const lines = [`[connection.${name}]`];
+  lines.push(`bootstrap = "${bootstrap}"`);
+  lines.push(`topic     = "${topic}"`);
+  if (username) { lines.push(`username  = "${username}"`); }
+  if (password) { lines.push(`password  = "${password}"`); }
+  return lines.join('\n');
+}
+
+/**
+ * Remove a [connection.<name>] section (and any blank lines directly before it)
+ * from raw TOML text. Returns the original text unchanged if the section is not found.
+ */
+function removeConnectionBlock(tomlText: string, name: string): string {
+  const lines = tomlText.split('\n');
+  const header = `[connection.${name}]`;
+  let start = -1;
+  let end = lines.length;
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (t === header) {
+      start = i;
+    } else if (start >= 0 && i > start && t.startsWith('[')) {
+      end = i;
+      break;
+    }
+  }
+  if (start < 0) return tomlText;
+  // Eat blank lines that immediately precede the section header
+  let removeFrom = start;
+  while (removeFrom > 0 && lines[removeFrom - 1].trim() === '') { removeFrom--; }
+  lines.splice(removeFrom, end - removeFrom);
+  return lines.join('\n');
+}
+
+/** Replace an existing [connection.<name>] block, or append it if not present. */
+function upsertConnectionBlock(tomlText: string, name: string, block: string): string {
+  const cleaned = removeConnectionBlock(tomlText, name);
+  return cleaned.trimEnd() + '\n\n' + block + '\n';
+}
+
+interface ConnectionFormFields {
+  name: string; bootstrap: string; topic: string; username: string; password: string;
+}
+
+/** Multi-step input box sequence to collect / edit connection fields. */
+async function promptConnectionFields(
+  defaults?: Partial<ConnectionFormFields>,
+  nameReadonly = false,
+): Promise<ConnectionFormFields | undefined> {
+  let name: string;
+  if (nameReadonly) {
+    name = defaults?.name ?? '';
+  } else {
+    const v = await vscode.window.showInputBox({
+      title: 'KafkaSQL — Connection name',
+      prompt: 'Unique identifier (letters, digits, hyphens, dots, underscores)',
+      value: defaults?.name ?? '',
+      validateInput: s => /^[a-zA-Z0-9_.-]+$/.test(s.trim()) ? null : 'Use letters, digits, hyphens, dots, or underscores',
+    });
+    if (v === undefined) return undefined;
+    name = v.trim();
+  }
+
+  const bootstrap = await vscode.window.showInputBox({
+    title: 'KafkaSQL — Bootstrap servers',
+    prompt: 'Kafka bootstrap server(s), comma-separated (e.g. localhost:9092)',
+    value: defaults?.bootstrap ?? 'localhost:9092',
+    validateInput: s => s.trim() ? null : 'Required',
+  });
+  if (bootstrap === undefined) return undefined;
+
+  const topic = await vscode.window.showInputBox({
+    title: 'KafkaSQL — Event-log topic',
+    prompt: 'KafkaSQL event-log topic name',
+    value: defaults?.topic ?? '_kafkasql_log',
+    validateInput: s => s.trim() ? null : 'Required',
+  });
+  if (topic === undefined) return undefined;
+
+  const username = await vscode.window.showInputBox({
+    title: 'KafkaSQL — Username (optional)',
+    prompt: 'SASL/SCRAM-SHA-256 username — leave empty for PLAINTEXT',
+    value: defaults?.username ?? '',
+  });
+  if (username === undefined) return undefined;
+
+  let password = '';
+  if (username.trim()) {
+    const pw = await vscode.window.showInputBox({
+      title: 'KafkaSQL — Password',
+      prompt: 'SASL/SCRAM-SHA-256 password',
+      value: defaults?.password ?? '',
+      password: true,
+      validateInput: s => s.trim() ? null : 'Required when username is set',
+    });
+    if (pw === undefined) return undefined;
+    password = pw;
+  }
+
+  return { name, bootstrap: bootstrap.trim(), topic: topic.trim(), username: username.trim(), password };
 }
 
 /** Walks upward from `startDir` looking for the first `*.proj.toml` file. */
@@ -800,6 +915,107 @@ export function activate(context: vscode.ExtensionContext) {
     }
   });
 
+  // ── New Query from sidebar connection ──────────────────────────────────────
+  // Opens a new untitled KafkaSQL document pre-pinned to the chosen connection.
+  reg('kafkasql.newQuery', async (node: ConnectionNode) => {
+    if (!node) return;
+    const doc = await vscode.workspace.openTextDocument({ language: 'kafkasql', content: '' });
+    pinnedConnections.set(doc.uri.toString(), {
+      connectionName: node.label,
+      projectFile:    node.projectFile,
+      bootstrapServers: node.bootstrapServers,
+    });
+    await vscode.window.showTextDocument(doc, { preview: false });
+    vscode.window.setStatusBarMessage(
+      `KafkaSQL: new query on "${node.label}" (${node.bootstrapServers})`, 4000);
+  });
+
+  // ── Add Connection ────────────────────────────────────────────────────────
+  // Can be invoked from the Clusters root toolbar button or from the command palette.
+  reg('kafkasql.addConnection', async () => {
+    // Find all project directories that have (or could have) a connections.toml
+    const projTomlUris = await vscode.workspace.findFiles(
+      '**/*.proj.toml', '{.git,node_modules,build,.gradle,dist}/**');
+
+    let targetToml: string;
+    if (projTomlUris.length === 0) {
+      // No project files — write to workspace root
+      const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!wsRoot) { vscode.window.showErrorMessage('KafkaSQL: no workspace folder open'); return; }
+      targetToml = path.join(wsRoot, 'connections.toml');
+    } else if (projTomlUris.length === 1) {
+      targetToml = path.join(path.dirname(projTomlUris[0].fsPath), 'connections.toml');
+    } else {
+      interface ProjItem extends vscode.QuickPickItem { tomlPath: string; }
+      const items: ProjItem[] = projTomlUris.map(u => ({
+        label: path.basename(path.dirname(u.fsPath)),
+        description: path.dirname(u.fsPath),
+        tomlPath: path.join(path.dirname(u.fsPath), 'connections.toml'),
+      }));
+      const picked = await vscode.window.showQuickPick<ProjItem>(items, {
+        placeHolder: 'Add connection to which project?',
+      });
+      if (!picked) return;
+      targetToml = picked.tomlPath;
+    }
+
+    const fields = await promptConnectionFields();
+    if (!fields) return;
+
+    const existing = fs.existsSync(targetToml) ? fs.readFileSync(targetToml, 'utf8') : '';
+    // Guard against duplicate names
+    if (existing.includes(`[connection.${fields.name}]`)) {
+      vscode.window.showErrorMessage(`KafkaSQL: connection "${fields.name}" already exists in ${path.basename(targetToml)}`);
+      return;
+    }
+    const block = serializeConnectionBlock(fields.name, fields.bootstrap, fields.topic, fields.username || undefined, fields.password || undefined);
+    const updated = upsertConnectionBlock(existing, fields.name, block);
+    fs.writeFileSync(targetToml, updated, 'utf8');
+    vscode.window.showInformationMessage(`KafkaSQL: connection "${fields.name}" added to ${path.basename(targetToml)}`);
+    await explorer.refresh();
+  });
+
+  // ── Edit Connection ───────────────────────────────────────────────────────
+  reg('kafkasql.editConnection', async (node: ConnectionNode) => {
+    if (!node) return;
+    const tomlPath = findConnectionsToml(path.dirname(node.projectFile));
+    if (!tomlPath) { vscode.window.showErrorMessage('KafkaSQL: connections.toml not found'); return; }
+
+    const fields = await promptConnectionFields({
+      name:      node.label,
+      bootstrap: node.bootstrapServers,
+      topic:     node.topic,
+      username:  node.username ?? '',
+      password:  node.password ?? '',
+    }, /* nameReadonly */ true);
+    if (!fields) return;
+
+    const raw     = fs.readFileSync(tomlPath, 'utf8');
+    const block   = serializeConnectionBlock(fields.name, fields.bootstrap, fields.topic, fields.username || undefined, fields.password || undefined);
+    const updated = upsertConnectionBlock(raw, fields.name, block);
+    fs.writeFileSync(tomlPath, updated, 'utf8');
+    vscode.window.showInformationMessage(`KafkaSQL: connection "${fields.name}" updated`);
+    await explorer.refresh();
+  });
+
+  // ── Remove Connection ─────────────────────────────────────────────────────
+  reg('kafkasql.removeConnection', async (node: ConnectionNode) => {
+    if (!node) return;
+    const confirmed = await vscode.window.showWarningMessage(
+      `Remove connection "${node.label}" from connections.toml?`,
+      { modal: true }, 'Remove');
+    if (confirmed !== 'Remove') return;
+
+    const tomlPath = findConnectionsToml(path.dirname(node.projectFile));
+    if (!tomlPath) { vscode.window.showErrorMessage('KafkaSQL: connections.toml not found'); return; }
+
+    const raw     = fs.readFileSync(tomlPath, 'utf8');
+    const updated = removeConnectionBlock(raw, node.label);
+    fs.writeFileSync(tomlPath, updated, 'utf8');
+    vscode.window.showInformationMessage(`KafkaSQL: connection "${node.label}" removed`);
+    await explorer.refresh();
+  });
+
   // ── Cancel Execution ───────────────────────────────────────────────────────
   reg('kafkasql.cancelExecution', async () => {
     if (!client) return;
@@ -833,49 +1049,75 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    // Find connections.toml relative to the active file
-    const activeDir = path.dirname(activeUri.fsPath);
-    const tomlPath  = findConnectionsToml(activeDir);
-    if (!tomlPath) {
-      vscode.window.showErrorMessage('KafkaSQL: no connections.toml found — add one alongside your .proj.toml');
-      return;
-    }
-    const connections = parseConnectionsToml(tomlPath);
-    if (connections.length === 0) {
-      vscode.window.showErrorMessage('KafkaSQL: connections.toml has no valid connections');
-      return;
-    }
+    // ── Resolve connection ────────────────────────────────────────────────────
+    // Pinned connections are set when a file is opened via "New Query" from the sidebar.
+    const pinned = pinnedConnections.get(activeUri.toString());
+    let pickedName: string;
+    let pickedDescription: string;
+    let lspFilePath: string;
+    let activeDir: string;
 
-    interface ConnItem extends vscode.QuickPickItem { name: string; }
-    const items: ConnItem[] = connections.map(c => ({
-      label: c.name,
-      description: c.bootstrapServers,
-      detail: `topic: ${c.topic}`,
-      name: c.name,
-    }));
+    if (pinned) {
+      pickedName        = pinned.connectionName;
+      pickedDescription = pinned.bootstrapServers;
+      lspFilePath       = pinned.projectFile;
+      activeDir         = path.dirname(pinned.projectFile);
+    } else {
+      // For unsaved (untitled) files there is no real path, so fall back to the workspace root.
+      const isUntitled = activeUri.scheme === 'untitled';
+      activeDir = isUntitled
+        ? (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? path.dirname(activeUri.fsPath))
+        : path.dirname(activeUri.fsPath);
+      const tomlPath  = findConnectionsToml(activeDir);
+      if (!tomlPath) {
+        vscode.window.showErrorMessage('KafkaSQL: no connections.toml found — add one alongside your .proj.toml');
+        return;
+      }
+      const connections = parseConnectionsToml(tomlPath);
+      if (connections.length === 0) {
+        vscode.window.showErrorMessage('KafkaSQL: connections.toml has no valid connections');
+        return;
+      }
 
-    const picked = connections.length === 1
-      ? items[0]
-      : await vscode.window.showQuickPick<ConnItem>(items, {
-          placeHolder: 'Execute against which cluster?',
-          matchOnDescription: true,
-        });
-    if (!picked) return;
+      interface ConnItem extends vscode.QuickPickItem { name: string; }
+      const items: ConnItem[] = connections.map(c => ({
+        label: c.name,
+        description: c.bootstrapServers,
+        detail: `topic: ${c.topic}`,
+        name: c.name,
+      }));
+
+      const picked = connections.length === 1
+        ? items[0]
+        : await vscode.window.showQuickPick<ConnItem>(items, {
+            placeHolder: 'Execute against which cluster?',
+            matchOnDescription: true,
+          });
+      if (!picked) return;
+
+      pickedName        = picked.name;
+      pickedDescription = picked.description ?? '';
+      lspFilePath       = isUntitled
+        ? (vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '')
+        : activeUri.fsPath;
+    }
 
     resultsChannel.show(true);
-    const mode = isInteractiveMode(activeUri.fsPath, activeDir, activeUri.toString()) ? 'interactive' : 'file';
+    const isUntitledFile = activeUri.scheme === 'untitled';
+    // Untitled and pinned files have no local project structure — always use interactive mode.
+    const mode = (isUntitledFile || !!pinned) || isInteractiveMode(activeUri.fsPath, activeDir, activeUri.toString()) ? 'interactive' : 'file';
     const modeTag = mode === 'interactive' ? ' [interactive]' : '';
-    resultsChannel.appendLine(`\n── Execute on "${picked.name}" (${picked.description})${modeTag} ──`);
+    resultsChannel.appendLine(`\n── Execute on "${pickedName}" (${pickedDescription})${modeTag} ──`);
     resultsChannel.appendLine(new Date().toISOString());
 
     let result: unknown;
     executionStatusBar.show();
     try {
       result = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: `KafkaSQL: reading from "${picked.name}"…`, cancellable: true },
+        { location: vscode.ProgressLocation.Notification, title: `KafkaSQL: reading from "${pickedName}"…`, cancellable: true },
         async (_progress, token) => {
           token.onCancellationRequested(() => sendLspCommand('kafkasql.cancelExecution', []).catch(() => {}));
-          return sendLspCommand('kafkasql.executeStatement', [activeUri.fsPath, picked.name, text, mode]);
+          return sendLspCommand('kafkasql.executeStatement', [lspFilePath, pickedName, text, mode]);
         }
       );
     } catch (err) {
@@ -909,19 +1151,19 @@ export function activate(context: vscode.ExtensionContext) {
         resultsChannel.appendLine(`\n${count} record(s) returned.`);
         if (count > 0) {
           vscode.window.showInformationMessage(
-            `KafkaSQL: ${count} record(s) returned from "${picked.name}"`);
+            `KafkaSQL: ${count} record(s) returned from "${pickedName}"`);
         } else {
           vscode.window.showInformationMessage(
-            `KafkaSQL: no matching records on "${picked.name}"`);
+            `KafkaSQL: no matching records on "${pickedName}"`);
         }
       } else if (r.executed > 0) {
         resultsChannel.appendLine(`\n${r.executed} event(s) written.`);
         vscode.window.showInformationMessage(
-          `KafkaSQL: ${r.executed} event(s) written to "${picked.name}"`);
+          `KafkaSQL: ${r.executed} event(s) written to "${pickedName}"`);
       } else {
         resultsChannel.appendLine(`\nnothing to write — schema already up to date.`);
         vscode.window.showInformationMessage(
-          `KafkaSQL: nothing to write — schema already up to date on "${picked.name}"`);
+          `KafkaSQL: nothing to write — schema already up to date on "${pickedName}"`);
       }
     }
   });

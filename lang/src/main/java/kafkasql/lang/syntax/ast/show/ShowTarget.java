@@ -1,10 +1,11 @@
 package kafkasql.lang.syntax.ast.show;
 
 /**
- * Target type for SHOW statements (CONTEXTS, TYPES, or STREAMS).
+ * Target type for SHOW statements (CONTEXTS, TYPES, STREAMS, or USERS).
  */
 public enum ShowTarget {
     CONTEXTS,
     TYPES,
-    STREAMS
+    STREAMS,
+    USERS
 }

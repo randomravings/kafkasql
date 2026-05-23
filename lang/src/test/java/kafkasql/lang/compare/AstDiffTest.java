@@ -558,7 +558,7 @@ class AstDiffTest {
         void leftOnly() {
             ScriptDiff d = diff(
                 "CREATE CONTEXT company;",
-                "SHOW ALL CONTEXTS;"
+                "SHOW CONTEXTS;"
             );
             assertTrue(d.statements().stream()
                 .anyMatch(s -> s.kind() == DiffKind.LEFT_ONLY),
@@ -569,7 +569,7 @@ class AstDiffTest {
         @DisplayName("Context in right only — RIGHT_ONLY")
         void rightOnly() {
             ScriptDiff d = diff(
-                "SHOW ALL CONTEXTS;",
+                "SHOW CONTEXTS;",
                 "CREATE CONTEXT company;"
             );
             assertTrue(d.statements().stream()
@@ -719,7 +719,7 @@ class AstDiffTest {
         void declarationRemoved_breakingNote() {
             ScriptDiff d = diff(
                 "CREATE TYPE Foo AS SCALAR INT32;",
-                "SHOW ALL TYPES;"
+                "SHOW TYPES;"
             );
             SemanticEnricher.enrich(d);
             StmtDiff.CreateDiff cd = d.statements().stream()
@@ -735,7 +735,7 @@ class AstDiffTest {
         @DisplayName("Declaration added — SAFE note on CreateDiff")
         void declarationAdded_safeNote() {
             ScriptDiff d = diff(
-                "SHOW ALL TYPES;",
+                "SHOW TYPES;",
                 "CREATE TYPE Foo AS SCALAR INT32;"
             );
             SemanticEnricher.enrich(d);
@@ -1162,7 +1162,7 @@ class AstDiffTest {
         void leftOnlyStatement_producesEntry() {
             ScriptDiff d = diff(
                 "CREATE TYPE Foo AS SCALAR INT32;",
-                "SHOW ALL TYPES;"
+                "SHOW TYPES;"
             );
             List<DiffEntry> entries = d.flatten();
             assertTrue(entries.stream().anyMatch(e ->
@@ -1174,7 +1174,7 @@ class AstDiffTest {
         @DisplayName("RIGHT_ONLY statement produces a DiffEntry")
         void rightOnlyStatement_producesEntry() {
             ScriptDiff d = diff(
-                "SHOW ALL TYPES;",
+                "SHOW TYPES;",
                 "CREATE TYPE Foo AS SCALAR INT32;"
             );
             List<DiffEntry> entries = d.flatten();

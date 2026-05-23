@@ -239,10 +239,20 @@ public abstract class KafkaSqlEngine {
             case ReadStmt read -> executeRead(read, bindings, captureResults);
             case ShowStmt show -> executeShow(show, captureResults);
             case ExplainStmt explain -> executeExplain(explain, captureResults);
+            case UserStmt user -> executeUser(user);
+            case AclStmt acl   -> executeGrant(acl);
             default -> {
                 // CREATE and USE statements are handled during binding phase
             }
         }
+    }
+
+    protected void executeUser(UserStmt stmt) {
+        // Default no-op; override in LSP to wire Kafka AdminClient
+    }
+
+    protected void executeGrant(AclStmt stmt) {
+        // Default no-op; override in LSP to wire Kafka AdminClient ACL API
     }
     
     /**
@@ -488,102 +498,70 @@ public abstract class KafkaSqlEngine {
         if (!captureResults) {
             return; // Don't capture results for replayed statements
         }
-        
-        if (lastModel == null) {
-            handleShowResult(List.of("No schema loaded"));
-            return;
-        }
-        
-        List<String> results = new ArrayList<>();
-        var symbols = lastModel.symbols();
-        
+
         switch (show) {
             case ShowCurrentStmt scs -> {
-                // Return the current context with label
-                String context = (currentContextName != null && !currentContextName.isEmpty()) 
-                    ? currentContextName 
-                    : "(global)";
-                results.add("Current context: " + context);
+                String context = (currentContextName != null && !currentContextName.isEmpty())
+                    ? currentContextName : "(global)";
+                handleShowResult(List.of("Current context: " + context));
             }
-            
-            case ShowAllStmt sas -> {
-                // Show ALL: list all of the specified type globally
-                results.addAll(getAllOfType(symbols, sas.target()));
-            }
-            
             case ShowContextualStmt scs -> {
-                // Show contextual: filter by context if qname is present
-                // If qname is empty, use current context if available
-                Optional<Name> contextFilter = scs.qname()
-                    .map(qn -> Name.of(qn.context(), qn.name()));
-                
-                // If no qname and we have a current context, use it
-                if (contextFilter.isEmpty() && currentContextName != null && !currentContextName.isEmpty()) {
-                    contextFilter = Optional.of(Name.of(currentContextName));
+                // USERS does not require a schema — delegate to backend hook
+                if (scs.target() == ShowTarget.USERS) {
+                    handleShowResult(listUsers(scs.filter()));
+                    return;
                 }
-                
-                results.addAll(getFilteredByContext(symbols, scs.target(), contextFilter));
+
+                if (lastModel == null) {
+                    handleShowResult(List.of("No schema loaded"));
+                    return;
+                }
+
+                java.util.function.Predicate<Decl> predicate = switch (scs.target()) {
+                    case CONTEXTS -> d -> d instanceof kafkasql.lang.syntax.ast.decl.ContextDecl;
+                    case TYPES    -> d -> d instanceof kafkasql.lang.syntax.ast.decl.TypeDecl;
+                    case STREAMS  -> d -> d instanceof kafkasql.lang.syntax.ast.decl.StreamDecl;
+                    case USERS    -> throw new IllegalStateException("unreachable");
+                };
+
+                java.util.function.Predicate<String> namePredicate = buildNamePredicate(scs.filter());
+
+                var results = lastModel.symbols()._decl.entrySet().stream()
+                    .filter(e -> predicate.test(e.getValue()))
+                    .map(e -> e.getKey().fullName())
+                    .filter(namePredicate)
+                    .sorted()
+                    .toList();
+
+                handleShowResult(results);
             }
         }
-        
-        handleShowResult(results);
     }
-    
+
     /**
-     * Get all declarations of a specific type globally.
+     * Build a predicate that matches a fully-qualified name against an optional
+     * glob pattern (supports {@code *} as a multi-character wildcard).
+     * When no pattern is supplied every name matches.
      */
-    private List<String> getAllOfType(SymbolTable symbols, ShowTarget target) {
-        var predicate = switch (target) {
-            case CONTEXTS -> (java.util.function.Predicate<Decl>) (d -> d instanceof kafkasql.lang.syntax.ast.decl.ContextDecl);
-            case TYPES -> (java.util.function.Predicate<Decl>) (d -> d instanceof kafkasql.lang.syntax.ast.decl.TypeDecl);
-            case STREAMS -> (java.util.function.Predicate<Decl>) (d -> d instanceof kafkasql.lang.syntax.ast.decl.StreamDecl);
-        };
-        
-        var items = symbols._decl.entrySet().stream()
-            .filter(e -> predicate.test(e.getValue()))
-            .map(e -> e.getKey())
-            .sorted((a, b) -> a.fullName().compareTo(b.fullName()))
-            .map(Name::fullName)
-            .toList();
-        
-        return items;
+    private java.util.function.Predicate<String> buildNamePredicate(Optional<String> filter) {
+        if (filter.isEmpty()) {
+            return name -> true;
+        }
+        String pattern = filter.get();
+        // Convert glob pattern to regex: escape regex metacharacters, then replace * with .*
+        String regex = java.util.regex.Pattern.quote(pattern).replace("\\*", "\\E.*\\Q");
+        java.util.regex.Pattern compiled = java.util.regex.Pattern.compile(regex, java.util.regex.Pattern.CASE_INSENSITIVE);
+        return name -> compiled.matcher(name).matches();
     }
-    
+
     /**
-     * Get declarations filtered by optional context.
-     * Shows only direct children of the context (not nested grandchildren).
+     * List users. Override in subclasses that have access to an AdminClient.
+     * The base implementation always returns a placeholder message.
+     *
+     * @param filter when present, a glob pattern or exact username; when empty, list all
      */
-    private List<String> getFilteredByContext(SymbolTable symbols, ShowTarget target, Optional<Name> contextFilter) {
-        var predicate = switch (target) {
-            case CONTEXTS -> (java.util.function.Predicate<Decl>) (d -> d instanceof kafkasql.lang.syntax.ast.decl.ContextDecl);
-            case TYPES -> (java.util.function.Predicate<Decl>) (d -> d instanceof kafkasql.lang.syntax.ast.decl.TypeDecl);
-            case STREAMS -> (java.util.function.Predicate<Decl>) (d -> d instanceof kafkasql.lang.syntax.ast.decl.StreamDecl);
-        };
-        
-        var items = symbols._decl.entrySet().stream()
-            .filter(e -> predicate.test(e.getValue()))
-            .map(e -> e.getKey())
-            .filter(name -> {
-                String fullName = name.fullName();
-                if (contextFilter.isEmpty()) {
-                    // In global context: show only top-level items (no dots)
-                    return !fullName.contains(".");
-                } else {
-                    // In specific context: show only direct children
-                    String contextPrefix = contextFilter.get().fullName() + ".";
-                    if (!fullName.startsWith(contextPrefix)) {
-                        return false;
-                    }
-                    // Check if it's a direct child (no additional dots after the prefix)
-                    String afterPrefix = fullName.substring(contextPrefix.length());
-                    return !afterPrefix.contains(".");
-                }
-            })
-            .sorted((a, b) -> a.fullName().compareTo(b.fullName()))
-            .map(Name::fullName)
-            .toList();
-        
-        return items;
+    protected List<String> listUsers(Optional<String> filter) {
+        return List.of("[SHOW USERS not supported in this mode]");
     }
     
     /**

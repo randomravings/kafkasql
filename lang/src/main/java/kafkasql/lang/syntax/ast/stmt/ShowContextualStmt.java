@@ -2,16 +2,15 @@ package kafkasql.lang.syntax.ast.stmt;
 
 import kafkasql.runtime.diagnostics.Range;
 import kafkasql.lang.syntax.ast.show.ShowTarget;
-import kafkasql.lang.syntax.ast.misc.QName;
 
 import java.util.Optional;
 
 /**
- * SHOW CONTEXTS|TYPES|STREAMS [qname];
- * If qname is empty, uses current context.
+ * SHOW CONTEXTS|TYPES|STREAMS|USERS ['pattern'];
+ * If filter is empty, returns all items. The pattern may contain '*' wildcards.
  */
 public record ShowContextualStmt(
-    Range range, 
+    Range range,
     ShowTarget target,
-    Optional<QName> qname
+    Optional<String> filter
 ) implements ShowStmt { }
