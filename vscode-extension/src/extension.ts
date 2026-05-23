@@ -31,13 +31,13 @@ const fileModeOverrides = new Map<string, 'file' | 'interactive'>();
 interface PinnedConnection { connectionName: string; projectFile: string; bootstrapServers: string; }
 const pinnedConnections = new Map<string, PinnedConnection>();
 
-const TOML_UNSAFE_CHARS = /["\\\r\n]/;
+const TOML_UNSAFE_CHARS = /["\\\x00-\x1f\x7f]/;
 
 function validateTomlSafe(fieldName: string, value: string, required = true): string | null {
   const trimmed = value.trim();
   if (required && !trimmed) return 'Required';
   if (trimmed && TOML_UNSAFE_CHARS.test(trimmed)) {
-    return `${fieldName} cannot contain quotes, backslashes, or newlines`;
+    return `${fieldName} cannot contain quotes, backslashes, or control characters`;
   }
   return null;
 }
