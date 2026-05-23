@@ -324,7 +324,12 @@ public class KafkaEngine extends KafkaSqlEngine {
                 case WRITE  -> List.of(AclOperation.WRITE);
                 case CREATE -> List.of(AclOperation.CREATE);
                 case MODIFY -> List.of(AclOperation.ALTER);
-                case ALL    -> List.of(AclOperation.READ, AclOperation.WRITE);
+                case ALL    -> List.of(
+                    AclOperation.READ,
+                    AclOperation.WRITE,
+                    AclOperation.CREATE,
+                    AclOperation.ALTER
+                );
             };
 
             var resourcePattern = new ResourcePattern(ResourceType.TOPIC, topicName, patternType);
