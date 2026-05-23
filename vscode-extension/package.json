@@ -103,6 +103,26 @@
         "command": "kafkasql.executeStatement",
         "title": "KafkaSQL: Execute Statement",
         "icon": "$(play)"
+      },
+      {
+        "command": "kafkasql.newQuery",
+        "title": "KafkaSQL: New Query",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "kafkasql.addConnection",
+        "title": "KafkaSQL: Add Connection",
+        "icon": "$(add)"
+      },
+      {
+        "command": "kafkasql.editConnection",
+        "title": "KafkaSQL: Edit Connection",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "kafkasql.removeConnection",
+        "title": "KafkaSQL: Remove Connection",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -126,19 +146,24 @@
           "command": "kafkasql.explorer.refresh",
           "when": "view == kafkasqlProjectExplorer",
           "group": "navigation@4"
+        },
+        {
+          "command": "kafkasql.addConnection",
+          "when": "view == kafkasqlProjectExplorer",
+          "group": "navigation@5"
         }
       ],
       "editor/title": [
         {
           "command": "kafkasql.executeStatement",
-          "when": "resourceExtname == .kafka || resourceExtname == .kafkasql",
+          "when": "resourceExtname == .kafka || resourceExtname == .kafkasql || editorLangId == kafkasql",
           "group": "navigation"
         }
       ],
       "editor/context": [
         {
           "command": "kafkasql.executeStatement",
-          "when": "resourceExtname == .kafka || resourceExtname == .kafkasql",
+          "when": "resourceExtname == .kafka || resourceExtname == .kafkasql || editorLangId == kafkasql",
           "group": "kafkasql@1"
         }
       ],
@@ -176,6 +201,41 @@
           "command": "kafkasql.deployToCluster",
           "when": "view == kafkasqlProjectExplorer && viewItem == kafkasqlConnection",
           "group": "kafkasql@2"
+        },
+        {
+          "command": "kafkasql.newQuery",
+          "when": "view == kafkasqlProjectExplorer && viewItem == kafkasqlConnection",
+          "group": "kafkasql@3"
+        },
+        {
+          "command": "kafkasql.editConnection",
+          "when": "view == kafkasqlProjectExplorer && viewItem == kafkasqlConnection",
+          "group": "kafkasql@4"
+        },
+        {
+          "command": "kafkasql.removeConnection",
+          "when": "view == kafkasqlProjectExplorer && viewItem == kafkasqlConnection",
+          "group": "kafkasql@5"
+        },
+        {
+          "command": "kafkasql.addConnection",
+          "when": "view == kafkasqlProjectExplorer && viewItem == kafkasqlClustersRoot",
+          "group": "inline"
+        },
+        {
+          "command": "kafkasql.newQuery",
+          "when": "view == kafkasqlProjectExplorer && viewItem == kafkasqlConnection",
+          "group": "inline@1"
+        },
+        {
+          "command": "kafkasql.editConnection",
+          "when": "view == kafkasqlProjectExplorer && viewItem == kafkasqlConnection",
+          "group": "inline@2"
+        },
+        {
+          "command": "kafkasql.removeConnection",
+          "when": "view == kafkasqlProjectExplorer && viewItem == kafkasqlConnection",
+          "group": "inline@3"
         }
       ]
     }

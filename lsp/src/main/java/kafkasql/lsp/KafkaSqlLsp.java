@@ -293,8 +293,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
         return Map.of("error", "Connection '" + connectionName + "' not found in connections.toml");
       }
 
-      Properties props = new Properties();
-      props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,  conn.bootstrapServers());
+      Properties props = conn.baseProperties();
       props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,   ByteArrayDeserializer.class.getName());
       props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
       props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
@@ -404,8 +403,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
       Map<Name, Decl> localDecls = buildLocalDecls(localContent, localPath.toString(), root);
 
       // 3. Produce Kafka events for the differences
-      Properties producerProps = new Properties();
-      producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,         conn.bootstrapServers());
+      Properties producerProps = conn.baseProperties();
       producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,   ByteArraySerializer.class.getName());
       producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
       producerProps.put(ProducerConfig.ACKS_CONFIG, "all");
@@ -414,7 +412,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
       List<String> operations = new ArrayList<>();
 
       try (KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(producerProps);
-           kafkasql.persistence.TopicProvisioner provisioner = new kafkasql.persistence.TopicProvisioner(conn.bootstrapServers())) {
+           kafkasql.persistence.TopicProvisioner provisioner = new kafkasql.persistence.TopicProvisioner(conn.baseProperties())) {
         kafkasql.runtime.stream.StreamWriter<sys.schema.SymbolEventLog> streamWriter =
             new kafkasql.io.WriteStream<>(conn.topic(), producer,
                 msg -> { var baos = new java.io.ByteArrayOutputStream(); msg.writeTo(baos); return baos.toByteArray(); },
@@ -543,8 +541,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
       Path root = Path.of(activeFilePath).normalize().getParent();
       Map<Name, Decl> localDecls = buildLocalDecls(statementText, "<editor>", root, !interactive);
 
-      Properties producerProps = new Properties();
-      producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,       conn.bootstrapServers());
+      Properties producerProps = conn.baseProperties();
       producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,   ByteArraySerializer.class.getName());
       producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
       producerProps.put(ProducerConfig.ACKS_CONFIG, "all");
@@ -567,7 +564,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
       List<String> operations = new ArrayList<>();
 
       try (KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(producerProps);
-           kafkasql.persistence.TopicProvisioner provisioner = new kafkasql.persistence.TopicProvisioner(conn.bootstrapServers())) {
+           kafkasql.persistence.TopicProvisioner provisioner = new kafkasql.persistence.TopicProvisioner(conn.baseProperties())) {
         kafkasql.runtime.stream.StreamWriter<sys.schema.SymbolEventLog> streamWriter =
             new kafkasql.io.WriteStream<>(conn.topic(), producer,
                 msg -> { var baos = new java.io.ByteArrayOutputStream(); msg.writeTo(baos); return baos.toByteArray(); },
@@ -591,9 +588,8 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
         logWriter.flush();
 
         // Handle WRITE TO and/or READ FROM statements via the execution engine
-        if (hasWriteStatements(statementText) || hasReadStatements(statementText)) {
+        if (hasWriteStatements(statementText) || hasReadStatements(statementText) || hasUserStatements(statementText)) {
           String remoteScript = buildRemoteScript(stateMap);
-          String bootstrapServers = conn.bootstrapServers();
           int[] writeCount = {0};
           Map<String, Integer> streamWriteCounts = new LinkedHashMap<>();
           List<Map<String, Object>> queryRecords = new ArrayList<>();
@@ -652,8 +648,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
               ReadMode mode = consumerByStream.get(topic);
               StopAfter stopAfter = stopAfterByStream.get(topic);
 
-              Properties baseProps = new Properties();
-              baseProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+              Properties baseProps = conn.baseProperties();
               baseProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
               baseProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
               baseProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
@@ -740,6 +735,192 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
             }
 
             @Override
+            protected void executeUser(kafkasql.lang.syntax.ast.stmt.UserStmt stmt) {
+              Properties adminProps = conn.baseProperties();
+              try (org.apache.kafka.clients.admin.AdminClient admin = org.apache.kafka.clients.admin.AdminClient.create(adminProps)) {
+                switch (stmt) {
+                  case kafkasql.lang.syntax.ast.stmt.UserStmt.CreateUser cu -> {
+                    String password = cu.password().orElseThrow(
+                        () -> new IllegalArgumentException("CREATE USER requires PASSWORD option"));
+                    var info = new org.apache.kafka.clients.admin.ScramCredentialInfo(
+                        org.apache.kafka.clients.admin.ScramMechanism.SCRAM_SHA_256, 4096);
+                    var upsert = new org.apache.kafka.clients.admin.UserScramCredentialUpsertion(
+                        cu.username(), info, password);
+                    admin.alterUserScramCredentials(List.of(upsert)).all().get();
+                    operations.add("CREATE USER '" + cu.username() + "'");
+                  }
+                  case kafkasql.lang.syntax.ast.stmt.UserStmt.AlterUser au -> {
+                    // Fetch existing mechanisms so we update all mechanisms already assigned to this user.
+                    List<org.apache.kafka.clients.admin.ScramMechanism> targetMechs = new ArrayList<>();
+                    try {
+                      var desc = admin.describeUserScramCredentials(List.of(au.username())).all().get();
+                      var userDesc = desc.get(au.username());
+                      if (userDesc != null) {
+                        userDesc.credentialInfos().forEach(ci -> targetMechs.add(ci.mechanism()));
+                      }
+                    } catch (Exception ignored) {}
+                    if (targetMechs.isEmpty()) {
+                      targetMechs.add(org.apache.kafka.clients.admin.ScramMechanism.SCRAM_SHA_256);
+                    }
+                    List<org.apache.kafka.clients.admin.UserScramCredentialAlteration> alterations = new ArrayList<>();
+                    for (var mech : targetMechs) {
+                      var info = new org.apache.kafka.clients.admin.ScramCredentialInfo(mech, 4096);
+                      alterations.add(new org.apache.kafka.clients.admin.UserScramCredentialUpsertion(
+                          au.username(), info, au.password()));
+                    }
+                    admin.alterUserScramCredentials(alterations).all().get();
+                    operations.add("ALTER USER '" + au.username() + "'");
+                  }
+                  case kafkasql.lang.syntax.ast.stmt.UserStmt.DropUser du -> {
+                    List<org.apache.kafka.clients.admin.UserScramCredentialAlteration> deletions = new ArrayList<>();
+                    try {
+                      var desc = admin.describeUserScramCredentials(List.of(du.username())).all().get();
+                      var userDesc = desc.get(du.username());
+                      if (userDesc != null) {
+                        for (var cred : userDesc.credentialInfos()) {
+                          deletions.add(new org.apache.kafka.clients.admin.UserScramCredentialDeletion(
+                              du.username(), cred.mechanism()));
+                        }
+                      }
+                    } catch (Exception ignored) {}
+                    if (!deletions.isEmpty()) {
+                      admin.alterUserScramCredentials(deletions).all().get();
+                    }
+                    operations.add("DROP USER '" + du.username() + "'");
+                  }
+                }
+              } catch (Exception ex) {
+                throw new RuntimeException("User management failed: " + ex.getMessage(), ex);
+              }
+            }
+
+            @Override
+            protected List<String> listUsers(java.util.Optional<String> filter) {
+              Properties adminProps = conn.baseProperties();
+              try (org.apache.kafka.clients.admin.AdminClient admin = org.apache.kafka.clients.admin.AdminClient.create(adminProps)) {
+                // Fetch all SCRAM users from Kafka
+                var desc = admin.describeUserScramCredentials(List.of()).all().get();
+                if (desc.isEmpty()) {
+                  return List.of("(no SCRAM users)");
+                }
+                // Build glob predicate for the optional filter pattern
+                java.util.function.Predicate<String> namePredicate;
+                if (filter.isPresent()) {
+                  String pattern = filter.get();
+                  // Convert glob * to regex .* (case-insensitive)
+                  String regex = java.util.regex.Pattern.quote(pattern).replace("\\*", "\\E.*\\Q");
+                  java.util.regex.Pattern compiled = java.util.regex.Pattern.compile(
+                      regex, java.util.regex.Pattern.CASE_INSENSITIVE);
+                  namePredicate = name -> compiled.matcher(name).matches();
+                } else {
+                  namePredicate = name -> true;
+                }
+                // If the filter has no wildcard and matches exactly one user, show full detail
+                boolean isExact = filter.isPresent() && !filter.get().contains("*");
+                if (isExact) {
+                  String name = filter.get();
+                  var userDesc = desc.get(name);
+                  if (userDesc == null || userDesc.credentialInfos().isEmpty()) {
+                    return List.of("USER " + name + ": no SCRAM credentials");
+                  }
+                  List<String> lines = new java.util.ArrayList<>();
+                  lines.add("USER " + name);
+                  for (var cred : userDesc.credentialInfos()) {
+                    lines.add("  mechanism  : " + cred.mechanism().mechanismName());
+                    lines.add("  iterations : " + cred.iterations());
+                  }
+                  return lines;
+                }
+                // Otherwise return a summary list, applying the glob filter
+                return desc.entrySet().stream()
+                  .filter(e -> namePredicate.test(e.getKey()))
+                  .sorted(java.util.Map.Entry.comparingByKey())
+                  .map(e -> {
+                    var mechs = e.getValue().credentialInfos().stream()
+                        .map(ci -> ci.mechanism().mechanismName())
+                        .collect(java.util.stream.Collectors.joining(", "));
+                    return e.getKey() + " [" + mechs + "]";
+                  })
+                  .collect(java.util.stream.Collectors.toList());
+              } catch (Exception ex) {
+                throw new RuntimeException("SHOW USERS failed: " + ex.getMessage(), ex);
+              }
+            }
+
+            @Override
+            protected void executeGrant(kafkasql.lang.syntax.ast.stmt.AclStmt stmt) {
+              Properties adminProps = conn.baseProperties();
+              try (org.apache.kafka.clients.admin.AdminClient admin = org.apache.kafka.clients.admin.AdminClient.create(adminProps)) {
+                boolean isGrant = stmt instanceof kafkasql.lang.syntax.ast.stmt.AclStmt.Grant;
+                kafkasql.lang.syntax.ast.stmt.AclStmt.Privilege privilege = switch (stmt) {
+                  case kafkasql.lang.syntax.ast.stmt.AclStmt.Grant  g -> g.privilege();
+                  case kafkasql.lang.syntax.ast.stmt.AclStmt.Revoke r -> r.privilege();
+                };
+                kafkasql.lang.syntax.ast.stmt.AclStmt.Target target = switch (stmt) {
+                  case kafkasql.lang.syntax.ast.stmt.AclStmt.Grant  g -> g.target();
+                  case kafkasql.lang.syntax.ast.stmt.AclStmt.Revoke r -> r.target();
+                };
+                kafkasql.lang.syntax.ast.misc.QName resource = switch (stmt) {
+                  case kafkasql.lang.syntax.ast.stmt.AclStmt.Grant  g -> g.resource();
+                  case kafkasql.lang.syntax.ast.stmt.AclStmt.Revoke r -> r.resource();
+                };
+                String principal = switch (stmt) {
+                  case kafkasql.lang.syntax.ast.stmt.AclStmt.Grant  g -> g.principal();
+                  case kafkasql.lang.syntax.ast.stmt.AclStmt.Revoke r -> r.principal();
+                };
+
+                // Derive topic name from QName (dot-separated)
+                String topicName = resource.fullName();
+
+                // STREAM → LITERAL pattern; CONTEXT → PREFIXED pattern
+                org.apache.kafka.common.resource.PatternType patternType =
+                    target == kafkasql.lang.syntax.ast.stmt.AclStmt.Target.CONTEXT
+                        ? org.apache.kafka.common.resource.PatternType.PREFIXED
+                        : org.apache.kafka.common.resource.PatternType.LITERAL;
+
+                // Map privilege to Kafka ACL operations
+                List<org.apache.kafka.common.acl.AclOperation> ops = switch (privilege) {
+                  case READ   -> List.of(org.apache.kafka.common.acl.AclOperation.READ);
+                  case WRITE  -> List.of(org.apache.kafka.common.acl.AclOperation.WRITE);
+                  case CREATE -> List.of(org.apache.kafka.common.acl.AclOperation.CREATE);
+                  case MODIFY -> List.of(org.apache.kafka.common.acl.AclOperation.ALTER);
+                  case ALL    -> List.of(
+                      org.apache.kafka.common.acl.AclOperation.READ,
+                      org.apache.kafka.common.acl.AclOperation.WRITE);
+                };
+
+                var resourcePattern = new org.apache.kafka.common.resource.ResourcePattern(
+                    org.apache.kafka.common.resource.ResourceType.TOPIC, topicName, patternType);
+                String kafkaPrincipal = principal.contains(":") ? principal : "User:" + principal;
+
+                if (isGrant) {
+                  List<org.apache.kafka.common.acl.AclBinding> bindings = new ArrayList<>();
+                  for (var op : ops) {
+                    var entry = new org.apache.kafka.common.acl.AccessControlEntry(
+                        kafkaPrincipal, "*",
+                        op, org.apache.kafka.common.acl.AclPermissionType.ALLOW);
+                    bindings.add(new org.apache.kafka.common.acl.AclBinding(resourcePattern, entry));
+                  }
+                  admin.createAcls(bindings).all().get();
+                  operations.add("GRANT " + privilege + " ON " + target + " " + topicName + " TO " + principal);
+                } else {
+                  List<org.apache.kafka.common.acl.AclBindingFilter> filters = new ArrayList<>();
+                  for (var op : ops) {
+                    var entryFilter = new org.apache.kafka.common.acl.AccessControlEntryFilter(
+                        kafkaPrincipal, "*",
+                        op, org.apache.kafka.common.acl.AclPermissionType.ALLOW);
+                    filters.add(new org.apache.kafka.common.acl.AclBindingFilter(
+                        resourcePattern.toFilter(), entryFilter));
+                  }
+                  admin.deleteAcls(filters).all().get();
+                  operations.add("REVOKE " + privilege + " ON " + target + " " + topicName + " FROM " + principal);
+                }
+              } catch (Exception ex) {
+                throw new RuntimeException("ACL management failed: " + ex.getMessage(), ex);
+              }
+            }
+
+            @Override
             protected Map<Integer, Long> writeSchemaMarker(Name streamName, String typeName) {
               return Map.of();
             }
@@ -785,8 +966,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
       Map<Name, String>  stateMap   = live.stateMap();
       Map<Name, Integer> versionMap = new HashMap<>(live.versionMap());
 
-      Properties producerProps = new Properties();
-      producerProps.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,       conn.bootstrapServers());
+      Properties producerProps = conn.baseProperties();
       producerProps.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,   ByteArraySerializer.class.getName());
       producerProps.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
       producerProps.put(ProducerConfig.ACKS_CONFIG, "all");
@@ -795,7 +975,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
       List<String> operations = new ArrayList<>();
 
       try (KafkaProducer<byte[], byte[]> producer = new KafkaProducer<>(producerProps);
-           kafkasql.persistence.TopicProvisioner provisioner = new kafkasql.persistence.TopicProvisioner(conn.bootstrapServers())) {
+           kafkasql.persistence.TopicProvisioner provisioner = new kafkasql.persistence.TopicProvisioner(conn.baseProperties())) {
         kafkasql.runtime.stream.StreamWriter<sys.schema.SymbolEventLog> streamWriter =
             new kafkasql.io.WriteStream<>(conn.topic(), producer,
                 msg -> { var baos = new java.io.ByteArrayOutputStream(); msg.writeTo(baos); return baos.toByteArray(); },
@@ -976,8 +1156,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
     Map<Name, String>  stateMap   = new LinkedHashMap<>();
     Map<Name, Integer> versionMap = new HashMap<>();
 
-    Properties props = new Properties();
-    props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,          conn.bootstrapServers());
+    Properties props = conn.baseProperties();
     props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,     ByteArrayDeserializer.class.getName());
     props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,   ByteArrayDeserializer.class.getName());
     props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG,         "false");
@@ -1150,6 +1329,23 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
       for (Script script : result.scripts()) {
         for (Stmt stmt : script.statements()) {
           if (stmt instanceof ReadStmt) return true;
+        }
+      }
+      return false;
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
+  private boolean hasUserStatements(String content) {
+    try {
+      StringInput input = new StringInput("<editor>", content);
+      KafkaSqlArgs args = new KafkaSqlArgs(Path.of(""), false, false);
+      ParseResult result = KafkaSqlParser.parse(List.of(input), args);
+      for (Script script : result.scripts()) {
+        for (Stmt stmt : script.statements()) {
+          if (stmt instanceof kafkasql.lang.syntax.ast.stmt.UserStmt) return true;
+          if (stmt instanceof kafkasql.lang.syntax.ast.stmt.AclStmt) return true;
         }
       }
       return false;

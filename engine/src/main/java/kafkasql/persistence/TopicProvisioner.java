@@ -27,6 +27,11 @@ public final class TopicProvisioner implements AutoCloseable {
         this.adminClient = AdminClient.create(props);
     }
 
+    /** Creates a provisioner from a pre-built properties map (e.g. with SASL credentials). */
+    public TopicProvisioner(Properties props) {
+        this.adminClient = AdminClient.create(props);
+    }
+
     /**
      * Creates the topic if it does not already exist.
      *

@@ -453,7 +453,11 @@ public final class AstDiff {
     private static StmtDiff.ShowDiff diffShow(ShowStmt left, ShowStmt right) {
         if (left  == null) return new StmtDiff.ShowDiff(DiffKind.RIGHT_ONLY, null, right, new ArrayList<>());
         if (right == null) return new StmtDiff.ShowDiff(DiffKind.LEFT_ONLY, left,  null, new ArrayList<>());
-        boolean same = left.target() == right.target() && left.getClass().equals(right.getClass());
+        java.util.Optional<String> leftFilter  = left  instanceof ShowContextualStmt l ? l.filter() : java.util.Optional.empty();
+        java.util.Optional<String> rightFilter = right instanceof ShowContextualStmt r ? r.filter() : java.util.Optional.empty();
+        boolean same = left.target() == right.target()
+            && left.getClass().equals(right.getClass())
+            && java.util.Objects.equals(leftFilter, rightFilter);
         return new StmtDiff.ShowDiff(same ? DiffKind.UNCHANGED : DiffKind.MODIFIED, left, right, new ArrayList<>());
     }
 

@@ -80,6 +80,8 @@ export class ConnectionNode {
     public readonly projectFile: string,   // path to .proj.toml for LSP request
     public readonly bootstrapServers: string,
     public readonly topic: string,
+    public readonly username?: string,
+    public readonly password?: string,
   ) {}
   get connectionKey() { return `${this.projectName}/${this.label}`; }
 }
@@ -145,6 +147,8 @@ export interface ParsedConnection {
   name: string;
   bootstrapServers: string;
   topic: string;
+  username?: string;
+  password?: string;
 }
 
 interface KafkaSqlObject {
@@ -230,13 +234,13 @@ function parseConnectionsFile(dir: string): ParsedConnection[] {
   const filePath = path.join(dir, 'connections.toml');
   if (!fs.existsSync(filePath)) return [];
   const connections: ParsedConnection[] = [];
-  let current: { name: string; bootstrap?: string; topic?: string } | null = null;
+  let current: { name: string; bootstrap?: string; topic?: string; username?: string; password?: string } | null = null;
   for (const raw of fs.readFileSync(filePath, 'utf8').split('\n')) {
     const t = raw.trim();
     if (!t || t.startsWith('#')) continue;
     if (t.startsWith('[')) {
       if (current?.bootstrap && current.topic) {
-        connections.push({ name: current.name, bootstrapServers: current.bootstrap, topic: current.topic });
+        connections.push({ name: current.name, bootstrapServers: current.bootstrap, topic: current.topic, username: current.username, password: current.password });
       }
       const section = t.replace(/^\[/, '').replace(/\].*$/, '').trim();
       if (section.startsWith('connection.')) {
@@ -255,9 +259,11 @@ function parseConnectionsFile(dir: string): ParsedConnection[] {
     else { const ci = val.indexOf('#'); if (ci >= 0) val = val.slice(0, ci).trim(); }
     if (key === 'bootstrap') current.bootstrap = val;
     if (key === 'topic')     current.topic = val;
+    if (key === 'username')  current.username = val;
+    if (key === 'password')  current.password = val;
   }
   if (current?.bootstrap && current.topic) {
-    connections.push({ name: current.name, bootstrapServers: current.bootstrap, topic: current.topic });
+    connections.push({ name: current.name, bootstrapServers: current.bootstrap, topic: current.topic, username: current.username, password: current.password });
   }
   return connections;
 }
@@ -588,7 +594,7 @@ export class KafkaSqlProjectExplorer
           item.description  = node.bootstrapServers.length > maxLen
             ? node.bootstrapServers.slice(0, maxLen) + '…'
             : node.bootstrapServers;
-          item.tooltip      = `${node.projectName} — ${node.bootstrapServers} / topic: ${node.topic}`;
+          item.tooltip      = `${node.projectName} — ${node.bootstrapServers} / topic: ${node.topic}${node.username ? ' 🔐' : ''}`;
           item.contextValue = 'kafkasqlConnection';
           return item;
         }
@@ -668,7 +674,7 @@ export class KafkaSqlProjectExplorer
         const all: ConnectionNode[] = [];
         for (const proj of this.projects) {
           for (const c of proj.connections) {
-            all.push(new ConnectionNode(c.name, proj.name, proj.projectFile, c.bootstrapServers, c.topic));
+            all.push(new ConnectionNode(c.name, proj.name, proj.projectFile, c.bootstrapServers, c.topic, c.username, c.password));
           }
         }
         if (all.length === 0) return [new EmptyNode()];

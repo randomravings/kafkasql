@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Parses a {@code connections.toml} file into a list of {@link ConnectionConfig}.
@@ -14,6 +15,8 @@ import java.util.List;
  * [connection.prod]
  * bootstrap = "broker1:9092,broker2:9092"
  * topic     = "kafkasql.schema-events"
+ * username  = "alice"          # optional — enables SASL/SCRAM-SHA-256
+ * password  = "secret"
  *
  * [connection.staging]
  * bootstrap = "staging:9092"
@@ -49,6 +52,8 @@ public final class ConnectionsLoader {
         String currentConnection = null;
         String bootstrap = null;
         String topic = null;
+        String username = null;
+        String password = null;
 
         for (String raw : Files.readAllLines(file)) {
             String line = raw.trim();
@@ -57,11 +62,14 @@ public final class ConnectionsLoader {
             if (line.startsWith("[")) {
                 // Flush previous connection before switching section
                 if (currentConnection != null && bootstrap != null && topic != null) {
-                    result.add(new ConnectionConfig(currentConnection, bootstrap, topic));
+                    result.add(new ConnectionConfig(currentConnection, bootstrap, topic,
+                        Optional.ofNullable(username), Optional.ofNullable(password)));
                 }
                 currentConnection = null;
                 bootstrap = null;
                 topic = null;
+                username = null;
+                password = null;
 
                 String section = line.replaceAll("^\\[", "").replaceAll("\\].*$", "").trim();
                 if (section.startsWith("connection.")) {
@@ -88,12 +96,15 @@ public final class ConnectionsLoader {
             switch (key) {
                 case "bootstrap" -> bootstrap = value;
                 case "topic"     -> topic     = value;
+                case "username"  -> username  = value;
+                case "password"  -> password  = value;
             }
         }
 
         // Flush last connection
         if (currentConnection != null && bootstrap != null && topic != null) {
-            result.add(new ConnectionConfig(currentConnection, bootstrap, topic));
+            result.add(new ConnectionConfig(currentConnection, bootstrap, topic,
+                Optional.ofNullable(username), Optional.ofNullable(password)));
         }
 
         return result;

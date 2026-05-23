@@ -44,6 +44,8 @@ public final class StatementBinder {
 
                 case ReadStmt r  -> bindRead(r, symbols, diags, bindings);
                 case WriteStmt w -> bindWrite(w, symbols, diags, bindings);
+                case UserStmt u  -> {}
+                case AclStmt a   -> {}
                 default -> {}
             }
         }

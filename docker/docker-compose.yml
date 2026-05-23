@@ -2,11 +2,12 @@ name: kafkasql
 
 services:
   kafka:
-    image: apache/kafka:4.1.1 
+    image: apache/kafka:4.1.1
     container_name: kafkasql-kafka
     ports:
       - "9092:9092"
       - "9093:9093"
+      - "9094:9094"
     environment:
       # KRaft settings
       KAFKA_NODE_ID: 1
@@ -15,10 +16,29 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       
       # Listener settings
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      # Note: listener name SASLSCRAM has no underscore — the env-var converter
+      # maps _ → . so a name with _ would corrupt the resulting property key.
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,SASLSCRAM://0.0.0.0:9094,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,SASLSCRAM://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,SASLSCRAM:SASL_PLAINTEXT,CONTROLLER:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      # SASL/SCRAM-SHA-256 settings
+      KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-256
+      KAFKA_LISTENER_NAME_SASLSCRAM_SASL_ENABLED_MECHANISMS: SCRAM-SHA-256
+      # The property listener.name.saslscram.scram-sha-256.sasl.jaas.config contains
+      # a hyphen, which cannot be encoded in the _ → . env-var scheme.
+      # Mount a JAAS file and point the JVM at it via KAFKA_OPTS instead.
+      KAFKA_OPTS: "-Djava.security.auth.login.config=/etc/kafka/secrets/kafka_server_jaas.conf"
+
+      # Grant the 'admin' user superuser rights
+      KAFKA_SUPER_USERS: "User:admin"
+
+      # ACL authorizer — enables GRANT/REVOKE ACL support
+      # allow_everyone_if_no_acl_found=true keeps the PLAINTEXT listener open
+      # for unauthenticated clients while ACLs are enforced on SASL connections.
+      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
       
       # Cluster settings
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
@@ -33,5 +53,8 @@ services:
       test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 30s
+    volumes:
+      - ./kafka_server_jaas.conf:/etc/kafka/secrets/kafka_server_jaas.conf:ro
 

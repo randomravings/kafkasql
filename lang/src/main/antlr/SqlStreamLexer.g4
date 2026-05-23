@@ -20,6 +20,7 @@ ALL           : [Aa][Ll][Ll] ;
 CONTEXTS      : [Cc][Oo][Nn][Tt][Ee][Xx][Tt][Ss] ;
 TYPES         : [Tt][Yy][Pp][Ee][Ss] ;
 STREAMS       : [Ss][Tt][Rr][Ee][Aa][Mm][Ss] ;
+USERS         : [Uu][Ss][Ee][Rr][Ss] ;
 SCALAR        : [Ss][Cc][Aa][Ll][Aa][Rr] ;
 ENUM          : [Ee][Nn][Uu][Mm] ;
 STRUCT        : [Ss][Tt][Rr][Uu][Cc][Tt] ;
@@ -77,6 +78,13 @@ REMOVE        : [Rr][Ee][Mm][Oo][Vv][Ee] ;
 SYNONYM       : [Ss][Yy][Nn][Oo][Nn][Yy][Mm] ;
 SET           : [Ss][Ee][Tt] ;
 VERSION       : [Vv][Ee][Rr][Ss][Ii][Oo][Nn] ;
+USER          : [Uu][Ss][Ee][Rr] ;
+PASSWORD      : [Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd] ;
+GRANT         : [Gg][Rr][Aa][Nn][Tt] ;
+REVOKE        : [Rr][Ee][Vv][Oo][Kk][Ee] ;
+MODIFY        : [Mm][Oo][Dd][Ii][Ff][Yy] ;
+ON            : [Oo][Nn] ;
+
 LATEST        : [Ll][Aa][Tt][Ee][Ss][Tt] ;
 
 GROUP         : [Gg][Rr][Oo][Uu][Pp] ;

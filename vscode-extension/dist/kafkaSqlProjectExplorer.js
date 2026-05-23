@@ -110,12 +110,14 @@ exports.EmptyNode = EmptyNode;
 class ConnectionNode {
     constructor(label, // connection name
     projectName, projectFile, // path to .proj.toml for LSP request
-    bootstrapServers, topic) {
+    bootstrapServers, topic, username, password) {
         this.label = label;
         this.projectName = projectName;
         this.projectFile = projectFile;
         this.bootstrapServers = bootstrapServers;
         this.topic = topic;
+        this.username = username;
+        this.password = password;
         this.kind = 'connection';
     }
     get connectionKey() { return `${this.projectName}/${this.label}`; }
@@ -233,7 +235,7 @@ function parseConnectionsFile(dir) {
             continue;
         if (t.startsWith('[')) {
             if (current?.bootstrap && current.topic) {
-                connections.push({ name: current.name, bootstrapServers: current.bootstrap, topic: current.topic });
+                connections.push({ name: current.name, bootstrapServers: current.bootstrap, topic: current.topic, username: current.username, password: current.password });
             }
             const section = t.replace(/^\[/, '').replace(/\].*$/, '').trim();
             if (section.startsWith('connection.')) {
@@ -262,9 +264,13 @@ function parseConnectionsFile(dir) {
             current.bootstrap = val;
         if (key === 'topic')
             current.topic = val;
+        if (key === 'username')
+            current.username = val;
+        if (key === 'password')
+            current.password = val;
     }
     if (current?.bootstrap && current.topic) {
-        connections.push({ name: current.name, bootstrapServers: current.bootstrap, topic: current.topic });
+        connections.push({ name: current.name, bootstrapServers: current.bootstrap, topic: current.topic, username: current.username, password: current.password });
     }
     return connections;
 }
@@ -536,7 +542,7 @@ class KafkaSqlProjectExplorer {
                     item.description = node.bootstrapServers.length > maxLen
                         ? node.bootstrapServers.slice(0, maxLen) + '…'
                         : node.bootstrapServers;
-                    item.tooltip = `${node.projectName} — ${node.bootstrapServers} / topic: ${node.topic}`;
+                    item.tooltip = `${node.projectName} — ${node.bootstrapServers} / topic: ${node.topic}${node.username ? ' 🔐' : ''}`;
                     item.contextValue = 'kafkasqlConnection';
                     return item;
                 }
@@ -600,7 +606,7 @@ class KafkaSqlProjectExplorer {
                 const all = [];
                 for (const proj of this.projects) {
                     for (const c of proj.connections) {
-                        all.push(new ConnectionNode(c.name, proj.name, proj.projectFile, c.bootstrapServers, c.topic));
+                        all.push(new ConnectionNode(c.name, proj.name, proj.projectFile, c.bootstrapServers, c.topic, c.username, c.password));
                     }
                 }
                 if (all.length === 0)

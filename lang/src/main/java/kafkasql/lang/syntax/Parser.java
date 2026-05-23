@@ -165,6 +165,10 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
                 return visitAlterStmt(ctx.alterStmt());
             if (ctx.dropStmt() != null)
                 return visitDropStmt(ctx.dropStmt());
+            if (ctx.userStmt() != null)
+                return (UserStmt) visit(ctx.userStmt());
+            if (ctx.grantStmt() != null)
+                return (AclStmt) visit(ctx.grantStmt());
             
             // Syntax error - report and return placeholder
             Range range = range(ctx);
@@ -226,26 +230,20 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         }
 
         @Override
-        public ShowStmt visitShowAllStmt(SqlStreamParser.ShowAllStmtContext ctx) {
-            Range range = range(ctx);
-            ShowTarget target = parseShowTarget(ctx.showTarget());
-            return new ShowAllStmt(range, target);
-        }
-
-        @Override
         public ShowStmt visitShowContextualStmt(SqlStreamParser.ShowContextualStmtContext ctx) {
             Range range = range(ctx);
             ShowTarget target = parseShowTarget(ctx.showTarget());
-            Optional<QName> qname = ctx.qname() != null 
-                ? Optional.of(visitQname(ctx.qname()))
+            Optional<String> filter = ctx.STRING_LIT() != null
+                ? Optional.of(unquote(ctx.STRING_LIT().getText()))
                 : Optional.empty();
-            return new ShowContextualStmt(range, target, qname);
+            return new ShowContextualStmt(range, target, filter);
         }
 
         private ShowTarget parseShowTarget(SqlStreamParser.ShowTargetContext ctx) {
             if (ctx.CONTEXTS() != null) return ShowTarget.CONTEXTS;
             if (ctx.TYPES() != null) return ShowTarget.TYPES;
             if (ctx.STREAMS() != null) return ShowTarget.STREAMS;
+            if (ctx.USERS() != null) return ShowTarget.USERS;
             throw new IllegalStateException("Unknown show target");
         }
 
@@ -355,6 +353,65 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             return new DropStmt.DropStream(range(ctx), visitQname(ctx.qname()));
         }
 
+        // ========================================================================
+        // USER
+        // ========================================================================
+
+        @Override
+        public UserStmt.CreateUser visitCreateUser(SqlStreamParser.CreateUserContext ctx) {
+            String username = visitIdentifier(ctx.identifier()).name();
+            Optional<String> password = ctx.STRING_LIT() != null
+                ? Optional.of(unquote(ctx.STRING_LIT().getText()))
+                : Optional.empty();
+            return new UserStmt.CreateUser(range(ctx), username, password);
+        }
+
+        @Override
+        public UserStmt.AlterUser visitAlterUser(SqlStreamParser.AlterUserContext ctx) {
+            return new UserStmt.AlterUser(range(ctx),
+                visitIdentifier(ctx.identifier()).name(),
+                unquote(ctx.STRING_LIT().getText()));
+        }
+
+        @Override
+        public UserStmt.DropUser visitDropUser(SqlStreamParser.DropUserContext ctx) {
+            return new UserStmt.DropUser(range(ctx), visitIdentifier(ctx.identifier()).name());
+        }
+
+        // ========================================================================
+        // GRANT / REVOKE
+        // ========================================================================
+
+        @Override
+        public AclStmt.Grant visitGrantPrivilege(SqlStreamParser.GrantPrivilegeContext ctx) {
+            AclStmt.Privilege priv = parsePrivilege(ctx.privilege());
+            AclStmt.Target target  = parseGrantTarget(ctx.grantTarget());
+            QName resource         = visitQname(ctx.qname());
+            String principal       = unquote(ctx.STRING_LIT().getText());
+            return new AclStmt.Grant(range(ctx), priv, target, resource, principal);
+        }
+
+        @Override
+        public AclStmt.Revoke visitRevokePrivilege(SqlStreamParser.RevokePrivilegeContext ctx) {
+            AclStmt.Privilege priv = parsePrivilege(ctx.privilege());
+            AclStmt.Target target  = parseGrantTarget(ctx.grantTarget());
+            QName resource         = visitQname(ctx.qname());
+            String principal       = unquote(ctx.STRING_LIT().getText());
+            return new AclStmt.Revoke(range(ctx), priv, target, resource, principal);
+        }
+
+        private AclStmt.Privilege parsePrivilege(SqlStreamParser.PrivilegeContext ctx) {
+            if (ctx.READ()   != null) return AclStmt.Privilege.READ;
+            if (ctx.WRITE()  != null) return AclStmt.Privilege.WRITE;
+            if (ctx.CREATE() != null) return AclStmt.Privilege.CREATE;
+            if (ctx.MODIFY() != null) return AclStmt.Privilege.MODIFY;
+            return AclStmt.Privilege.ALL;
+        }
+
+        private AclStmt.Target parseGrantTarget(SqlStreamParser.GrantTargetContext ctx) {
+            return ctx.CONTEXT() != null ? AclStmt.Target.CONTEXT : AclStmt.Target.STREAM;
+        }
+
         @Override
         public Decl visitDecl(SqlStreamParser.DeclContext ctx) {
             if (ctx.contextDecl() != null)
@@ -452,16 +509,18 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             // ID is the common case; keyword alternatives are soft-keywords used
             // as identifiers (e.g. a field named "End" or "Group").
             org.antlr.v4.runtime.tree.TerminalNode token =
-                ctx.ID() != null         ? ctx.ID()         :
-                ctx.END() != null        ? ctx.END()        :
-                ctx.GROUP() != null      ? ctx.GROUP()      :
-                ctx.BEGINNING() != null  ? ctx.BEGINNING()  :
-                ctx.OFFSETS() != null    ? ctx.OFFSETS()    :
-                ctx.TIMESTAMPS() != null ? ctx.TIMESTAMPS() :
-                ctx.AFTER() != null      ? ctx.AFTER()      :
-                ctx.RECORDS() != null    ? ctx.RECORDS()    :
-                ctx.SECONDS() != null    ? ctx.SECONDS()    :
-                ctx.IDLE() != null       ? ctx.IDLE()       : null;
+                ctx.ID() != null            ? ctx.ID()            :
+                ctx.END() != null           ? ctx.END()           :
+                ctx.GROUP() != null         ? ctx.GROUP()         :
+                ctx.BEGINNING() != null     ? ctx.BEGINNING()     :
+                ctx.OFFSETS() != null       ? ctx.OFFSETS()       :
+                ctx.TIMESTAMPS() != null    ? ctx.TIMESTAMPS()    :
+                ctx.AFTER() != null         ? ctx.AFTER()         :
+                ctx.RECORDS() != null       ? ctx.RECORDS()       :
+                ctx.SECONDS() != null       ? ctx.SECONDS()       :
+                ctx.IDLE() != null          ? ctx.IDLE()          :
+                ctx.USER() != null          ? ctx.USER()          :
+                ctx.PASSWORD() != null      ? ctx.PASSWORD()      : null;
             if (token == null) {
                 Range range = range(ctx);
                 _diags.syntaxError(

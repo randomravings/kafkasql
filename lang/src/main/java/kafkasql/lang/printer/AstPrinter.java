@@ -92,6 +92,8 @@ public final class AstPrinter extends Printer {
             case DropStmt d     -> writeDropStmt(d, indent);
             case ReadStmt r     -> writeRead(r, indent);
             case WriteStmt w    -> writeWrite(w, indent);
+            case UserStmt u     -> writeUserStmt(u, indent);
+            case AclStmt a      -> writeAclStmt(a, indent);
         }
     }
 
@@ -118,19 +120,13 @@ public final class AstPrinter extends Printer {
                 branch("target", indent, true);
                 write("CURRENT CONTEXT");
             }
-            case ShowAllStmt sas -> {
-                writeClass(sas.getClass());
-                branch("target", indent, true);
-                write("ALL ");
-                write(sas.target().name());
-            }
             case ShowContextualStmt scs -> {
                 writeClass(scs.getClass());
                 branch("target", indent, true);
                 write(scs.target().name());
-                if (scs.qname().isPresent()) {
-                    branch("qname", indent, false);
-                    writeQName(scs.qname().get(), indent + 1);
+                if (scs.filter().isPresent()) {
+                    branch("filter", indent, false);
+                    write(scs.filter().get());
                 }
             }
         }
@@ -193,6 +189,58 @@ public final class AstPrinter extends Printer {
         writeClass(d.getClass());
         branch("target", indent, true);
         writeQName(d.target(), indent + 1);
+    }
+
+    private void writeUserStmt(UserStmt u, int indent) throws IOException {
+        writeClass(u.getClass());
+        switch (u) {
+            case UserStmt.CreateUser cu -> {
+                branch("username", indent, cu.password().isEmpty());
+                write(cu.username());
+                cu.password().ifPresent(p -> {
+                    try { branch("PASSWORD", indent, true); write(p); }
+                    catch (IOException e) { throw new java.io.UncheckedIOException(e); }
+                });
+            }
+            case UserStmt.AlterUser au -> {
+                branch("username", indent, false);
+                write(au.username());
+                branch("PASSWORD", indent, true);
+                write(au.password());
+            }
+            case UserStmt.DropUser du -> {
+                branch("username", indent, true);
+                write(du.username());
+            }
+        }
+    }
+
+    private void writeAclStmt(AclStmt a, int indent) throws IOException {
+        writeClass(a.getClass());
+        AclStmt.Privilege priv = switch (a) {
+            case AclStmt.Grant  g -> g.privilege();
+            case AclStmt.Revoke r -> r.privilege();
+        };
+        AclStmt.Target target = switch (a) {
+            case AclStmt.Grant  g -> g.target();
+            case AclStmt.Revoke r -> r.target();
+        };
+        QName resource = switch (a) {
+            case AclStmt.Grant  g -> g.resource();
+            case AclStmt.Revoke r -> r.resource();
+        };
+        String principal = switch (a) {
+            case AclStmt.Grant  g -> g.principal();
+            case AclStmt.Revoke r -> r.principal();
+        };
+        branch("privilege", indent, false);
+        write(priv.name());
+        branch("target", indent, false);
+        write(target.name());
+        branch("resource", indent, false);
+        writeQName(resource, indent + 1);
+        branch("principal", indent, true);
+        write(principal);
     }
 
     private void writeDecl(Decl d, int indent) throws IOException {

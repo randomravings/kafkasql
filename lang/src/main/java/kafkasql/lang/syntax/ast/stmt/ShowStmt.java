@@ -6,7 +6,7 @@ import kafkasql.lang.syntax.ast.show.ShowTarget;
  * Base sealed interface for all SHOW statements.
  */
 public sealed interface ShowStmt extends Stmt 
-    permits ShowCurrentStmt, ShowAllStmt, ShowContextualStmt {
+    permits ShowCurrentStmt, ShowContextualStmt {
     
     ShowTarget target();
 }

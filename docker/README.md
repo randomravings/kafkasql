@@ -24,10 +24,51 @@ docker compose down -v
 
 ## Configuration
 
-- **Kafka Version:** 4.0.0 (Apache Kafka, not Confluent)
+- **Kafka Version:** 4.1.1 (Apache Kafka, KRaft mode)
 - **Consensus:** KRaft (no Zookeeper required)
 - **Mode:** Single-node combined broker/controller
-- **Bootstrap Server:** `localhost:9092`
+
+| Listener | Port | Protocol | Auth |
+|----------|------|----------|------|
+| PLAINTEXT | 9092 | PLAINTEXT | none (internal / dev) |
+| SASLSCRAM | 9094 | SASL_PLAINTEXT | SCRAM-SHA-256 |
+| CONTROLLER | 9093 | PLAINTEXT | internal only |
+
+### Default credentials (created by `setup.sh`)
+
+| Username | Password |
+|----------|----------|
+| `admin` | `admin-secret` |
+
+Override at setup time via environment variables:
+
+```bash
+KAFKA_ADMIN_USER=myuser KAFKA_ADMIN_PASSWORD=mypass ./docker/setup.sh
+```
+
+### Adding more users
+
+Use the `kafka-configs.sh` tool against the unauthenticated PLAINTEXT listener (9092):
+
+```bash
+docker exec kafkasql-kafka \
+  /opt/kafka/bin/kafka-configs.sh \
+    --bootstrap-server localhost:9092 \
+    --alter \
+    --add-config 'SCRAM-SHA-256=[iterations=4096,password=secret]' \
+    --entity-type users \
+    --entity-name alice
+```
+
+### Listing SCRAM users
+
+```bash
+docker exec kafkasql-kafka \
+  /opt/kafka/bin/kafka-configs.sh \
+    --bootstrap-server localhost:9092 \
+    --describe \
+    --entity-type users
+```
 
 ## Basic Operations
 
@@ -97,15 +138,22 @@ docker compose ps
 
 ## Accessing from Host Applications
 
-Connect to Kafka from your local machine using:
+### Without authentication (PLAINTEXT)
 
-- **Bootstrap Server:** `localhost:9092`
-- **Security Protocol:** `PLAINTEXT` (no authentication)
+```
+bootstrap.servers=localhost:9092
+security.protocol=PLAINTEXT
+```
 
-Example connection string for most clients:
+### With SASL/SCRAM-SHA-256
 
-```bash
-localhost:9092
+```
+bootstrap.servers=localhost:9094
+security.protocol=SASL_PLAINTEXT
+sasl.mechanism=SCRAM-SHA-256
+sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required \
+  username="admin" \
+  password="admin-secret";
 ```
 
 ## Troubleshooting
@@ -124,11 +172,12 @@ docker compose logs -f kafka
 
 ### Container Not Starting
 
-1. Check if port 9092 or 9093 is already in use:
+1. Check if ports 9092, 9093, or 9094 are already in use:
 
    ```bash
    lsof -i :9092
    lsof -i :9093
+   lsof -i :9094
    ```
 
 2. Check Docker daemon is running

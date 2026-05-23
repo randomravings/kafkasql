@@ -4,8 +4,16 @@ import kafkasql.engine.KafkaSqlEngine;
 import kafkasql.io.SchemaMarker;
 import kafkasql.runtime.Name;
 import kafkasql.runtime.value.StructValue;
+import kafkasql.lang.syntax.ast.misc.QName;
+import kafkasql.lang.syntax.ast.stmt.AclStmt;
+import kafkasql.lang.syntax.ast.stmt.UserStmt;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.kafka.clients.admin.ScramCredentialInfo;
+import org.apache.kafka.clients.admin.ScramMechanism;
+import org.apache.kafka.clients.admin.UserScramCredentialAlteration;
+import org.apache.kafka.clients.admin.UserScramCredentialDeletion;
+import org.apache.kafka.clients.admin.UserScramCredentialUpsertion;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -14,7 +22,16 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.common.acl.AccessControlEntry;
+import org.apache.kafka.common.acl.AccessControlEntryFilter;
+import org.apache.kafka.common.acl.AclBinding;
+import org.apache.kafka.common.acl.AclBindingFilter;
+import org.apache.kafka.common.acl.AclOperation;
+import org.apache.kafka.common.acl.AclPermissionType;
 import org.apache.kafka.common.header.internals.RecordHeader;
+import org.apache.kafka.common.resource.PatternType;
+import org.apache.kafka.common.resource.ResourcePattern;
+import org.apache.kafka.common.resource.ResourceType;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.ByteArraySerializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -269,6 +286,126 @@ public class KafkaEngine extends KafkaSqlEngine {
             return new StreamRecord(typeName, new StructValue(type, fields));
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    // ========================================================================
+    // ACL management
+    // ========================================================================
+
+    @Override
+    protected void executeGrant(AclStmt stmt) {
+        try {
+            boolean isGrant = stmt instanceof AclStmt.Grant;
+            AclStmt.Privilege privilege = switch (stmt) {
+                case AclStmt.Grant  g -> g.privilege();
+                case AclStmt.Revoke r -> r.privilege();
+            };
+            AclStmt.Target target = switch (stmt) {
+                case AclStmt.Grant  g -> g.target();
+                case AclStmt.Revoke r -> r.target();
+            };
+            QName resource = switch (stmt) {
+                case AclStmt.Grant  g -> g.resource();
+                case AclStmt.Revoke r -> r.resource();
+            };
+            String principal = switch (stmt) {
+                case AclStmt.Grant  g -> g.principal();
+                case AclStmt.Revoke r -> r.principal();
+            };
+
+            String topicName = resource.fullName();
+            PatternType patternType = target == AclStmt.Target.CONTEXT
+                ? PatternType.PREFIXED
+                : PatternType.LITERAL;
+
+            List<AclOperation> ops = switch (privilege) {
+                case READ   -> List.of(AclOperation.READ);
+                case WRITE  -> List.of(AclOperation.WRITE);
+                case CREATE -> List.of(AclOperation.CREATE);
+                case MODIFY -> List.of(AclOperation.ALTER);
+                case ALL    -> List.of(AclOperation.READ, AclOperation.WRITE);
+            };
+
+            var resourcePattern = new ResourcePattern(ResourceType.TOPIC, topicName, patternType);
+            String kafkaPrincipal = principal.contains(":") ? principal : "User:" + principal;
+
+            if (isGrant) {
+                List<AclBinding> bindings = new ArrayList<>();
+                for (var op : ops) {
+                    var entry = new AccessControlEntry(kafkaPrincipal, "*", op, AclPermissionType.ALLOW);
+                    bindings.add(new AclBinding(resourcePattern, entry));
+                }
+                adminClient.createAcls(bindings).all().get();
+            } else {
+                List<AclBindingFilter> filters = new ArrayList<>();
+                for (var op : ops) {
+                    var entryFilter = new AccessControlEntryFilter(
+                        kafkaPrincipal, "*", op, AclPermissionType.ALLOW);
+                    filters.add(new AclBindingFilter(resourcePattern.toFilter(), entryFilter));
+                }
+                adminClient.deleteAcls(filters).all().get();
+            }
+        } catch (Exception ex) {
+            throw new RuntimeException("ACL management failed: " + ex.getMessage(), ex);
+        }
+    }
+
+    // ========================================================================
+    // User management
+    // ========================================================================
+
+    @Override
+    protected void executeUser(UserStmt stmt) {
+        try {
+            switch (stmt) {
+                case UserStmt.CreateUser cu -> {
+                    String password = cu.password().orElseThrow(
+                        () -> new IllegalArgumentException("CREATE USER requires PASSWORD option"));
+                    var info = new ScramCredentialInfo(ScramMechanism.SCRAM_SHA_256, 4096);
+                    adminClient.alterUserScramCredentials(
+                        List.of(new UserScramCredentialUpsertion(cu.username(), info, password))
+                    ).all().get();
+                }
+                case UserStmt.AlterUser au -> {
+                    List<ScramMechanism> targetMechs = new ArrayList<>();
+                    try {
+                        var desc = adminClient.describeUserScramCredentials(List.of(au.username())).all().get();
+                        var userDesc = desc.get(au.username());
+                        if (userDesc != null) {
+                            userDesc.credentialInfos().forEach(ci -> targetMechs.add(ci.mechanism()));
+                        }
+                    } catch (Exception ignored) {}
+                    if (targetMechs.isEmpty()) {
+                        targetMechs.add(ScramMechanism.SCRAM_SHA_256);
+                    }
+                    List<UserScramCredentialAlteration> alterations = new ArrayList<>();
+                    for (var mech : targetMechs) {
+                        alterations.add(new UserScramCredentialUpsertion(
+                            au.username(), new ScramCredentialInfo(mech, 4096), au.password()));
+                    }
+                    adminClient.alterUserScramCredentials(alterations).all().get();
+                }
+                case UserStmt.DropUser du -> {
+                    List<UserScramCredentialAlteration> deletions = new ArrayList<>();
+                    try {
+                        var desc = adminClient.describeUserScramCredentials(List.of(du.username())).all().get();
+                        var userDesc = desc.get(du.username());
+                        if (userDesc != null) {
+                            for (var cred : userDesc.credentialInfos()) {
+                                deletions.add(new UserScramCredentialDeletion(du.username(), cred.mechanism()));
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                    if (!deletions.isEmpty()) {
+                        adminClient.alterUserScramCredentials(deletions).all().get();
+                    }
+                }
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception ex) {
+            throw new RuntimeException("User management failed: " + ex.getMessage(), ex);
         }
     }
 

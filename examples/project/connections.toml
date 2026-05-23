@@ -6,6 +6,13 @@
 # Fields per connection:
 #   bootstrap  — Kafka bootstrap server(s), comma-separated (required)
 #   topic      — event-log topic written by the KafkaSQL engine (required)
+#   username   — SASL/SCRAM-SHA-256 username (optional)
+#   password   — SASL/SCRAM-SHA-256 password (optional, required if username set)
+#
+# When username/password are set the client uses SASL_PLAINTEXT + SCRAM-SHA-256.
+# Make sure bootstrap points at the SASL listener port (e.g. 9094), NOT the
+# PLAINTEXT port (e.g. 9092) — connecting with SASL to a PLAINTEXT listener
+# causes an "unexpected handshake" error.
 #
 # Connections are shown as child nodes under the project in the VS Code
 # project explorer. Expanding a connection reads the live schema model
@@ -13,22 +20,18 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-# ── Local / development cluster ───────────────────────────────────────────────
+# ── Local / development cluster (no auth, PLAINTEXT port) ────────────────────
 
 [connection.local]
 bootstrap = "localhost:9092"
 topic     = "_kafkasql_log"
 
+# ── Local / development cluster (SASL/SCRAM, port 9094) ──────────────────────
+# Default admin credentials — created automatically by docker/setup.sh.
+# Override via KAFKA_ADMIN_USER / KAFKA_ADMIN_PASSWORD env vars before running setup.sh.
 
-# ── Staging cluster ───────────────────────────────────────────────────────────
-
-# [connection.staging]
-# bootstrap = "kafka-staging.internal:9092"
-# topic     = "_kafkasql_log"
-
-
-# ── Production cluster ────────────────────────────────────────────────────────
-
-# [connection.production]
-# bootstrap = "kafka-prod-1.internal:9092,kafka-prod-2.internal:9092"
-# topic     = "_kafkasql_log"
+[connection.local-admin]
+bootstrap = "localhost:9094"
+topic     = "_kafkasql_log"
+username  = "admin"
+password  = "admin-secret"
