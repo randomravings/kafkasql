@@ -3,7 +3,6 @@ package kafkasql.pipeline.phases;
 import kafkasql.runtime.diagnostics.Diagnostics;
 import kafkasql.lang.semantic.SemanticModel;
 import kafkasql.linter.LintEngine;
-import kafkasql.linter.LintSettings;
 import kafkasql.pipeline.Phase;
 import kafkasql.pipeline.PhaseResult;
 import kafkasql.pipeline.PipelineContext;

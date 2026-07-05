@@ -2,5 +2,7 @@
 -- Lives at kafka/orders.kafka (depth 1 from kafka root — no folder constraint).
 -- Other files that need this context: INCLUDE 'orders.kafka'; USE CONTEXT orders;
 
+USE CONTEXT GLOBAL;
+
 CREATE CONTEXT orders
 COMMENT 'Order management domain';

@@ -38,9 +38,6 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 
 import kafkasql.runtime.type.StructType;
-import kafkasql.runtime.type.StructTypeField;
-import kafkasql.runtime.type.AnyType;
-import kafkasql.runtime.type.PrimitiveType;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;

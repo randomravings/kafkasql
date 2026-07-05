@@ -15,7 +15,7 @@ import kafkasql.runtime.type.*;
  * - Scalar types → type aliases / wrapper classes
  * - Enum types → Java enums
  * - Struct types → Java records
- * - Union types → sealed interfaces (TODO)
+ * - Union types → sealed interfaces with nested member records
  */
 public class Compiler {
     private static final String INDENT = "    ";
@@ -50,8 +50,9 @@ public class Compiler {
                     generateEnum(declName, enumType);
                 } else if (boundType instanceof StructType structType) {
                     generateStruct(declName, structType);
+                } else if (boundType instanceof UnionType unionType) {
+                    generateUnion(declName, unionType);
                 }
-                // TODO: UnionType
             } else if (decl instanceof kafkasql.lang.syntax.ast.decl.StreamDecl streamDecl) {
                 generateStream(declName, streamDecl);
             }
@@ -60,6 +61,109 @@ public class Compiler {
         return generatedFiles;
     }
     
+    // ========================================================================
+    // Union Generation
+    // ========================================================================
+
+    private void generateUnion(Name name, UnionType type) {
+        String className = toClassName(name);
+
+        StringBuilder sb = new StringBuilder();
+
+        // Package
+        if (!name.context().isEmpty()) {
+            sb.append("package ").append(toPackage(name)).append(";\n\n");
+        }
+
+        // Imports
+        sb.append("import kafkasql.runtime.Record;\n");
+        sb.append("import kafkasql.io.codec.Encoder;\n");
+        sb.append("import kafkasql.io.codec.Decoder;\n");
+        sb.append("import java.io.*;\n");
+        sb.append("import java.math.BigDecimal;\n");
+        sb.append("import java.time.*;\n");
+        sb.append("import java.util.*;\n\n");
+
+        // Documentation
+        type.doc().ifPresent(doc -> {
+            sb.append("/**\n");
+            sb.append(" * ").append(doc).append("\n");
+            sb.append(" */\n");
+        });
+
+        // Sealed interface declaration with permits clause
+        String unionName = name.name();
+        StringBuilder permitsClause = new StringBuilder();
+        boolean firstPermit = true;
+        for (String memberName : type.members().keySet()) {
+            if (!firstPermit) permitsClause.append(", ");
+            firstPermit = false;
+            permitsClause.append(unionName).append(".").append(memberName);
+        }
+        sb.append("public sealed interface ").append(unionName).append(" extends Record");
+        sb.append(" permits ").append(permitsClause).append(" {\n\n");
+
+        // Abstract writeTo
+        sb.append(INDENT).append("void writeTo(OutputStream out) throws Exception;\n\n");
+
+        // Static readFrom dispatch
+        sb.append(INDENT).append("static ").append(unionName).append(" readFrom(InputStream in) throws Exception {\n");
+        sb.append(INDENT).append(INDENT).append("int idx = Decoder.decodeVarInt32(in);\n");
+        sb.append(INDENT).append(INDENT).append("return switch (idx) {\n");
+        int memberIdx = 0;
+        for (String memberName : type.members().keySet()) {
+            sb.append(INDENT).append(INDENT).append(INDENT)
+              .append("case ").append(memberIdx).append(" -> ").append(memberName).append(".readFrom(in);\n");
+            memberIdx++;
+        }
+        sb.append(INDENT).append(INDENT).append(INDENT)
+          .append("default -> throw new IllegalArgumentException(\"Unknown union member index: \" + idx);\n");
+        sb.append(INDENT).append(INDENT).append("};\n");
+        sb.append(INDENT).append("}\n\n");
+
+        // Nested member records
+        memberIdx = 0;
+        for (Map.Entry<String, UnionTypeMember> entry : type.members().entrySet()) {
+            String memberName = entry.getKey();
+            UnionTypeMember member = entry.getValue();
+            AnyType memberType = member.typ();
+            String javaType = mapFieldType(memberType, false);
+
+            member.doc().ifPresent(doc -> {
+                sb.append(INDENT).append("/** ").append(doc).append(" */\n");
+            });
+
+            sb.append(INDENT).append("record ").append(memberName).append("(");
+            sb.append(javaType).append(" value");
+            sb.append(") implements ").append(unionName).append(" {\n");
+
+            // writeTo
+            sb.append(INDENT).append(INDENT).append("@Override\n");
+            sb.append(INDENT).append(INDENT).append("public void writeTo(OutputStream out) throws Exception {\n");
+            sb.append(INDENT).append(INDENT).append(INDENT)
+              .append("Encoder.writeVarInt32(out, ").append(memberIdx).append(");\n");
+            sb.append(INDENT).append(INDENT).append(INDENT);
+            emitStructFieldWrite(sb, "value", memberType, false);
+            sb.append(INDENT).append(INDENT).append("}\n\n");
+
+            // readFrom
+            sb.append(INDENT).append(INDENT).append("public static ").append(memberName)
+              .append(" readFrom(InputStream in) throws Exception {\n");
+            sb.append(INDENT).append(INDENT).append(INDENT)
+              .append("return new ").append(memberName).append("(");
+            emitStructFieldRead(sb, memberType, false);
+            sb.append(");\n");
+            sb.append(INDENT).append(INDENT).append("}\n");
+
+            sb.append(INDENT).append("}\n\n");
+            memberIdx++;
+        }
+
+        sb.append("}\n");
+
+        generatedFiles.put(className, sb.toString());
+    }
+
     // ========================================================================
     // Scalar Generation
     // ========================================================================
@@ -262,23 +366,27 @@ public class Compiler {
         }
         sb.append(INDENT).append("}\n\n");
         
-        // readFrom
+        // readFrom — uses local variables so list/map fields can use multi-statement loops
         sb.append(INDENT).append("public static ").append(recordName).append(" readFrom(InputStream in) throws Exception {\n");
+        for (var entry : type.fields().entrySet()) {
+            String fieldName = entry.getKey();
+            StructTypeField field = entry.getValue();
+            emitStructFieldReadLocal(sb, "_" + fieldName, field.type(), field.nullable(), INDENT + INDENT);
+        }
         sb.append(INDENT).append(INDENT).append("return new ").append(recordName).append("(\n");
         first = true;
         for (var entry : type.fields().entrySet()) {
-            StructTypeField field = entry.getValue();
+            String fieldName = entry.getKey();
             if (!first) {
                 sb.append(",\n");
             }
             first = false;
-            sb.append(INDENT).append(INDENT).append(INDENT);
-            emitStructFieldRead(sb, field.type(), field.nullable());
+            sb.append(INDENT).append(INDENT).append(INDENT).append("_").append(fieldName);
         }
         sb.append("\n");
         sb.append(INDENT).append(INDENT).append(");\n");
         sb.append(INDENT).append("}\n");
-        
+
         sb.append("}\n");
         
         generatedFiles.put(className, sb.toString());
@@ -456,7 +564,7 @@ public class Compiler {
         sb.append(INDENT).append(" *\n");
         sb.append(INDENT).append(" * <p>The topic name is implicitly derived from the stream name.\n");
         sb.append(INDENT).append(" * The caller is responsible for creating and configuring the consumer,\n");
-        sb.append(INDENT).append(" * including byte[] deserializers, consumer group, subscriptions, and other properties.\n");
+        sb.append(INDENT).append(" * including byte[] deserializers, cursor name, subscriptions, and other properties.\n");
         sb.append(INDENT).append(" * The consumer is NOT owned by this reader - the caller must manage its lifecycle.\n");
         sb.append(INDENT).append(" *\n");
         sb.append(INDENT).append(" * @param consumer Pre-configured Kafka consumer with byte[] key/value deserializers\n");
@@ -710,7 +818,59 @@ public class Compiler {
             case EnumType et -> emitComplexFieldWrite(sb, fieldName, nullable);
             case StructType st -> emitComplexFieldWrite(sb, fieldName, nullable);
             case UnionType ut -> emitComplexFieldWrite(sb, fieldName, nullable);
-            default -> sb.append("// TODO: unsupported type for ").append(fieldName).append("\n");
+            case ListType lt -> emitListFieldWrite(sb, fieldName, lt, nullable);
+            case MapType mt -> emitMapFieldWrite(sb, fieldName, mt, nullable);
+            default -> throw new UnsupportedOperationException("Unsupported type for field: " + fieldName + " (" + type.getClass().getSimpleName() + ")");
+        }
+    }
+
+    private void emitListFieldWrite(StringBuilder sb, String fieldName, ListType lt, boolean nullable) {
+        if (nullable) {
+            sb.append("if (").append(fieldName).append(" == null) { Encoder.writeBool(out, false); } else { Encoder.writeBool(out, true); ");
+            emitListWriteBody(sb, fieldName, lt);
+            sb.append(" }\n");
+        } else {
+            emitListWriteBody(sb, fieldName, lt);
+            sb.append("\n");
+        }
+    }
+
+    private void emitListWriteBody(StringBuilder sb, String fieldName, ListType lt) {
+        sb.append("Encoder.writeVarInt32(out, ").append(fieldName).append(".size()); ");
+        sb.append("for (var __e : ").append(fieldName).append(") { ");
+        emitElementWrite(sb, "__e", lt.item());
+        sb.append(" }");
+    }
+
+    private void emitMapFieldWrite(StringBuilder sb, String fieldName, MapType mt, boolean nullable) {
+        if (nullable) {
+            sb.append("if (").append(fieldName).append(" == null) { Encoder.writeBool(out, false); } else { Encoder.writeBool(out, true); ");
+            emitMapWriteBody(sb, fieldName, mt);
+            sb.append(" }\n");
+        } else {
+            emitMapWriteBody(sb, fieldName, mt);
+            sb.append("\n");
+        }
+    }
+
+    private void emitMapWriteBody(StringBuilder sb, String fieldName, MapType mt) {
+        sb.append("Encoder.writeVarInt32(out, ").append(fieldName).append(".size()); ");
+        sb.append("for (var __entry : ").append(fieldName).append(".entrySet()) { ");
+        emitElementWrite(sb, "__entry.getKey()", mt.key());
+        sb.append(" ");
+        emitElementWrite(sb, "__entry.getValue()", mt.value());
+        sb.append(" }");
+    }
+
+    /** Emits a single element write (no trailing newline) for use inside loops. */
+    private void emitElementWrite(StringBuilder sb, String accessor, AnyType type) {
+        switch (type) {
+            case PrimitiveType pt -> emitPrimitiveWrite(sb, accessor, pt);
+            case ScalarType ignored -> sb.append(accessor).append(".writeTo(out);");
+            case EnumType ignored -> sb.append(accessor).append(".writeTo(out);");
+            case StructType ignored -> sb.append(accessor).append(".writeTo(out);");
+            case UnionType ignored -> sb.append(accessor).append(".writeTo(out);");
+            default -> throw new UnsupportedOperationException("Unsupported element type: " + type.getClass().getSimpleName());
         }
     }
     
@@ -723,7 +883,8 @@ public class Compiler {
     }
     
     /**
-     * Emits a read expression for a struct field (any AnyType).
+     * Emits a read expression for a struct field (any AnyType). Only valid for simple types;
+     * for List/Map fields use {@link #emitStructFieldReadLocal} instead.
      */
     private void emitStructFieldRead(StringBuilder sb, AnyType type, boolean nullable) {
         switch (type) {
@@ -732,7 +893,74 @@ public class Compiler {
             case EnumType et -> emitComplexFieldRead(sb, et.fqn().toString(), nullable);
             case StructType st -> emitComplexFieldRead(sb, st.fqn().toString(), nullable);
             case UnionType ut -> emitComplexFieldRead(sb, ut.fqn().toString(), nullable);
-            default -> sb.append("null /* TODO: unsupported type */");
+            default -> throw new UnsupportedOperationException("Unsupported type: " + type.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * Emits a local variable declaration that reads one struct field from {@code in}.
+     * Handles all types including List and Map (which require multi-statement loops).
+     */
+    private void emitStructFieldReadLocal(StringBuilder sb, String varName, AnyType type, boolean nullable, String indent) {
+        switch (type) {
+            case ListType lt -> {
+                String elemType = mapFieldType(lt.item(), false);
+                if (nullable) {
+                    sb.append(indent).append("java.util.List<").append(elemType).append("> ").append(varName).append(";");
+                    sb.append(" if (Decoder.decodeBoolean(in)) { ");
+                    sb.append("int __n = Decoder.decodeVarInt32(in); ");
+                    sb.append(varName).append(" = new java.util.ArrayList<>(__n); ");
+                    sb.append("for (int __i = 0; __i < __n; __i++) { ").append(varName).append(".add(");
+                    emitElementRead(sb, lt.item());
+                    sb.append("); } } else { ").append(varName).append(" = null; }\n");
+                } else {
+                    sb.append(indent).append("int __").append(varName).append("_n = Decoder.decodeVarInt32(in);\n");
+                    sb.append(indent).append("var ").append(varName).append(" = new java.util.ArrayList<").append(elemType).append(">(__").append(varName).append("_n);\n");
+                    sb.append(indent).append("for (int __i = 0; __i < __").append(varName).append("_n; __i++) { ").append(varName).append(".add(");
+                    emitElementRead(sb, lt.item());
+                    sb.append("); }\n");
+                }
+            }
+            case MapType mt -> {
+                String keyType = mapFieldType(mt.key(), false);
+                String valType = mapFieldType(mt.value(), false);
+                if (nullable) {
+                    sb.append(indent).append("java.util.Map<").append(keyType).append(", ").append(valType).append("> ").append(varName).append(";");
+                    sb.append(" if (Decoder.decodeBoolean(in)) { ");
+                    sb.append("int __n = Decoder.decodeVarInt32(in); ");
+                    sb.append(varName).append(" = new java.util.LinkedHashMap<>(__n); ");
+                    sb.append("for (int __i = 0; __i < __n; __i++) { ").append(varName).append(".put(");
+                    emitElementRead(sb, mt.key());
+                    sb.append(", ");
+                    emitElementRead(sb, mt.value());
+                    sb.append("); } } else { ").append(varName).append(" = null; }\n");
+                } else {
+                    sb.append(indent).append("int __").append(varName).append("_n = Decoder.decodeVarInt32(in);\n");
+                    sb.append(indent).append("var ").append(varName).append(" = new java.util.LinkedHashMap<").append(keyType).append(", ").append(valType).append(">(__").append(varName).append("_n);\n");
+                    sb.append(indent).append("for (int __i = 0; __i < __").append(varName).append("_n; __i++) { ").append(varName).append(".put(");
+                    emitElementRead(sb, mt.key());
+                    sb.append(", ");
+                    emitElementRead(sb, mt.value());
+                    sb.append("); }\n");
+                }
+            }
+            default -> {
+                sb.append(indent).append("var ").append(varName).append(" = ");
+                emitStructFieldRead(sb, type, nullable);
+                sb.append(";\n");
+            }
+        }
+    }
+
+    /** Emits a single element read expression (no semicolon) for use inside loops. */
+    private void emitElementRead(StringBuilder sb, AnyType type) {
+        switch (type) {
+            case PrimitiveType pt -> emitPrimitiveRead(sb, pt);
+            case ScalarType st -> sb.append(st.fqn().toString()).append(".readFrom(in)");
+            case EnumType et -> sb.append(et.fqn().toString()).append(".readFrom(in)");
+            case StructType st -> sb.append(st.fqn().toString()).append(".readFrom(in)");
+            case UnionType ut -> sb.append(ut.fqn().toString()).append(".readFrom(in)");
+            default -> throw new UnsupportedOperationException("Unsupported element type: " + type.getClass().getSimpleName());
         }
     }
     
@@ -754,7 +982,7 @@ public class Compiler {
         } else if (typeNode instanceof kafkasql.lang.syntax.ast.type.ComplexTypeNode) {
             emitComplexFieldWrite(sb, fieldName, nullable);
         } else {
-            sb.append("// TODO: unsupported AST type for ").append(fieldName).append("\n");
+            throw new UnsupportedOperationException("Unsupported AST type for field: " + fieldName + " (" + typeNode.getClass().getSimpleName() + ")");
         }
     }
     
@@ -765,7 +993,7 @@ public class Compiler {
             String typeName = mapAstTypeToJava(complexNode, false);
             emitComplexFieldRead(sb, typeName, nullable);
         } else {
-            sb.append("null /* TODO: unsupported AST type */");
+            throw new UnsupportedOperationException("Unsupported AST type: " + typeNode.getClass().getSimpleName());
         }
     }
     

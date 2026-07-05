@@ -10,6 +10,8 @@ import kafkasql.lang.syntax.ast.Script;
 import kafkasql.lang.syntax.ast.decl.ContextDecl;
 import kafkasql.lang.syntax.ast.decl.Decl;
 import kafkasql.lang.syntax.ast.decl.DerivedTypeDecl;
+import kafkasql.lang.syntax.ast.decl.EnumDecl;
+import kafkasql.lang.syntax.ast.decl.EnumSymbolDecl;
 import kafkasql.lang.syntax.ast.decl.StreamDecl;
 import kafkasql.lang.syntax.ast.decl.StreamMemberDecl;
 import kafkasql.lang.syntax.ast.decl.StructDecl;
@@ -20,17 +22,28 @@ import kafkasql.lang.syntax.ast.fragment.DroppedNode;
 import kafkasql.lang.syntax.ast.misc.QName;
 import kafkasql.lang.syntax.ast.AstListNode;
 import kafkasql.lang.syntax.ast.stmt.AlterStmt;
+import kafkasql.lang.syntax.ast.stmt.CursorStmt;
 import kafkasql.lang.syntax.ast.stmt.CreateStmt;
 import kafkasql.lang.syntax.ast.stmt.DropStmt;
+import kafkasql.lang.syntax.ast.stmt.ReadMode;
+import kafkasql.lang.syntax.ast.stmt.ReadStmt;
 import kafkasql.lang.syntax.ast.stmt.Stmt;
 import kafkasql.lang.syntax.ast.stmt.UseStmt;
 import kafkasql.lang.syntax.ast.use.ContextUse;
 
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.time.Instant;
 
 public final class DeclResolver {
+
+    private record CursorRef(
+        Name context,
+        String cursorName
+    ) {}
 
     private DeclResolver() {}
 
@@ -47,6 +60,8 @@ public final class DeclResolver {
                 case CreateStmt c -> resolveCreateStmt(c, symbols, scope, diags);
                 case AlterStmt a -> resolveAlterStmt(a, symbols, diags);
                 case DropStmt d -> resolveDropStmt(d, symbols, diags);
+                case CursorStmt cursor -> resolveCursorStmt(cursor, symbols, scope, diags);
+                case ReadStmt read -> resolveReadStmt(read, symbols, scope, diags);
                 default -> {
                     // ignore other statements
                 }
@@ -221,7 +236,26 @@ public final class DeclResolver {
                 symbols.replace(target, newTypeDecl);
             }
             case AlterStmt.AddSymbol as -> {
-                // TODO: handle enum symbol addition
+                if (!(existingType.kind() instanceof EnumDecl enumDecl)) {
+                    diags.error(as.range(), DiagnosticKind.SEMANTIC, DiagnosticCode.INVALID_TYPE_REF,
+                        "Can only ADD SYMBOL to ENUM types");
+                    return;
+                }
+                String newSymbolName = as.symbol().name().name();
+                for (EnumSymbolDecl s : enumDecl.symbols()) {
+                    if (s.name().name().equals(newSymbolName)) {
+                        diags.error(as.range(), DiagnosticKind.SEMANTIC, DiagnosticCode.DUPLICATE_DECLARATION,
+                            "Symbol '" + newSymbolName + "' already exists in enum");
+                        return;
+                    }
+                }
+                AstListNode<EnumSymbolDecl> newSymbols = new AstListNode<>(EnumSymbolDecl.class);
+                newSymbols.addAll(enumDecl.symbols());
+                newSymbols.add(as.symbol());
+                EnumDecl newEnum = new EnumDecl(enumDecl.range(), enumDecl.type(), newSymbols);
+                TypeDecl newTypeDecl = new TypeDecl(
+                    existingType.range(), existingType.name(), newEnum, existingType.fragments());
+                symbols.replace(target, newTypeDecl);
             }
         }
     }
@@ -285,6 +319,305 @@ public final class DeclResolver {
         if (!hasError) {
             symbols._decl.remove(target);
         }
+    }
+
+    private static void resolveCursorStmt(
+        CursorStmt stmt,
+        SymbolTable symbols,
+        ContextScope scope,
+        Diagnostics diags
+    ) {
+        if (scope.isGlobal()) {
+            diags.error(
+                stmt.range(),
+                DiagnosticKind.SEMANTIC,
+                DiagnosticCode.INVALID_TYPE_REF,
+                "Cursor must be created inside a context. " +
+                "Use CREATE CONTEXT <name>; and USE CONTEXT <name>; first."
+            );
+            return;
+        }
+        Name cursorContext = scope.current();
+
+        switch (stmt) {
+            case CursorStmt.CreateCursor create -> {
+                LinkedHashMap<Name, CursorStmt.ResetPolicy> resolvedStreams =
+                    resolveCursorStreamBindings(create.streams(), cursorContext, symbols, diags);
+                if (symbols.lookupCursor(cursorContext, create.cursorName()).isPresent()) {
+                    diags.error(
+                        create.range(),
+                        DiagnosticKind.SEMANTIC,
+                        DiagnosticCode.DUPLICATE_DECLARATION,
+                        "Cursor already exists: '" + create.cursorName() + "'"
+                    );
+                    return;
+                }
+                symbols.registerCursor(
+                    cursorContext,
+                    create.cursorName(),
+                    resolvedStreams
+                );
+            }
+            case CursorStmt.AlterCursorAdd add -> {
+                var existingOpt = symbols.lookupCursor(cursorContext, add.cursorName());
+                if (existingOpt.isEmpty()) {
+                    diags.error(
+                        add.range(),
+                        DiagnosticKind.SEMANTIC,
+                        DiagnosticCode.UNKNOWN_TYPE,
+                        "Unknown cursor: '" + add.cursorName() + "'"
+                    );
+                    return;
+                }
+                Name streamName = resolveCursorStream(add.stream(), cursorContext, symbols, diags);
+                if (streamName == null) {
+                    return;
+                }
+                LinkedHashMap<Name, CursorStmt.ResetPolicy> updated =
+                    new LinkedHashMap<>(existingOpt.get().streamPolicies());
+                updated.put(streamName, add.resetPolicy().orElse(CursorStmt.ResetPolicy.LATEST));
+                symbols.upsertCursor(
+                    cursorContext,
+                    add.cursorName(),
+                    updated
+                );
+            }
+            case CursorStmt.AlterCursorRemove remove -> {
+                var existingOpt = symbols.lookupCursor(cursorContext, remove.cursorName());
+                if (existingOpt.isEmpty()) {
+                    diags.error(
+                        remove.range(),
+                        DiagnosticKind.SEMANTIC,
+                        DiagnosticCode.UNKNOWN_TYPE,
+                        "Unknown cursor: '" + remove.cursorName() + "'"
+                    );
+                    return;
+                }
+                Name streamName = resolveCursorStream(remove.stream(), cursorContext, symbols, diags);
+                if (streamName == null) {
+                    return;
+                }
+                LinkedHashMap<Name, CursorStmt.ResetPolicy> updated =
+                    new LinkedHashMap<>(existingOpt.get().streamPolicies());
+                if (updated.remove(streamName) == null) {
+                    diags.error(
+                        remove.range(),
+                        DiagnosticKind.SEMANTIC,
+                        DiagnosticCode.UNKNOWN_STREAM,
+                        "Cursor '" + remove.cursorName() + "' does not include stream '" + streamName.fullName() + "'"
+                    );
+                    return;
+                }
+                symbols.upsertCursor(cursorContext, remove.cursorName(), updated);
+            }
+            case CursorStmt.AlterCursorResetStream alter -> {
+                var existingOpt = symbols.lookupCursor(cursorContext, alter.cursorName());
+                if (existingOpt.isEmpty()) {
+                    diags.error(
+                        alter.range(),
+                        DiagnosticKind.SEMANTIC,
+                        DiagnosticCode.UNKNOWN_TYPE,
+                        "Unknown cursor: '" + alter.cursorName() + "'"
+                    );
+                    return;
+                }
+                Name streamName = resolveCursorStream(alter.stream(), cursorContext, symbols, diags);
+                if (streamName == null) {
+                    return;
+                }
+                LinkedHashMap<Name, CursorStmt.ResetPolicy> updated =
+                    new LinkedHashMap<>(existingOpt.get().streamPolicies());
+                if (!updated.containsKey(streamName)) {
+                    diags.error(
+                        alter.range(),
+                        DiagnosticKind.SEMANTIC,
+                        DiagnosticCode.UNKNOWN_STREAM,
+                        "Cursor '" + alter.cursorName() + "' does not include stream '" + streamName.fullName() + "'"
+                    );
+                    return;
+                }
+                updated.put(streamName, alter.resetPolicy());
+                symbols.upsertCursor(cursorContext, alter.cursorName(), updated);
+            }
+            case CursorStmt.AlterCursorSeekStream seek -> {
+                var existingOpt = symbols.lookupCursor(cursorContext, seek.cursorName());
+                if (existingOpt.isEmpty()) {
+                    diags.error(
+                        seek.range(),
+                        DiagnosticKind.SEMANTIC,
+                        DiagnosticCode.UNKNOWN_TYPE,
+                        "Unknown cursor: '" + seek.cursorName() + "'"
+                    );
+                    return;
+                }
+                Name streamName = resolveCursorStream(seek.stream(), cursorContext, symbols, diags);
+                if (streamName == null) {
+                    return;
+                }
+                if (!existingOpt.get().streamPolicies().containsKey(streamName)) {
+                    diags.error(
+                        seek.range(),
+                        DiagnosticKind.SEMANTIC,
+                        DiagnosticCode.UNKNOWN_STREAM,
+                        "Cursor '" + seek.cursorName() + "' does not include stream '" + streamName.fullName() + "'"
+                    );
+                    return;
+                }
+                LinkedHashSet<Integer> seenPartitions = new LinkedHashSet<>();
+                for (CursorStmt.PartitionSeek p : seek.seeks()) {
+                    if (!seenPartitions.add(p.partition())) {
+                        diags.error(
+                            p.range(),
+                            DiagnosticKind.SEMANTIC,
+                            DiagnosticCode.DUPLICATE_DECLARATION,
+                            "Duplicate partition in cursor seek list: " + p.partition()
+                        );
+                    }
+                    if (p.target() instanceof CursorStmt.SeekTarget.Timestamp ts) {
+                        try {
+                            Instant.parse(ts.timestamp());
+                        } catch (Exception ex) {
+                            diags.error(
+                                p.range(),
+                                DiagnosticKind.SEMANTIC,
+                                DiagnosticCode.INVALID_LITERAL,
+                                "Invalid seek timestamp literal: '" + ts.timestamp() + "'"
+                            );
+                        }
+                    }
+                    if (p.target() instanceof CursorStmt.SeekTarget.Offset off && off.offset() < 0) {
+                        diags.error(
+                            p.range(),
+                            DiagnosticKind.SEMANTIC,
+                            DiagnosticCode.INVALID_LITERAL,
+                            "Offset must be >= 0 in cursor seek list"
+                        );
+                    }
+                }
+            }
+            case CursorStmt.DropCursor drop -> {
+                if (symbols.lookupCursor(cursorContext, drop.cursorName()).isEmpty()) {
+                    diags.error(
+                        drop.range(),
+                        DiagnosticKind.SEMANTIC,
+                        DiagnosticCode.UNKNOWN_TYPE,
+                        "Unknown cursor: '" + drop.cursorName() + "'"
+                    );
+                    return;
+                }
+                symbols.removeCursor(cursorContext, drop.cursorName());
+            }
+        }
+    }
+
+    private static Name resolveCursorStream(
+        QName stream,
+        Name cursorContext,
+        SymbolTable symbols,
+        Diagnostics diags
+    ) {
+        Name streamName = toName(stream);
+        if (streamName.context().isEmpty() && !cursorContext.isRoot()) {
+            streamName = Name.of(cursorContext.fullName(), streamName.name());
+        }
+        if (symbols.lookupStream(streamName).isEmpty()) {
+            diags.error(
+                stream.range(),
+                DiagnosticKind.SEMANTIC,
+                DiagnosticCode.UNKNOWN_STREAM,
+                "Unknown stream in cursor mapping: " + streamName.fullName()
+            );
+            return null;
+        }
+        if (!Name.of(streamName.context()).equals(cursorContext)) {
+            diags.error(
+                stream.range(),
+                DiagnosticKind.SEMANTIC,
+                DiagnosticCode.INVALID_CONTEXT_SCOPE,
+                "Cursor context '" + cursorContext.fullName() + "' cannot include stream from context '"
+                    + streamName.context() + "'."
+            );
+            return null;
+        }
+        return streamName;
+    }
+
+    private static LinkedHashMap<Name, CursorStmt.ResetPolicy> resolveCursorStreamBindings(
+        List<CursorStmt.StreamBinding> streams,
+        Name cursorContext,
+        SymbolTable symbols,
+        Diagnostics diags
+    ) {
+        LinkedHashMap<Name, CursorStmt.ResetPolicy> resolved = new LinkedHashMap<>();
+        for (CursorStmt.StreamBinding binding : streams) {
+            Name streamName = resolveCursorStream(binding.stream(), cursorContext, symbols, diags);
+            if (streamName == null) {
+                continue;
+            }
+            resolved.put(streamName, binding.resetPolicy().orElse(CursorStmt.ResetPolicy.LATEST));
+        }
+        return resolved;
+    }
+
+    private static void resolveReadStmt(
+        ReadStmt stmt,
+        SymbolTable symbols,
+        ContextScope scope,
+        Diagnostics diags
+    ) {
+        if (stmt.mode().isEmpty()) return;
+        if (!(stmt.mode().get() instanceof ReadMode.FromCursor cursorMode)) return;
+
+        Name stream = toName(stmt.stream());
+        if (stream.context().isEmpty() && !scope.isGlobal()) {
+            stream = Name.of(scope.current().fullName(), stream.name());
+        }
+
+        Optional<CursorRef> cursorRef = parseCursorRef(cursorMode.cursorName(), stmt.range(), diags);
+        if (cursorRef.isEmpty()) {
+            return;
+        }
+
+        var cursorOpt = symbols.lookupCursor(cursorRef.get().context(), cursorRef.get().cursorName());
+        if (cursorOpt.isEmpty()) {
+            diags.error(
+                stmt.range(),
+                DiagnosticKind.SEMANTIC,
+                DiagnosticCode.UNKNOWN_TYPE,
+                "Unknown cursor: '" + cursorMode.cursorName() + "'"
+            );
+            return;
+        }
+
+        if (symbols.lookupStream(stream).isPresent() && !cursorOpt.get().streamPolicies().containsKey(stream)) {
+            diags.error(
+                stmt.stream().range(),
+                DiagnosticKind.SEMANTIC,
+                DiagnosticCode.UNKNOWN_STREAM,
+                "Cursor '" + cursorMode.cursorName() + "' is not assigned to stream '" + stream.fullName() + "'"
+            );
+        }
+    }
+
+    private static Optional<CursorRef> parseCursorRef(
+        String rawCursorRef,
+        Range range,
+        Diagnostics diags
+    ) {
+        int split = rawCursorRef.lastIndexOf('.');
+        if (split <= 0 || split == rawCursorRef.length() - 1) {
+            diags.error(
+                range,
+                DiagnosticKind.SEMANTIC,
+                DiagnosticCode.INVALID_TYPE_REF,
+                "FROM CURSOR requires fully-qualified cursor reference '<context>.<cursor>'"
+            );
+            return Optional.empty();
+        }
+
+        String contextPart = rawCursorRef.substring(0, split);
+        String cursorName = rawCursorRef.substring(split + 1);
+        return Optional.of(new CursorRef(Name.of(contextPart), cursorName));
     }
 
     // =======================================================================

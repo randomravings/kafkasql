@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 /**
  * Represents a KafkaSQL project rooted at a {@code .proj.toml} file.

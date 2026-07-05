@@ -762,7 +762,7 @@ class TheBigOneTest {
             r.fields().forEach((field, value) -> {
                 System.out.println("  " + field + ":");
                 System.out.println("    " + value);
-                System.out.println("    Type: " + value.getClass().getName());
+                System.out.println("    Type: " + (value != null ? value.getClass().getSimpleName() : "null"));
             });
         });
         

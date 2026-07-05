@@ -1,4 +1,5 @@
-INCLUDE 'Customer.kafka';
+INCLUDE '../../contexts/customers.kafka';
+INCLUDE '../../types/customers/Customer.kafka';
 
 USE CONTEXT customers;
 

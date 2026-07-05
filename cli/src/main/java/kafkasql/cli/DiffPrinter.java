@@ -34,7 +34,6 @@ public final class DiffPrinter implements ScriptDiffVisitor {
     private static final String YELLOW = "\u001B[33m";
     private static final String CYAN   = "\u001B[36m";
     private static final String GREY   = "\u001B[90m";
-    private static final String BOLD   = "\u001B[1m";
 
     private static final String MEMBER_INDENT = "    ";
     private static final String DETAIL_INDENT = "      ";

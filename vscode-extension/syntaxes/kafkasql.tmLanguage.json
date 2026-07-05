@@ -278,16 +278,16 @@
     },
     "read-mode-clause": {
       "patterns": [
-        { "include": "#read-mode-from-group" },
+        { "include": "#read-mode-from-cursor" },
         { "include": "#read-mode-from-offsets" },
         { "include": "#read-mode-from-timestamps" },
         { "include": "#read-mode-from-timestamp" },
         { "include": "#read-mode-from-bound" }
       ]
     },
-    "read-mode-from-group": {
-      "comment": "FROM GROUP '<name>' [BEGINNING|END]",
-      "begin": "(?i)\\b(FROM)\\s+(GROUP)\\b",
+    "read-mode-from-cursor": {
+      "comment": "FROM CURSOR '<name>' [BEGINNING|END]",
+      "begin": "(?i)\\b(FROM)\\s+(CURSOR)\\b",
       "beginCaptures": {
         "1": { "name": "keyword.control.clause.kafkasql" },
         "2": { "name": "keyword.control.clause.kafkasql" }

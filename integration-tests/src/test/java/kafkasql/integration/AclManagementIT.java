@@ -37,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class AclManagementIT {
 
     @Container
+    @SuppressWarnings("resource")
     static final KafkaContainer kafka = new KafkaContainer("apache/kafka:4.0.0")
             .withEnv("KAFKA_AUTHORIZER_CLASS_NAME",
                      "org.apache.kafka.metadata.authorizer.StandardAuthorizer")

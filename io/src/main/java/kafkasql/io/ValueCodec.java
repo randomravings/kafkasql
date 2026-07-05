@@ -100,6 +100,108 @@ public class ValueCodec {
     }
 
     // ========================================================================
+    // Projected struct decode — reads only specified fields, skips the rest
+    // ========================================================================
+
+    /**
+     * Deserializes a {@link StructValue} from a byte array, reading only the fields
+     * listed in {@code readFields} and skipping all other bytes.
+     * <p>
+     * The returned {@link StructValue}'s {@link StructType} contains <em>only</em>
+     * the projected fields, making non-projected data inaccessible via the type
+     * interface.
+     *
+     * @param type       Full struct type (required to navigate the wire format)
+     * @param data       Raw bytes
+     * @param readFields Names of the fields to decode; {@code null} reads all fields
+     */
+    public static Value fromByteArray(AnyType type, byte[] data, Set<String> readFields) throws Exception {
+        if (type instanceof StructType st && readFields != null) {
+            return decodeProjected(st, new ByteArrayInputStream(data), readFields);
+        }
+        return fromByteArray(type, data);
+    }
+
+    private static StructValue decodeProjected(StructType type, InputStream in, Set<String> readFields)
+            throws Exception {
+        LinkedHashMap<String, StructTypeField> projectedTypeFields = new LinkedHashMap<>();
+        LinkedHashMap<String, Object> fields = new LinkedHashMap<>();
+        for (var entry : type.fields().entrySet()) {
+            StructTypeField field = entry.getValue();
+            String name = entry.getKey();
+            if (readFields.contains(name)) {
+                Object value = decodeField(field.type(), field.nullable(), in);
+                fields.put(name, value);
+                projectedTypeFields.put(name, field);
+            } else {
+                skipField(field.type(), field.nullable(), in);
+            }
+        }
+        StructType projectedType = new StructType(
+            type.fqn(), projectedTypeFields, type.constraints(), type.doc());
+        return new StructValue(projectedType, fields);
+    }
+
+    // ========================================================================
+    // Field skipping — reads and discards bytes without allocation
+    // ========================================================================
+
+    private static void skipField(AnyType type, boolean nullable, InputStream in) throws Exception {
+        if (nullable) {
+            boolean present = Decoder.decodeBoolean(in);
+            if (!present) return;
+        }
+        skipFieldValue(type, in);
+    }
+
+    private static void skipFieldValue(AnyType type, InputStream in) throws Exception {
+        switch (type) {
+            case PrimitiveType pt -> skipPrimitive(pt.kind(), in);
+            case ScalarType st    -> skipPrimitive(st.primitive().kind(), in);
+            case EnumType ignored -> in.skipNBytes(4); // INT32
+            case StructType st    -> {
+                for (var e : st.fields().entrySet())
+                    skipField(e.getValue().type(), e.getValue().nullable(), in);
+            }
+            case UnionType ut     -> {
+                int idx = Decoder.decodeVarInt32(in);
+                int i = 0;
+                for (var e : ut.members().entrySet()) {
+                    if (i++ == idx) { skipFieldValue(e.getValue().typ(), in); break; }
+                }
+            }
+            case ListType lt      -> {
+                int n = Decoder.decodeVarInt32(in);
+                for (int i = 0; i < n; i++) skipFieldValue(lt.item(), in);
+            }
+            case MapType mt       -> {
+                int n = Decoder.decodeVarInt32(in);
+                for (int i = 0; i < n; i++) {
+                    skipFieldValue(mt.key(), in);
+                    skipFieldValue(mt.value(), in);
+                }
+            }
+            default -> throw new IllegalArgumentException("Cannot skip type: " + type);
+        }
+    }
+
+    private static void skipPrimitive(PrimitiveKind kind, InputStream in) throws Exception {
+        switch (kind) {
+            case BOOLEAN, INT8              -> in.skipNBytes(1);
+            case INT16                      -> in.skipNBytes(2);
+            case INT32, FLOAT32             -> in.skipNBytes(4);
+            case INT64, FLOAT64, DATE, TIME -> in.skipNBytes(8);
+            case UUID                       -> in.skipNBytes(16);
+            case STRING, BYTES, DECIMAL     -> in.skipNBytes(Decoder.decodeVarInt32(in));
+            case TIMESTAMP                  -> in.skipNBytes(12); // int64 epoch + int32 nanos
+            case TIMESTAMP_TZ               -> {
+                in.skipNBytes(12); // int64 epoch + int32 nanos
+                in.skipNBytes(Decoder.decodeVarInt32(in)); // zone id bytes
+            }
+        }
+    }
+
+    // ========================================================================
     // Enum
     // ========================================================================
 

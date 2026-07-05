@@ -1,4 +1,4 @@
-INCLUDE '../example.kafka';
+INCLUDE '../../../contexts/com/example.kafka';
 
 USE CONTEXT com.example;
 

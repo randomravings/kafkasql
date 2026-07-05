@@ -90,6 +90,7 @@ public final class AstPrinter extends Printer {
             case CreateStmt c   -> writeCreateStmt(c, indent);
             case AlterStmt a    -> writeAlterStmt(a, indent);
             case DropStmt d     -> writeDropStmt(d, indent);
+                case CursorStmt cursor -> writeCursorStmt(cursor, indent);
             case ReadStmt r     -> writeRead(r, indent);
             case WriteStmt w    -> writeWrite(w, indent);
             case UserStmt u     -> writeUserStmt(u, indent);
@@ -211,6 +212,69 @@ public final class AstPrinter extends Printer {
             case UserStmt.DropUser du -> {
                 branch("username", indent, true);
                 write(du.username());
+            }
+        }
+    }
+
+    private void writeCursorStmt(CursorStmt stmt, int indent) throws IOException {
+        writeClass(stmt.getClass());
+        switch (stmt) {
+            case CursorStmt.CreateCursor create -> {
+                branch("cursor", indent, false);
+                write("'" + create.cursorName() + "'");
+                branch("streams", indent, true);
+                for (CursorStmt.StreamBinding s : create.streams()) {
+                    branch("stream", indent + 1, s.resetPolicy().isEmpty());
+                    writeQName(s.stream(), indent + 2);
+                    if (s.resetPolicy().isPresent()) {
+                        branch("reset", indent + 1, true);
+                        write(s.resetPolicy().get().name());
+                    }
+                }
+            }
+            case CursorStmt.AlterCursorAdd add -> {
+                branch("cursor", indent, false);
+                write("'" + add.cursorName() + "'");
+                branch("addStream", indent, add.resetPolicy().isEmpty());
+                writeQName(add.stream(), indent + 1);
+                if (add.resetPolicy().isPresent()) {
+                    branch("reset", indent, true);
+                    write(add.resetPolicy().get().name());
+                }
+            }
+            case CursorStmt.AlterCursorRemove remove -> {
+                branch("cursor", indent, false);
+                write("'" + remove.cursorName() + "'");
+                branch("removeStream", indent, true);
+                writeQName(remove.stream(), indent + 1);
+            }
+            case CursorStmt.AlterCursorResetStream alter -> {
+                branch("cursor", indent, false);
+                write("'" + alter.cursorName() + "'");
+                branch("resetStream", indent, false);
+                writeQName(alter.stream(), indent + 1);
+                branch("reset", indent, true);
+                write(alter.resetPolicy().name());
+            }
+            case CursorStmt.AlterCursorSeekStream seek -> {
+                branch("cursor", indent, false);
+                write("'" + seek.cursorName() + "'");
+                branch("seekStream", indent, false);
+                writeQName(seek.stream(), indent + 1);
+                branch("seeks", indent, true);
+                for (CursorStmt.PartitionSeek spec : seek.seeks()) {
+                    branch("partition " + spec.partition(), indent + 1, false);
+                    switch (spec.target()) {
+                        case CursorStmt.SeekTarget.Beginning ignored -> write("BEGINNING");
+                        case CursorStmt.SeekTarget.End ignored -> write("END");
+                        case CursorStmt.SeekTarget.Offset off -> write(Long.toString(off.offset()));
+                        case CursorStmt.SeekTarget.Timestamp ts -> write("'" + ts.timestamp() + "'");
+                    }
+                }
+            }
+            case CursorStmt.DropCursor drop -> {
+                branch("cursor", indent, true);
+                write("'" + drop.cursorName() + "'");
             }
         }
     }
@@ -557,14 +621,10 @@ public final class AstPrinter extends Printer {
 
     private void writeReadConsumer(ReadMode c, int indent) throws IOException {
         switch (c) {
-            case ReadMode.FromGroup jg -> {
-                writeClass(jg.getClass());
-                branch("group", indent, jg.resetToBeginning().isEmpty());
-                write("'" + jg.groupId() + "'");
-                if (jg.resetToBeginning().isPresent()) {
-                    branch("reset", indent, true);
-                    write(jg.resetToBeginning().get() ? "BEGINNING" : "END");
-                }
+            case ReadMode.FromCursor cursor -> {
+                writeClass(cursor.getClass());
+                branch("cursor", indent, true);
+                write("'" + cursor.cursorName() + "'");
             }
             case ReadMode.FromBeginning ignored -> {
                 writeClass(ignored.getClass());

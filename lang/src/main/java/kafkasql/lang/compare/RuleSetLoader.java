@@ -7,7 +7,6 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Loads and generates {@link RuleSet} TOML configuration files ({@code kafkasql.rules.toml}).
@@ -81,9 +80,6 @@ public final class RuleSetLoader {
         m.put("compatibility.context",      "CONTEXT");
         return Map.copyOf(m);
     }
-
-    /** Sections that are valid but carry no rule keys (reserved for future use). */
-    private static final Set<String> RESERVED_SECTIONS = Set.of("lint");
 
     private RuleSetLoader() {}
 

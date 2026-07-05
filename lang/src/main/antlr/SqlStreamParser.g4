@@ -43,6 +43,7 @@ statement
   | explainStmt
   | readStmt
   | writeStmt
+  | cursorStmt
   | createStmt
   | alterStmt
   | dropStmt
@@ -89,13 +90,8 @@ stopAfter
   ;
 
 readConsumer
-  : FROM GROUP STRING_LIT groupReset?                                       # FromGroupConsumer
+  : FROM CURSOR STRING_LIT                                                  # FromCursorConsumer
   | FROM fromBound                                                         # FromConsumer
-  ;
-
-groupReset
-  : BEGINNING
-  | END
   ;
 
 fromBound
@@ -201,6 +197,40 @@ userStmt
   : CREATE USER identifier (WITH? PASSWORD STRING_LIT)?   # CreateUser
   | ALTER USER identifier WITH? PASSWORD STRING_LIT       # AlterUser
   | DROP USER identifier                                  # DropUser
+  ;
+
+/* ───────────────────────── Cursor Statements ───────────────────────── */
+cursorStmt
+  : CREATE CURSOR STRING_LIT FOR STREAMS LPAREN cursorEntry (COMMA cursorEntry)* RPAREN # CreateCursor
+  | ALTER CURSOR STRING_LIT ADD STREAM qname cursorResetPolicy?                          # AlterCursorAdd
+  | ALTER CURSOR STRING_LIT REMOVE STREAM qname                                          # AlterCursorRemove
+  | ALTER CURSOR STRING_LIT RESET STREAM qname TO cursorResetBound                       # AlterCursorResetStream
+  | ALTER CURSOR STRING_LIT SEEK STREAM qname TO LPAREN cursorSeekSpec (COMMA cursorSeekSpec)* RPAREN # AlterCursorSeekStream
+  | DROP CURSOR STRING_LIT                                                               # DropCursor
+  ;
+
+cursorEntry
+  : qname cursorResetPolicy?
+  ;
+
+cursorResetPolicy
+  : RESET (EARLIEST | LATEST)
+  ;
+
+cursorResetBound
+  : BEGINNING
+  | END
+  ;
+
+cursorSeekSpec
+  : NUMBER_LIT COLON cursorSeekTarget
+  ;
+
+cursorSeekTarget
+  : BEGINNING
+  | END
+  | NUMBER_LIT
+  | STRING_LIT
   ;
 
 /* ─────────────────────── Grant/Revoke Statements ─────────────────────── */
@@ -570,7 +600,9 @@ dotPrefix
 identifier
   : ID
   | END
-  | GROUP
+  | CURSOR
+  | CURSORS
+  | SET
   | BEGINNING
   | OFFSETS
   | TIMESTAMPS

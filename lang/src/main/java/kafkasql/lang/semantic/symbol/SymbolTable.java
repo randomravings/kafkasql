@@ -8,10 +8,23 @@ import kafkasql.lang.syntax.ast.decl.Decl;
 import kafkasql.lang.syntax.ast.decl.StreamDecl;
 import kafkasql.lang.syntax.ast.decl.StructDecl;
 import kafkasql.lang.syntax.ast.decl.TypeDecl;
+import kafkasql.lang.syntax.ast.stmt.CursorStmt;
 
 public final class SymbolTable {
 
     public final Map<Name, Decl> _decl = new HashMap<>();
+    private final Map<CursorKey, CursorSymbol> _cursors = new HashMap<>();
+
+    public record CursorKey(
+        Name context,
+        String cursorName
+    ) {}
+
+    public record CursorSymbol(
+        Name context,
+        String cursorName,
+        Map<Name, CursorStmt.ResetPolicy> streamPolicies
+    ) {}
 
     public boolean hasKey(Name name) {
         return _decl.containsKey(name);
@@ -29,6 +42,41 @@ public final class SymbolTable {
             return false;
         _decl.put(name, decl);
         return true;
+    }
+
+    public Optional<CursorSymbol> lookupCursor(Name context, String cursorName) {
+        return Optional.ofNullable(_cursors.get(new CursorKey(context, cursorName)));
+    }
+
+    public boolean registerCursor(
+        Name context,
+        String cursorName,
+        Map<Name, CursorStmt.ResetPolicy> streamPolicies
+    ) {
+        CursorKey key = new CursorKey(context, cursorName);
+        if (_cursors.containsKey(key)) return false;
+        _cursors.put(key, new CursorSymbol(
+            context,
+            cursorName,
+            new LinkedHashMap<>(streamPolicies)
+        ));
+        return true;
+    }
+
+    public void upsertCursor(
+        Name context,
+        String cursorName,
+        Map<Name, CursorStmt.ResetPolicy> streamPolicies
+    ) {
+        _cursors.put(new CursorKey(context, cursorName), new CursorSymbol(
+            context,
+            cursorName,
+            new LinkedHashMap<>(streamPolicies)
+        ));
+    }
+
+    public boolean removeCursor(Name context, String cursorName) {
+        return _cursors.remove(new CursorKey(context, cursorName)) != null;
     }
 
     public Optional<TypeDecl> lookupType(Name name) {

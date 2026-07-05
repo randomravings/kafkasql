@@ -6,9 +6,7 @@ import kafkasql.runtime.Name;
 import kafkasql.runtime.stream.StreamReader;
 import sys.schema.SymbolEventLog;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 /**

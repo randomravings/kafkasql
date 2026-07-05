@@ -176,6 +176,53 @@ class CompilerTest {
         System.out.println(code);
     }
     
+    @Test
+    void testUnionCodeGen() {
+        String script = """
+            CREATE CONTEXT test;
+            USE CONTEXT test;
+
+            CREATE TYPE CardPayment AS STRUCT (
+                cardNumber STRING,
+                amount INT64
+            );
+
+            CREATE TYPE BankTransfer AS STRUCT (
+                iban STRING,
+                amount INT64
+            );
+
+            CREATE TYPE PaymentEvent AS UNION (
+                Card test.CardPayment,
+                Bank test.BankTransfer
+            )
+            COMMENT 'A payment event';
+            """;
+
+        var model = compile(script);
+        var compiler = new Compiler(model);
+        Map<String, String> generated = compiler.compile();
+
+        assertEquals(3, generated.size());
+        assertTrue(generated.containsKey("test/PaymentEvent"));
+
+        String code = generated.get("test/PaymentEvent");
+        assertTrue(code.contains("public sealed interface PaymentEvent extends Record"), "should be sealed interface");
+        assertTrue(code.contains("permits PaymentEvent.Card, PaymentEvent.Bank"), "should have permits clause");
+        assertTrue(code.contains("void writeTo(OutputStream out) throws Exception;"), "should have abstract writeTo");
+        assertTrue(code.contains("static PaymentEvent readFrom(InputStream in) throws Exception"), "should have static readFrom");
+        assertTrue(code.contains("case 0 -> Card.readFrom(in)"), "readFrom should dispatch to Card");
+        assertTrue(code.contains("case 1 -> Bank.readFrom(in)"), "readFrom should dispatch to Bank");
+        assertTrue(code.contains("record Card("), "should have nested Card record");
+        assertTrue(code.contains("record Bank("), "should have nested Bank record");
+        assertTrue(code.contains("implements PaymentEvent"), "member records should implement the interface");
+        assertTrue(code.contains("Encoder.writeVarInt32(out, 0)"), "Card writeTo should write index 0");
+        assertTrue(code.contains("Encoder.writeVarInt32(out, 1)"), "Bank writeTo should write index 1");
+        assertTrue(code.contains("A payment event"), "should include doc comment");
+        System.out.println("Generated union:");
+        System.out.println(code);
+    }
+
     private SemanticModel compile(String script) {
         Input input = new StringInput("test.kafka", script);
         KafkaSqlArgs args = new KafkaSqlArgs(Path.of(""), false, false);

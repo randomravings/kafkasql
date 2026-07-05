@@ -142,9 +142,9 @@ class StopAfterParseTest {
         }
 
         @Test
-        @DisplayName("FROM GROUP + STOP AFTER SECONDS IDLE")
-        void fromGroupWithSecondsIdle() {
-            ReadStmt read = parseRead("FROM GROUP 'my-group'\nSTOP AFTER 10 SECONDS IDLE");
+        @DisplayName("FROM CURSOR + STOP AFTER SECONDS IDLE")
+        void fromCursorWithSecondsIdle() {
+            ReadStmt read = parseRead("FROM CURSOR 'my-group'\nSTOP AFTER 10 SECONDS IDLE");
             assertTrue(read.mode().isPresent(), "mode should be present");
             var sa = assertInstanceOf(StopAfter.SecondsIdle.class, read.stopAfter().get());
             assertEquals(10L, sa.seconds());

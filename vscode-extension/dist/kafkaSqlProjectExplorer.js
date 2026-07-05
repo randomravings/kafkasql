@@ -171,6 +171,7 @@ exports.LiveErrorNode = LiveErrorNode;
 const RE_USE_CONTEXT = /\bUSE\s+CONTEXT\s+([\w.]+)\s*;/i;
 const RE_CREATE_CONTEXT = /^\s*CREATE\s+CONTEXT\s+([\w.]+)/i;
 const RE_CREATE_STREAM = /^\s*CREATE\s+STREAM\s+(\w+)/i;
+const RE_CREATE_CURSOR = /^\s*CREATE\s+CURSOR\s+'([^']+)'/i;
 const RE_CREATE_TYPE_AS = /^\s*CREATE\s+TYPE\s+(\w+)\s+AS\s+(ENUM|STRUCT|SCALAR|UNION)\b/i;
 const RE_CREATE_TYPE_DER = /^\s*CREATE\s+TYPE\s+(\w+)\s+AS\s+\w/i; // derived / aliased
 function parseProjectFile(filePath) {
@@ -304,6 +305,12 @@ function parseKafkaFile(filePath) {
         const streamM = RE_CREATE_STREAM.exec(line);
         if (streamM) {
             out.objects.push({ name: streamM[1], kind: 'STREAM', filePath, line: i });
+            continue;
+        }
+        // CREATE CURSOR
+        const cursorM = RE_CREATE_CURSOR.exec(line);
+        if (cursorM) {
+            out.objects.push({ name: cursorM[1], kind: 'CURSOR', filePath, line: i });
             continue;
         }
         // CREATE TYPE … AS ENUM|STRUCT|SCALAR
@@ -678,8 +685,9 @@ class KafkaSqlProjectExplorer {
                         .map(o => new LiveObjectNode(o.name, o.kind, node.label, node.connectionKey));
                 }
                 const childCount = getDirectChildContexts(node.label, contexts).length;
-                const typeCount = ctx.objects.filter(o => o.kind !== 'STREAM').length;
+                const typeCount = ctx.objects.filter(o => o.kind !== 'STREAM' && o.kind !== 'CURSOR').length;
                 const streamCount = ctx.objects.filter(o => o.kind === 'STREAM').length;
+                const cursorCount = ctx.objects.filter(o => o.kind === 'CURSOR').length;
                 const folders = [];
                 if (childCount > 0)
                     folders.push(new LiveCategoryNode('Contexts', node.label, node.connectionKey, childCount));
@@ -687,6 +695,8 @@ class KafkaSqlProjectExplorer {
                     folders.push(new LiveCategoryNode('Types', node.label, node.connectionKey, typeCount));
                 if (streamCount > 0)
                     folders.push(new LiveCategoryNode('Streams', node.label, node.connectionKey, streamCount));
+                if (cursorCount > 0)
+                    folders.push(new LiveCategoryNode('Cursors', node.label, node.connectionKey, cursorCount));
                 return folders;
             }
             // ── LiveCategory → live objects or child live contexts ────────────────
@@ -703,9 +713,14 @@ class KafkaSqlProjectExplorer {
                 const ctx = contexts.get(node.contextName);
                 if (!ctx)
                     return [];
-                const isStream = node.category === 'Streams';
                 return ctx.objects
-                    .filter(o => isStream ? o.kind === 'STREAM' : o.kind !== 'STREAM')
+                    .filter(o => {
+                    if (node.category === 'Streams')
+                        return o.kind === 'STREAM';
+                    if (node.category === 'Cursors')
+                        return o.kind === 'CURSOR';
+                    return o.kind !== 'STREAM' && o.kind !== 'CURSOR';
+                })
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map(o => new LiveObjectNode(o.name, o.kind, node.contextName, node.connectionKey));
             }
@@ -723,8 +738,9 @@ class KafkaSqlProjectExplorer {
                         .map(o => new ObjectNode(o.name, o.kind, node.label, o.filePath, o.line));
                 }
                 const childCount = proj ? getDirectChildContexts(node.label, proj.contexts).length : 0;
-                const typeCount = ctx ? ctx.objects.filter(o => o.kind !== 'STREAM').length : 0;
+                const typeCount = ctx ? ctx.objects.filter(o => o.kind !== 'STREAM' && o.kind !== 'CURSOR').length : 0;
                 const streamCount = ctx ? ctx.objects.filter(o => o.kind === 'STREAM').length : 0;
+                const cursorCount = ctx ? ctx.objects.filter(o => o.kind === 'CURSOR').length : 0;
                 const folders = [];
                 if (childCount > 0)
                     folders.push(new CategoryNode('Contexts', node.label, childCount));
@@ -732,6 +748,8 @@ class KafkaSqlProjectExplorer {
                     folders.push(new CategoryNode('Types', node.label, typeCount));
                 if (streamCount > 0)
                     folders.push(new CategoryNode('Streams', node.label, streamCount));
+                if (cursorCount > 0)
+                    folders.push(new CategoryNode('Cursors', node.label, cursorCount));
                 return folders;
             }
             // ── Category → child Contexts or Objects ──────────────────────────────
@@ -759,9 +777,14 @@ class KafkaSqlProjectExplorer {
                 const ctx = this.findContext(node.contextName);
                 if (!ctx)
                     return [];
-                const isStream = node.category === 'Streams';
                 return ctx.objects
-                    .filter(o => isStream ? o.kind === 'STREAM' : o.kind !== 'STREAM')
+                    .filter(o => {
+                    if (node.category === 'Streams')
+                        return o.kind === 'STREAM';
+                    if (node.category === 'Cursors')
+                        return o.kind === 'CURSOR';
+                    return o.kind !== 'STREAM' && o.kind !== 'CURSOR';
+                })
                     .sort((a, b) => {
                     // Within Types: enums → scalars → structs → derived; then alpha
                     const typeOrder = (k) => k === 'TYPE_ENUM' ? 0 : k === 'TYPE_SCALAR' ? 1 : k === 'TYPE_STRUCT' ? 2 : 3;
@@ -827,7 +850,11 @@ class KafkaSqlProjectExplorer {
                 if (this.flatContexts) {
                     return new ContextNode(ctx.name, ctx.declaredInFile, ctx.declaredAtLine);
                 }
-                const category = node.objectKind === 'STREAM' ? 'Streams' : 'Types';
+                const category = node.objectKind === 'STREAM'
+                    ? 'Streams'
+                    : node.objectKind === 'CURSOR'
+                        ? 'Cursors'
+                        : 'Types';
                 return new CategoryNode(category, node.contextName, 0);
             }
             case 'connection': {
@@ -869,7 +896,11 @@ class KafkaSqlProjectExplorer {
                 if (this.flatContexts) {
                     return new LiveContextNode(node.contextName, node.connectionKey);
                 }
-                const category = node.objectKind === 'STREAM' ? 'Streams' : 'Types';
+                const category = node.objectKind === 'STREAM'
+                    ? 'Streams'
+                    : node.objectKind === 'CURSOR'
+                        ? 'Cursors'
+                        : 'Types';
                 return new LiveCategoryNode(category, node.contextName, node.connectionKey, 0);
             }
             case 'loading':
@@ -910,12 +941,13 @@ class KafkaSqlProjectExplorer {
             if (!contexts.has(ctxName)) {
                 contexts.set(ctxName, { name: ctxName, declaredInFile: '', declaredAtLine: -1, objects: [] });
             }
-            const kind = entry.kind === 'STREAM' ? 'STREAM' :
-                entry.kind === 'TYPE_ENUM' ? 'TYPE_ENUM' :
-                    entry.kind === 'TYPE_STRUCT' ? 'TYPE_STRUCT' :
-                        entry.kind === 'TYPE_SCALAR' ? 'TYPE_SCALAR' :
-                            entry.kind === 'TYPE_UNION' ? 'TYPE_UNION' :
-                                entry.kind === 'TYPE_DERIVED' ? 'TYPE_DERIVED' : 'TYPE_DERIVED';
+            const kind = entry.kind === 'CURSOR' ? 'CURSOR' :
+                entry.kind === 'STREAM' ? 'STREAM' :
+                    entry.kind === 'TYPE_ENUM' ? 'TYPE_ENUM' :
+                        entry.kind === 'TYPE_STRUCT' ? 'TYPE_STRUCT' :
+                            entry.kind === 'TYPE_SCALAR' ? 'TYPE_SCALAR' :
+                                entry.kind === 'TYPE_UNION' ? 'TYPE_UNION' :
+                                    entry.kind === 'TYPE_DERIVED' ? 'TYPE_DERIVED' : 'TYPE_DERIVED';
             contexts.get(ctxName).objects.push({ name: entry.name, kind, filePath: '', line: -1 });
         }
         return contexts;
@@ -956,6 +988,7 @@ function categoryIcon(_category) {
 function objectIcon(kind) {
     switch (kind) {
         case 'STREAM': return icon('symbol-event', 'symbolIcon.eventForeground');
+        case 'CURSOR': return icon('organization', 'symbolIcon.interfaceForeground');
         case 'TYPE_ENUM': return icon('symbol-enum', 'symbolIcon.enumForeground');
         case 'TYPE_STRUCT': return icon('symbol-struct', 'symbolIcon.structForeground');
         case 'TYPE_SCALAR': return icon('symbol-constant', 'symbolIcon.constantForeground');
@@ -966,6 +999,7 @@ function objectIcon(kind) {
 function objectKindLabel(kind) {
     switch (kind) {
         case 'STREAM': return 'stream';
+        case 'CURSOR': return 'cursor';
         case 'TYPE_ENUM': return 'enum';
         case 'TYPE_STRUCT': return 'struct';
         case 'TYPE_SCALAR': return 'scalar';

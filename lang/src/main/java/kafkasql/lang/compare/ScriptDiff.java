@@ -1,9 +1,7 @@
 package kafkasql.lang.compare;
 
 import kafkasql.lang.syntax.ast.AstNode;
-import kafkasql.lang.syntax.ast.decl.*;
 import kafkasql.lang.syntax.ast.misc.Include;
-import kafkasql.lang.syntax.ast.misc.VersionPragma;
 import kafkasql.runtime.diagnostics.Range;
 
 import java.util.ArrayList;

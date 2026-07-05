@@ -1,5 +1,7 @@
 -- Context declaration file for the 'customers' context.
 -- Lives at kafka/customers.kafka (depth 1 — no folder constraint).
 
+USE CONTEXT GLOBAL;
+
 CREATE CONTEXT customers
 COMMENT 'Customer management domain';

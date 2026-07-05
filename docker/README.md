@@ -28,17 +28,17 @@ docker compose down -v
 - **Consensus:** KRaft (no Zookeeper required)
 - **Mode:** Single-node combined broker/controller
 
-| Listener | Port | Protocol | Auth |
-|----------|------|----------|------|
-| PLAINTEXT | 9092 | PLAINTEXT | none (internal / dev) |
-| SASLSCRAM | 9094 | SASL_PLAINTEXT | SCRAM-SHA-256 |
-| CONTROLLER | 9093 | PLAINTEXT | internal only |
+| Listener   | Port | Protocol      | Auth                   |
+| ---------- | ---- | ------------- | ---------------------- |
+| PLAINTEXT  | 9092 | PLAINTEXT     | none (internal / dev)  |
+| SASLSCRAM  | 9094 | SASL_PLAINTEXT| SCRAM-SHA-256          |
+| CONTROLLER | 9093 | PLAINTEXT     | internal only          |
 
 ### Default credentials (created by `setup.sh`)
 
-| Username | Password |
-|----------|----------|
-| `admin` | `admin-secret` |
+| Username | Password       |
+| -------- | -------------- |
+| `admin`  | `admin-secret` |
 
 Override at setup time via environment variables:
 
@@ -140,14 +140,14 @@ docker compose ps
 
 ### Without authentication (PLAINTEXT)
 
-```
+```properties
 bootstrap.servers=localhost:9092
 security.protocol=PLAINTEXT
 ```
 
 ### With SASL/SCRAM-SHA-256
 
-```
+```properties
 bootstrap.servers=localhost:9094
 security.protocol=SASL_PLAINTEXT
 sasl.mechanism=SCRAM-SHA-256

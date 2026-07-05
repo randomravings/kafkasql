@@ -1,0 +1,14 @@
+INCLUDE '../../contexts/customers.kafka';
+INCLUDE '../../streams/customers/Customers.kafka';
+
+USE CONTEXT customers;
+
+-- Example cursor for the customers context.
+CREATE CURSOR 'read-test' FOR STREAMS (Customers RESET EARLIEST);
+
+-- Cursor operations:
+-- ALTER CURSOR 'read-test' ADD STREAM customers.Audit RESET LATEST;
+-- ALTER CURSOR 'read-test' REMOVE STREAM customers.Audit;
+-- ALTER CURSOR 'read-test' RESET STREAM customers.Customers TO END;
+-- ALTER CURSOR 'read-test' SEEK STREAM customers.Customers TO (0: BEGINNING, 1: END, 2: 1001, 3: '2026-07-01T00:00:00.001Z');
+-- DROP CURSOR 'read-test';

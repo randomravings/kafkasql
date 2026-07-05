@@ -30,6 +30,33 @@ The resources we wan
 
 ## Testing it
 
+## Cursors
+
+`CURSOR` is the named read position over one or more streams. The cursor owns the stream list; the streams are not a set of cursors.
+
+```sql
+CREATE CURSOR 'customers-live' FOR STREAMS (
+  customers.Customers RESET EARLIEST,
+  customers.CustomerAudit RESET LATEST
+);
+
+ALTER CURSOR 'customers-live' ADD STREAM customers.CustomerReplay RESET EARLIEST;
+ALTER CURSOR 'customers-live' REMOVE STREAM customers.CustomerReplay;
+ALTER CURSOR 'customers-live' RESET STREAM customers.Customers TO END;
+ALTER CURSOR 'customers-live' SEEK STREAM customers.Customers TO (
+  0: BEGINNING,
+  1: END,
+  3: 1001,
+  4: '2026-07-01T00:00:00.001Z'
+);
+
+READ FROM customers.Customers
+  FROM CURSOR 'customers.customers-live'
+  TYPE CustomerRecord *;
+
+DROP CURSOR 'customers-live';
+```
+
 The code was built using Java 21 and Gradle 9.
 If you want to test it feel free to clone the repository, and then do the folliwing.
 
@@ -92,7 +119,7 @@ Scalars are intended for strongly typed primitive types that can have validation
 /*
  * Makes com.example avalaible for reference.
  */
-INCLUDE 'com/example.kafka'
+INCLUDE 'contexts/com/example.kafka'
 
 USE CONTEXT com.example; 
 
@@ -114,7 +141,7 @@ Ranges are:
 ### Enums
 
 ```SQL
-INCLUDE 'com/example.kafka'
+INCLUDE 'contexts/com/example.kafka'
 
 USE CONTEXT com.example; 
 
@@ -127,7 +154,7 @@ CREATE TYPE ENUM AS Ccy (
 ```
 
 ```SQL
-INCLUDE 'com/example.kafka'
+INCLUDE 'contexts/com/example.kafka'
 
 USE CONTEXT com.example;
 
@@ -144,7 +171,7 @@ COMMENT 'Enum litterlas use :: similar to static access of members'
 ### Structs
 
 ```SQL
-INCLUDE 'com/example.kafka'
+INCLUDE 'contexts/com/example.kafka'
 
 USE CONTEXT com.example; 
 
@@ -156,8 +183,8 @@ CREATE TYPE Person AS STRUCT (
 ```
 
 ```SQL
-INCLUDE 'com/example.kafka'
-INCLUDE 'com/example/Email.kafka' -- makes com.example.Email reference avaialble
+INCLUDE 'contexts/com/example.kafka'
+INCLUDE 'types/com/example/Email.kafka' -- makes com.example.Email reference avaialble
 
 USE CONTEXT com.example;
 
@@ -236,7 +263,7 @@ Here is a basic reference stream definition (many topics one schema)
 
 ```SQL
 -- Basic referencing (many streams one schema)
-INCLUDE 'com/example/User.kafka';
+INCLUDE 'types/com/example/User.kafka';
 
 CREATE STREAM Users
 TYPE User AS com.example.User
@@ -245,7 +272,7 @@ DISTRIBUTE BY (Id);
 
 ```SQL
 -- Stream with atwon inline types (one stream many schemas)
-INCLUDE 'com/example/User.kafka';
+INCLUDE 'types/com/example/User.kafka';
 
 CREATE STREAM Users (
   TYPE LegacyUser AS STRUCT (
@@ -265,7 +292,7 @@ CREATE STREAM Users (
 
 ```SQL
 -- Stream with an inline and a reference (many streams many schemas)
-INCLUDE 'com/example/User.kafka';
+INCLUDE 'types/com/example/User.kafka';
 
 CREATE STREAM Users
 TYPE UserA AS STRUCT (

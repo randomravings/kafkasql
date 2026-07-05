@@ -165,6 +165,8 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
                 return visitAlterStmt(ctx.alterStmt());
             if (ctx.dropStmt() != null)
                 return visitDropStmt(ctx.dropStmt());
+            if (ctx.cursorStmt() != null)
+                return (CursorStmt) visit(ctx.cursorStmt());
             if (ctx.userStmt() != null)
                 return (UserStmt) visit(ctx.userStmt());
             if (ctx.grantStmt() != null)
@@ -172,7 +174,8 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             
             // Syntax error - report and return placeholder
             Range range = range(ctx);
-            reportSyntaxError(range, "Expected USE, SHOW, EXPLAIN, READ, WRITE, CREATE, ALTER, or DROP statement");
+            reportSyntaxError(range,
+                "Expected USE, SHOW, EXPLAIN, READ, WRITE, CREATE, ALTER, DROP, CURSOR, USER, or GRANT statement");
             Identifier errorId = new Identifier(range, "<error>");
             QName errorQName = QName.of(errorId);
             return new UseStmt(range, new ContextUse(range, errorQName));
@@ -378,6 +381,102 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
             return new UserStmt.DropUser(range(ctx), visitIdentifier(ctx.identifier()).name());
         }
 
+        @Override
+        public CursorStmt.CreateCursor visitCreateCursor(SqlStreamParser.CreateCursorContext ctx) {
+            String cursorName = unquote(ctx.STRING_LIT().getText());
+            AstListNode<CursorStmt.StreamBinding> streams = new AstListNode<>(CursorStmt.StreamBinding.class);
+            for (SqlStreamParser.CursorEntryContext ec : ctx.cursorEntry()) {
+                streams.add(visitCursorEntry(ec));
+            }
+            return new CursorStmt.CreateCursor(range(ctx), cursorName, streams);
+        }
+
+        @Override
+        public CursorStmt.AlterCursorAdd visitAlterCursorAdd(SqlStreamParser.AlterCursorAddContext ctx) {
+            String cursorName = unquote(ctx.STRING_LIT().getText());
+            QName stream = visitQname(ctx.qname());
+            Optional<CursorStmt.ResetPolicy> reset = parseCursorResetPolicy(ctx.cursorResetPolicy());
+            return new CursorStmt.AlterCursorAdd(range(ctx), cursorName, stream, reset);
+        }
+
+        @Override
+        public CursorStmt.AlterCursorRemove visitAlterCursorRemove(SqlStreamParser.AlterCursorRemoveContext ctx) {
+            String cursorName = unquote(ctx.STRING_LIT().getText());
+            QName stream = visitQname(ctx.qname());
+            return new CursorStmt.AlterCursorRemove(range(ctx), cursorName, stream);
+        }
+
+        @Override
+        public CursorStmt.AlterCursorResetStream visitAlterCursorResetStream(SqlStreamParser.AlterCursorResetStreamContext ctx) {
+            String cursorName = unquote(ctx.STRING_LIT().getText());
+            QName stream = visitQname(ctx.qname());
+            CursorStmt.ResetPolicy reset = parseCursorResetBound(ctx.cursorResetBound());
+            return new CursorStmt.AlterCursorResetStream(range(ctx), cursorName, stream, reset);
+        }
+
+        @Override
+        public CursorStmt.AlterCursorSeekStream visitAlterCursorSeekStream(SqlStreamParser.AlterCursorSeekStreamContext ctx) {
+            String cursorName = unquote(ctx.STRING_LIT().getText());
+            QName stream = visitQname(ctx.qname());
+            AstListNode<CursorStmt.PartitionSeek> seeks = new AstListNode<>(CursorStmt.PartitionSeek.class);
+            for (SqlStreamParser.CursorSeekSpecContext sc : ctx.cursorSeekSpec()) {
+                seeks.add(visitCursorSeekSpec(sc));
+            }
+            return new CursorStmt.AlterCursorSeekStream(range(ctx), cursorName, stream, seeks);
+        }
+
+        @Override
+        public CursorStmt.DropCursor visitDropCursor(SqlStreamParser.DropCursorContext ctx) {
+            return new CursorStmt.DropCursor(range(ctx), unquote(ctx.STRING_LIT().getText()));
+        }
+
+        @Override
+        public CursorStmt.StreamBinding visitCursorEntry(SqlStreamParser.CursorEntryContext ctx) {
+            QName stream = visitQname(ctx.qname());
+            Optional<CursorStmt.ResetPolicy> reset = parseCursorResetPolicy(ctx.cursorResetPolicy());
+            return new CursorStmt.StreamBinding(range(ctx), stream, reset);
+        }
+
+        @Override
+        public CursorStmt.PartitionSeek visitCursorSeekSpec(SqlStreamParser.CursorSeekSpecContext ctx) {
+            Range range = range(ctx);
+            if (ctx.NUMBER_LIT() == null || ctx.cursorSeekTarget() == null) {
+                reportSyntaxError(range, "Expected: <partition>: BEGINNING|END|<offset>|'<timestamp>'");
+                return new CursorStmt.PartitionSeek(range, -1, new CursorStmt.SeekTarget.Beginning(range));
+            }
+            int partition = Integer.parseInt(ctx.NUMBER_LIT().getText());
+            CursorStmt.SeekTarget target = visitCursorSeekTarget(ctx.cursorSeekTarget());
+            return new CursorStmt.PartitionSeek(range, partition, target);
+        }
+
+        @Override
+        public CursorStmt.SeekTarget visitCursorSeekTarget(SqlStreamParser.CursorSeekTargetContext ctx) {
+            Range range = range(ctx);
+            if (ctx.BEGINNING() != null) return new CursorStmt.SeekTarget.Beginning(range);
+            if (ctx.END() != null) return new CursorStmt.SeekTarget.End(range);
+            if (ctx.NUMBER_LIT() != null) {
+                return new CursorStmt.SeekTarget.Offset(range, Long.parseLong(ctx.NUMBER_LIT().getText()));
+            }
+            if (ctx.STRING_LIT() != null) {
+                return new CursorStmt.SeekTarget.Timestamp(range, unquote(ctx.STRING_LIT().getText()));
+            }
+            throw new IllegalStateException("Unknown cursorSeekTarget alternative: " + ctx.getClass());
+        }
+
+        private Optional<CursorStmt.ResetPolicy> parseCursorResetPolicy(SqlStreamParser.CursorResetPolicyContext ctx) {
+            if (ctx == null) return Optional.empty();
+            if (ctx.EARLIEST() != null) return Optional.of(CursorStmt.ResetPolicy.EARLIEST);
+            return Optional.of(CursorStmt.ResetPolicy.LATEST);
+        }
+
+        private CursorStmt.ResetPolicy parseCursorResetBound(SqlStreamParser.CursorResetBoundContext ctx) {
+            if (ctx == null) {
+                throw new IllegalStateException("cursorResetBound context is required");
+            }
+            if (ctx.BEGINNING() != null) return CursorStmt.ResetPolicy.EARLIEST;
+            return CursorStmt.ResetPolicy.LATEST;
+        }
+
         // ========================================================================
         // GRANT / REVOKE
         // ========================================================================
@@ -507,11 +606,11 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         @Override
         public Identifier visitIdentifier(SqlStreamParser.IdentifierContext ctx) {
             // ID is the common case; keyword alternatives are soft-keywords used
-            // as identifiers (e.g. a field named "End" or "Group").
+            // as identifiers (e.g. a field named "End" or "Cursor").
             org.antlr.v4.runtime.tree.TerminalNode token =
                 ctx.ID() != null            ? ctx.ID()            :
                 ctx.END() != null           ? ctx.END()           :
-                ctx.GROUP() != null         ? ctx.GROUP()         :
+                ctx.CURSOR() != null        ? ctx.CURSOR()        :
                 ctx.BEGINNING() != null     ? ctx.BEGINNING()     :
                 ctx.OFFSETS() != null       ? ctx.OFFSETS()       :
                 ctx.TIMESTAMPS() != null    ? ctx.TIMESTAMPS()    :
@@ -1078,16 +1177,13 @@ public final class Parser extends SqlStreamParserBaseVisitor<AstNode> {
         public ReadMode visitReadConsumer(SqlStreamParser.ReadConsumerContext ctx) {
             Range range = range(ctx);
             return switch (ctx) {
-                case SqlStreamParser.FromGroupConsumerContext jg -> {
-                    if (jg.GROUP() == null || jg.STRING_LIT() == null) {
-                        reportSyntaxError(range, "Expected: FROM GROUP '<group-name>'");
-                        yield new ReadMode.FromGroup(range, "<error>", Optional.empty());
+                case SqlStreamParser.FromCursorConsumerContext cursor -> {
+                    if (cursor.CURSOR() == null || cursor.STRING_LIT() == null) {
+                        reportSyntaxError(range, "Expected: FROM CURSOR '<cursor-name>'");
+                        yield new ReadMode.FromCursor(range, "<error>");
                     }
-                    String groupId = unquote(jg.STRING_LIT().getText());
-                    Optional<Boolean> reset = Optional.empty();
-                    if (jg.groupReset() != null)
-                        reset = Optional.of(jg.groupReset().BEGINNING() != null);
-                    yield new ReadMode.FromGroup(range, groupId, reset);
+                    String cursorName = unquote(cursor.STRING_LIT().getText());
+                    yield new ReadMode.FromCursor(range, cursorName);
                 }
                 case SqlStreamParser.FromConsumerContext fc -> visitFromBound(fc.fromBound());
                 default -> throw new IllegalStateException("Unknown readConsumer alternative: " + ctx.getClass());

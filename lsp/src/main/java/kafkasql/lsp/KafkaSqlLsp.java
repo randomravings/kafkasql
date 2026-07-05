@@ -7,7 +7,6 @@ import kafkasql.lang.semantic.symbol.SymbolTable;
 import kafkasql.lang.syntax.ast.decl.*;
 import kafkasql.runtime.Name;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.OffsetAndTimestamp;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -49,9 +48,7 @@ import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.TopicPartition;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Optional;
@@ -67,8 +64,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.eclipse.lsp4j.SetTraceParams;
@@ -81,6 +80,24 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
   private String workspaceRoot = null;
   /** Set to true by kafkasql.cancelExecution; reset at the start of each execution. */
   private final AtomicBoolean executionCancelled = new AtomicBoolean(false);
+  private record CursorConfig(java.util.Map<Name, String> streamOffsetReset) {}
+  private record CursorRef(String contextName, String cursorName) {}
+  private final Map<String, CursorConfig> cursors = new ConcurrentHashMap<>();
+
+  private static String cursorKey(String connectionName, String contextName, String cursorName) {
+    return connectionName + "\u0000" + contextName + "\u0000" + cursorName;
+  }
+
+  private static CursorRef parseCursorRefOrThrow(String rawCursorRef) {
+    int split = rawCursorRef.lastIndexOf('.');
+    if (split <= 0 || split == rawCursorRef.length() - 1) {
+      throw new IllegalArgumentException(
+          "FROM CURSOR requires fully-qualified cursor reference '<context>.<cursor>'");
+    }
+    String contextName = rawCursorRef.substring(0, split);
+    String cursorName = rawCursorRef.substring(split + 1);
+    return new CursorRef(contextName, cursorName);
+  }
   private LanguageClient languageClient;
 
   @Override
@@ -328,6 +345,18 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
         };
         result.add(Map.of("name", name.name(), "context", name.context(), "kind", kind));
       }
+
+      // Merge in runtime cursor metadata for this connection.
+      String connPrefix = connectionName + "\u0000";
+      for (String key : cursors.keySet()) {
+        if (!key.startsWith(connPrefix)) continue;
+        int ctxSep = key.indexOf("\u0000", connPrefix.length());
+        if (ctxSep < 0) continue;
+        String context = key.substring(connPrefix.length(), ctxSep);
+        String cursorName = key.substring(ctxSep + 1);
+        result.add(Map.of("name", cursorName, "context", context, "kind", "CURSOR"));
+      }
+
       System.err.println("[kafkasql-lsp] liveModel '" + connectionName + "' returned " + result.size() + " symbols");
       return result;
     } catch (Exception e) {
@@ -535,7 +564,6 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
       // Read current state from Kafka
       LiveEventState live = readLiveEventState(conn);
       Map<Name, String>  stateMap   = live.stateMap();
-      Map<Name, Integer> versionMap = new HashMap<>(live.versionMap());
 
       // Parse the statement text; interactive mode skips INCLUDE resolution
       Path root = Path.of(activeFilePath).normalize().getParent();
@@ -595,19 +623,6 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
           Map<String, Integer> streamWriteCounts = new LinkedHashMap<>();
           List<Map<String, Object>> queryRecords = new ArrayList<>();
 
-          // Helper: convert a StreamRecord to a notification row and send it live.
-          Consumer<StreamRecord> onRecord = sr -> {
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("typeName", sr.typeName());
-            Map<String, Object> jsonFields = new LinkedHashMap<>();
-            for (var fe : sr.value().fields().entrySet()) {
-              jsonFields.put(fe.getKey(), toJsonValue(fe.getValue()));
-            }
-            row.put("fields", jsonFields);
-            queryRecords.add(row);
-            notifyRecord(row);
-          };
-
         // Extract consumer clauses keyed by stream name for use in readRecords
           Map<String, ReadMode> consumerByStream = new LinkedHashMap<>();
           Map<String, StopAfter> stopAfterByStream = new LinkedHashMap<>();
@@ -637,14 +652,25 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
                 rec.headers().add(new RecordHeader("typeName", keyBytes));
                 producer.send(rec).get();
                 writeCount[0]++;
-                streamWriteCounts.merge(topic, 1, Integer::sum);
+                streamWriteCounts.merge(topic, 1, (a, b) -> a + b);
               } catch (Exception ex) {
                 throw new RuntimeException("Failed to write record to topic: " + streamName.fullName(), ex);
               }
             }
 
             @Override
-            protected List<StreamRecord> readRecords(Name streamName) {
+            protected List<StreamRecord> readRecords(
+                Name streamName
+            ) {
+              return readRecords(streamName, null, sr -> {});
+            }
+
+            @Override
+            protected List<StreamRecord> readRecords(
+                Name streamName,
+                Map<String, Set<String>> readFieldsByType,
+                Consumer<StreamRecord> onRecord
+            ) {
               String topic = streamName.fullName();
               Map<String, StructType> typeMap = buildStreamTypeMap(getLastModel(), streamName);
               ReadMode mode = consumerByStream.get(topic);
@@ -657,20 +683,25 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
 
               List<StreamRecord> records = new ArrayList<>();
               try {
-                if (mode instanceof ReadMode.FromGroup jg) {
-                  // subscribe() path — group-managed offsets.
-                  // If committed offsets exist for the group+partition they are always used.
-                  // BEGINNING / END only take effect when NO committed offsets exist yet,
-                  // via auto.offset.reset — which is exactly what Kafka's config is for.
-                  //   FROM GROUP 'x'           → auto.offset.reset=earliest (new group reads all)
-                  //   FROM GROUP 'x' BEGINNING → auto.offset.reset=earliest
-                  //   FROM GROUP 'x' END       → auto.offset.reset=latest
-                  String offsetReset = jg.resetToBeginning().map(b -> b ? "earliest" : "latest")
-                      .orElse("latest");
+                if (mode instanceof ReadMode.FromCursor cursor) {
+                  CursorRef cursorRef = parseCursorRefOrThrow(cursor.cursorName());
+                  String cfgKey = cursorKey(conn.name(), cursorRef.contextName(), cursorRef.cursorName());
+                  CursorConfig cursorConfig = cursors.get(cfgKey);
+                  if (cursorConfig == null) {
+                    throw new IllegalArgumentException(
+                        "Cursor '" + cursor.cursorName() + "' is not defined. "
+                            + "Create it first with CREATE CURSOR ...");
+                  }
+                  Name streamKey = Name.of(topic);
+                  String offsetReset = cursorConfig.streamOffsetReset().get(streamKey);
+                  if (offsetReset == null) {
+                    throw new IllegalArgumentException(
+                        "Cursor '" + cursor.cursorName() + "' does not include stream '" + topic + "'.");
+                  }
 
                   Properties groupProps = new Properties(baseProps);
                   groupProps.putAll(baseProps);
-                  groupProps.put(ConsumerConfig.GROUP_ID_CONFIG, jg.groupId());
+                  groupProps.put(ConsumerConfig.GROUP_ID_CONFIG, cursor.cursorName());
                   groupProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, offsetReset);
 
                   try (KafkaConsumer<String, byte[]> gc = new KafkaConsumer<>(groupProps)) {
@@ -731,9 +762,228 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
             }
 
             @Override
+            protected void handleQueryRecord(StreamRecord sr) {
+              Map<String, Object> row = new LinkedHashMap<>();
+              row.put("typeName", sr.typeName());
+              Map<String, Object> jsonFields = new LinkedHashMap<>();
+              for (var fe : sr.value().fields().entrySet()) {
+                jsonFields.put(fe.getKey(), toJsonValue(fe.getValue()));
+              }
+              row.put("fields", jsonFields);
+              queryRecords.add(row);
+              notifyRecord(row);
+            }
+
+            @Override
             protected void handleQueryResult(List<StreamRecord> records) {
-              // Records were already sent as kafkasql/record notifications via onRecord.
-              // queryRecords is populated there too; nothing to do here.
+              // Incremental delivery is handled in handleQueryRecord.
+            }
+
+            @Override
+            protected void executeCursor(kafkasql.lang.syntax.ast.stmt.CursorStmt stmt) {
+              java.util.function.Function<String, Name> resolveCursorTopic = requested -> {
+                var model = getLastModel();
+                if (model == null) {
+                  throw new IllegalStateException("No semantic model available to resolve stream '" + requested + "'.");
+                }
+
+                Name exact = Name.of(requested);
+                if (model.symbols().lookupStream(exact).isPresent()) {
+                  return exact;
+                }
+
+                java.util.List<Name> byLeaf = model.symbols()._decl.keySet().stream()
+                    .filter(n -> n.name().equalsIgnoreCase(requested))
+                    .filter(n -> model.symbols().lookupStream(n).isPresent())
+                    .toList();
+
+                if (byLeaf.size() == 1) {
+                  return byLeaf.get(0);
+                }
+                if (byLeaf.size() > 1) {
+                  String options = byLeaf.stream()
+                    .map(n -> n.fullName())
+                    .collect(java.util.stream.Collectors.joining(", "));
+                  throw new IllegalArgumentException(
+                      "Stream '" + requested + "' is ambiguous for cursor mapping. Use fully-qualified name. Candidates: "
+                          + options);
+                }
+                throw new IllegalArgumentException(
+                    "Stream '" + requested + "' is not defined. Create the stream before mapping it to a cursor.");
+              };
+
+              switch (stmt) {
+                case kafkasql.lang.syntax.ast.stmt.CursorStmt.CreateCursor create -> {
+                  String cursorContext = null;
+                  java.util.LinkedHashMap<Name, String> streamOffsetReset = new java.util.LinkedHashMap<>();
+                  for (var s : create.streams()) {
+                    Name stream = resolveCursorTopic.apply(s.stream().fullName());
+                    if (cursorContext == null) {
+                      cursorContext = stream.context();
+                    } else if (!cursorContext.equalsIgnoreCase(stream.context())) {
+                      throw new IllegalArgumentException(
+                          "Cursor '" + create.cursorName() + "' must belong to a single context. "
+                              + "Expected context '" + cursorContext + "' but got '" + stream.context() + "'.");
+                    }
+                    String reset = s.resetPolicy()
+                        .map(p -> p == kafkasql.lang.syntax.ast.stmt.CursorStmt.ResetPolicy.EARLIEST
+                            ? "earliest"
+                            : "latest")
+                        .orElse("latest");
+                    streamOffsetReset.put(stream, reset);
+                  }
+                  if (cursorContext == null) {
+                    throw new IllegalArgumentException("CREATE CURSOR requires at least one stream.");
+                  }
+                  String key = cursorKey(conn.name(), cursorContext, create.cursorName());
+                  if (cursors.containsKey(key)) {
+                    throw new IllegalArgumentException(
+                        "Cursor '" + create.cursorName() + "' already exists in context '" + cursorContext + "'.");
+                  }
+                  cursors.put(key, new CursorConfig(streamOffsetReset));
+                  operations.add("CREATE CURSOR '" + create.cursorName() + "'");
+                }
+                case kafkasql.lang.syntax.ast.stmt.CursorStmt.AlterCursorAdd add -> {
+                  Name stream = resolveCursorTopic.apply(add.stream().fullName());
+                  String key = cursorKey(conn.name(), stream.context(), add.cursorName());
+                  CursorConfig current = cursors.get(key);
+                  if (current == null) {
+                    throw new IllegalArgumentException(
+                        "Cursor '" + add.cursorName() + "' is not defined.");
+                  }
+                  java.util.LinkedHashMap<Name, String> streamOffsetReset =
+                      new java.util.LinkedHashMap<>(current.streamOffsetReset());
+                  String reset = add.resetPolicy()
+                      .map(p -> p == kafkasql.lang.syntax.ast.stmt.CursorStmt.ResetPolicy.EARLIEST
+                          ? "earliest"
+                          : "latest")
+                      .orElse("latest");
+                  streamOffsetReset.put(stream, reset);
+                  cursors.put(key, new CursorConfig(streamOffsetReset));
+                  operations.add("ALTER CURSOR '" + add.cursorName() + "' ADD STREAM");
+                }
+                case kafkasql.lang.syntax.ast.stmt.CursorStmt.AlterCursorRemove remove -> {
+                  Name resolved = resolveCursorTopic.apply(remove.stream().fullName());
+                  String key = cursorKey(conn.name(), resolved.context(), remove.cursorName());
+                  CursorConfig current = cursors.get(key);
+                  if (current == null) {
+                    throw new IllegalArgumentException(
+                        "Cursor '" + remove.cursorName() + "' is not defined.");
+                  }
+                  java.util.LinkedHashMap<Name, String> streamOffsetReset =
+                      new java.util.LinkedHashMap<>(current.streamOffsetReset());
+                  if (streamOffsetReset.remove(resolved) == null) {
+                    throw new IllegalArgumentException(
+                        "Stream '" + resolved.fullName() + "' is not mapped to cursor '" + remove.cursorName() + "'.");
+                  }
+                  cursors.put(key, new CursorConfig(streamOffsetReset));
+                  operations.add("ALTER CURSOR '" + remove.cursorName() + "' REMOVE STREAM");
+                }
+                case kafkasql.lang.syntax.ast.stmt.CursorStmt.AlterCursorResetStream alter -> {
+                  Name resolved = resolveCursorTopic.apply(alter.stream().fullName());
+                  String key = cursorKey(conn.name(), resolved.context(), alter.cursorName());
+                  CursorConfig current = cursors.get(key);
+                  if (current == null) {
+                    throw new IllegalArgumentException(
+                        "Cursor '" + alter.cursorName() + "' is not defined.");
+                  }
+                  java.util.LinkedHashMap<Name, String> streamOffsetReset =
+                      new java.util.LinkedHashMap<>(current.streamOffsetReset());
+                  if (!streamOffsetReset.containsKey(resolved)) {
+                    throw new IllegalArgumentException(
+                        "Stream '" + resolved.fullName() + "' is not mapped to cursor '" + alter.cursorName() + "'.");
+                  }
+                  streamOffsetReset.put(resolved,
+                      alter.resetPolicy() == kafkasql.lang.syntax.ast.stmt.CursorStmt.ResetPolicy.EARLIEST
+                          ? "earliest"
+                          : "latest");
+                  cursors.put(key, new CursorConfig(streamOffsetReset));
+                  operations.add("ALTER CURSOR '" + alter.cursorName() + "' RESET STREAM");
+                }
+                case kafkasql.lang.syntax.ast.stmt.CursorStmt.AlterCursorSeekStream seek -> {
+                  Name resolved = resolveCursorTopic.apply(seek.stream().fullName());
+                  String key = cursorKey(conn.name(), resolved.context(), seek.cursorName());
+                  CursorConfig current = cursors.get(key);
+                  if (current == null) {
+                    throw new IllegalArgumentException(
+                        "Cursor '" + seek.cursorName() + "' is not defined.");
+                  }
+                  java.util.LinkedHashMap<Name, String> streamOffsetReset =
+                      new java.util.LinkedHashMap<>(current.streamOffsetReset());
+                  if (!streamOffsetReset.containsKey(resolved)) {
+                    throw new IllegalArgumentException(
+                        "Stream '" + resolved.fullName() + "' is not mapped to cursor '" + seek.cursorName() + "'.");
+                  }
+
+                  String topic = resolved.fullName();
+                  Properties seekProps = conn.baseProperties();
+                  seekProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+                  seekProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
+                  seekProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
+                  seekProps.put(ConsumerConfig.GROUP_ID_CONFIG, seek.cursorName());
+                  seekProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, streamOffsetReset.getOrDefault(resolved, "latest"));
+
+                  try (KafkaConsumer<String, byte[]> kafkaConsumer = new KafkaConsumer<>(seekProps)) {
+                    java.util.Map<Integer, TopicPartition> partitionsById = kafkaConsumer.partitionsFor(topic).stream()
+                        .collect(java.util.stream.Collectors.toMap(
+                        pi -> pi.partition(),
+                            pi -> new TopicPartition(pi.topic(), pi.partition())
+                        ));
+
+                    java.util.List<TopicPartition> assigned = new java.util.ArrayList<>();
+                    for (var spec : seek.seeks()) {
+                      TopicPartition tp = partitionsById.get(spec.partition());
+                      if (tp == null) {
+                        throw new IllegalArgumentException(
+                            "Partition " + spec.partition() + " does not exist on stream '" + topic + "'.");
+                      }
+                      assigned.add(tp);
+                    }
+
+                    kafkaConsumer.assign(assigned);
+
+                    for (var spec : seek.seeks()) {
+                      TopicPartition tp = partitionsById.get(spec.partition());
+                      switch (spec.target()) {
+                        case kafkasql.lang.syntax.ast.stmt.CursorStmt.SeekTarget.Beginning ignored ->
+                            kafkaConsumer.seekToBeginning(java.util.List.of(tp));
+                        case kafkasql.lang.syntax.ast.stmt.CursorStmt.SeekTarget.End ignored ->
+                            kafkaConsumer.seekToEnd(java.util.List.of(tp));
+                        case kafkasql.lang.syntax.ast.stmt.CursorStmt.SeekTarget.Offset off ->
+                            kafkaConsumer.seek(tp, off.offset());
+                        case kafkasql.lang.syntax.ast.stmt.CursorStmt.SeekTarget.Timestamp ts -> {
+                          long epochMillis = java.time.Instant.parse(ts.timestamp()).toEpochMilli();
+                          java.util.Map<TopicPartition, Long> tsQuery = new java.util.HashMap<>();
+                          tsQuery.put(tp, epochMillis);
+                          var result = kafkaConsumer.offsetsForTimes(tsQuery);
+                          var oat = result.get(tp);
+                          if (oat == null) {
+                            kafkaConsumer.seekToEnd(java.util.List.of(tp));
+                          } else {
+                            kafkaConsumer.seek(tp, oat.offset());
+                          }
+                        }
+                      }
+                    }
+                    kafkaConsumer.commitSync();
+                  }
+
+                  operations.add("ALTER CURSOR '" + seek.cursorName() + "' SEEK STREAM");
+                }
+                case kafkasql.lang.syntax.ast.stmt.CursorStmt.DropCursor drop -> {
+                  String matchingKey = cursors.keySet().stream()
+                      .filter(key -> key.startsWith(conn.name() + "\u0000"))
+                      .filter(key -> key.endsWith("\u0000" + drop.cursorName()))
+                      .findFirst()
+                      .orElse(null);
+                  if (matchingKey == null) {
+                    throw new IllegalArgumentException(
+                        "Cursor '" + drop.cursorName() + "' is not defined.");
+                  }
+                  cursors.remove(matchingKey);
+                  operations.add("DROP CURSOR '" + drop.cursorName() + "'");
+                }
+              }
             }
 
             @Override
@@ -1087,7 +1337,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
     ParseResult result = KafkaSqlParser.parse(inputList, parseArgs);
     if (result.diags().hasError()) {
       String errors = result.diags().all().stream()
-          .map(Object::toString)
+          .map(d -> d.toString())
           .collect(java.util.stream.Collectors.joining("; "));
       throw new IllegalArgumentException("Parse errors in project: " + errors);
     }
@@ -1182,6 +1432,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
         if (evt instanceof sys.schema.SymbolEventLog.SymbolEvent e) {
           Name name = Name.of(e.ObjectName());
           switch (e.EventType()) {
+            case NOOP -> {}
             case CREATE_STMT, ALTER_STMT -> {
               if (e.State() != null) {
                 stateMap.put(name, e.State());
@@ -1242,7 +1493,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
     ParseResult result = KafkaSqlParser.parse(List.of(input), parseArgs);
     if (result.diags().hasError()) {
       throw new IllegalArgumentException("Parse errors in local file: " +
-          result.diags().all().stream().map(Object::toString)
+          result.diags().all().stream().map(d -> d.toString())
                 .collect(java.util.stream.Collectors.joining(", ")));
     }
     Map<Name, Decl> decls = new LinkedHashMap<>();
@@ -1286,6 +1537,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
           if (stmt instanceof WriteStmt) hasWrite = true;
           if (stmt instanceof ReadStmt) hasRead = true;
           if (stmt instanceof kafkasql.lang.syntax.ast.stmt.UserStmt
+              || stmt instanceof kafkasql.lang.syntax.ast.stmt.CursorStmt
               || stmt instanceof kafkasql.lang.syntax.ast.stmt.AclStmt) {
             hasUserOrAcl = true;
           }
@@ -1364,9 +1616,10 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
       }
       if (done) break;
       if (System.currentTimeMillis() >= deadline) break;
-      // Only terminate at end-of-topic when there is an explicit STOP AFTER condition.
-      // Without one, keep polling for new records until cancelled.
-      if (stopAfter != null) {
+      // For STOP AFTER RECORDS, reaching end-of-topic means no more records can
+      // satisfy the count right now, so terminate instead of waiting forever.
+      // For STOP AFTER SECONDS, keep polling until the wall-clock deadline.
+      if (stopAfter instanceof StopAfter.Records) {
         done = partitions.stream().allMatch(tp ->
             consumer.position(tp) >= endOffsets.getOrDefault(tp, 0L));
       }
@@ -1439,7 +1692,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
     }
     if (!beginList.isEmpty()) consumer.seekToBeginning(beginList);
     if (!endList.isEmpty())   consumer.seekToEnd(endList);
-    offsetMap.forEach(consumer::seek);
+    offsetMap.forEach((tp, offset) -> consumer.seek(tp, offset));
   }
 
   private static void seekTimestamps(

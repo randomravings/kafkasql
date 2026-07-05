@@ -8,8 +8,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import java.util.Optional;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 @DisplayName("READ mode clause – parser")
@@ -50,39 +48,20 @@ class ReadModeParseTest {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // FROM GROUP
+    // FROM CURSOR
     // ──────────────────────────────────────────────────────────────────────────
 
     @Nested
-    @DisplayName("FROM GROUP")
-    class FromGroupTests {
+    @DisplayName("FROM CURSOR")
+    class FromCursorTests {
 
         @Test
-        @DisplayName("no reset → group id captured, reset empty")
-        void fromGroupNoReset() {
-            ReadStmt read = parseRead("FROM GROUP 'my-consumer'");
+        @DisplayName("cursor name captured")
+        void fromCursor() {
+            ReadStmt read = parseRead("FROM CURSOR 'my-consumer'");
             assertTrue(read.mode().isPresent());
-            var c = assertInstanceOf(ReadMode.FromGroup.class, read.mode().get());
-            assertEquals("my-consumer", c.groupId());
-            assertTrue(c.resetToBeginning().isEmpty());
-        }
-
-        @Test
-        @DisplayName("BEGINNING reset → resetToBeginning = true")
-        void fromGroupBeginning() {
-            ReadStmt read = parseRead("FROM GROUP 'replay-group' BEGINNING");
-            var c = assertInstanceOf(ReadMode.FromGroup.class, read.mode().get());
-            assertEquals("replay-group", c.groupId());
-            assertEquals(Optional.of(true), c.resetToBeginning());
-        }
-
-        @Test
-        @DisplayName("END reset → resetToBeginning = false")
-        void fromGroupEnd() {
-            ReadStmt read = parseRead("FROM GROUP 'live-group' END");
-            var c = assertInstanceOf(ReadMode.FromGroup.class, read.mode().get());
-            assertEquals("live-group", c.groupId());
-            assertEquals(Optional.of(false), c.resetToBeginning());
+            var c = assertInstanceOf(ReadMode.FromCursor.class, read.mode().get());
+            assertEquals("my-consumer", c.cursorName());
         }
     }
 
@@ -230,11 +209,11 @@ class ReadModeParseTest {
     class SyntaxErrorTests {
 
         @Test
-        @DisplayName("FROM GROUP without string literal → parse error")
-        void fromGroupMissingName() {
-            String text = PREAMBLE + "\nREAD FROM orders.Orders FROM GROUP TYPE OrderRecord *;";
+        @DisplayName("FROM CURSOR without string literal → parse error")
+        void fromCursorMissingName() {
+            String text = PREAMBLE + "\nREAD FROM orders.Orders FROM CURSOR TYPE OrderRecord *;";
             var result = TestHelpers.parse(text);
-            assertTrue(result.diags().hasError(), "Missing group name should produce a parse error");
+            assertTrue(result.diags().hasError(), "Missing cursor name should produce a parse error");
         }
 
         @Test

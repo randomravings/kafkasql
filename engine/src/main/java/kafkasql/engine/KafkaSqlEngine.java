@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -21,6 +22,8 @@ import kafkasql.lang.syntax.ast.Script;
 import kafkasql.lang.syntax.ast.stmt.*;
 import kafkasql.lang.syntax.ast.decl.Decl;
 import kafkasql.lang.syntax.ast.expr.*;
+import kafkasql.lang.syntax.ast.fragment.ProjectionExprNode;
+import kafkasql.lang.syntax.ast.fragment.ProjectionNode;
 import kafkasql.lang.syntax.ast.fragment.WhereNode;
 import kafkasql.lang.syntax.ast.literal.*;
 import kafkasql.lang.syntax.ast.show.ShowTarget;
@@ -28,6 +31,7 @@ import kafkasql.runtime.Name;
 import kafkasql.runtime.diagnostics.Range;
 import kafkasql.runtime.type.SchemaResolver;
 import kafkasql.runtime.type.StructType;
+import kafkasql.runtime.type.StructTypeField;
 import kafkasql.runtime.value.EnumValue;
 import kafkasql.runtime.value.StructValue;
 
@@ -239,12 +243,17 @@ public abstract class KafkaSqlEngine {
             case ReadStmt read -> executeRead(read, bindings, captureResults);
             case ShowStmt show -> executeShow(show, captureResults);
             case ExplainStmt explain -> executeExplain(explain, captureResults);
+            case CursorStmt cursor -> executeCursor(cursor);
             case UserStmt user -> executeUser(user);
             case AclStmt acl   -> executeGrant(acl);
             default -> {
                 // CREATE and USE statements are handled during binding phase
             }
         }
+    }
+
+    protected void executeCursor(CursorStmt stmt) {
+        // Default no-op; override in LSP backend.
     }
 
     protected void executeUser(UserStmt stmt) {
@@ -290,61 +299,206 @@ public abstract class KafkaSqlEngine {
      */
     private void executeRead(ReadStmt read, BindingEnv bindings, boolean captureResults) {
         Name streamName = Name.of(read.stream().context(), read.stream().name());
-        
-        // Get all records from the stream
-        List<StreamRecord> allRecords = readRecords(streamName);
-        // Filter by type if specific types are requested
-        List<StreamRecord> filteredRecords;
+        List<StreamRecord> results = new ArrayList<>();
+
         if (read.blocks().isEmpty()) {
-            // No type blocks means read all
-            filteredRecords = allRecords;
+            // No type blocks → return all records as-is
+            readRecords(streamName, null, record -> {
+                results.add(record);
+                if (captureResults) {
+                    handleQueryRecord(record);
+                }
+            });
         } else {
-            // Build a map of type name → StructType from bindings for resolution
+            // Build per-type schemas, projection nodes, and WHERE data
             Map<String, StructType> typeSchemas = new HashMap<>();
+            Map<String, ProjectionNode> projectionByType = new HashMap<>();
+            Map<String, Set<String>> whereFieldsByType = new HashMap<>();
+            Map<String, Optional<WhereNode>> whereByType = new HashMap<>();
+
             for (ReadTypeBlock block : read.blocks()) {
                 String typeName = block.alias().name();
                 StructType rowType = bindings.getOrNull(block, StructType.class);
-                if (rowType != null) {
-                    typeSchemas.put(typeName, rowType);
+                if (rowType != null) typeSchemas.put(typeName, rowType);
+
+                projectionByType.put(typeName, block.projection());
+
+                // WHERE fields — collect root-level field names referenced by the expression
+                Set<String> whereFields = new LinkedHashSet<>();
+                if (block.where().isPresent()) {
+                    collectExprFields(block.where().get().expr(), whereFields);
+                    whereByType.put(typeName, Optional.of(block.where().get()));
+                } else {
+                    whereByType.put(typeName, Optional.empty());
+                }
+                whereFieldsByType.put(typeName, whereFields);
+            }
+
+            // readFields = root fields of projection exprs ∪ WHERE fields per type
+            // (empty projection items = SELECT * → null = read all fields)
+            Map<String, Set<String>> readFieldsByType = new HashMap<>();
+            for (String typeName : typeSchemas.keySet()) {
+                ProjectionNode proj = projectionByType.get(typeName);
+                if (proj.items().isEmpty()) {
+                    readFieldsByType.put(typeName, null);  // SELECT * → read all
+                } else {
+                    Set<String> readFields = new LinkedHashSet<>();
+                    for (ProjectionExprNode pe : proj.items()) {
+                        String root = extractRootFieldName(pe.expr());
+                        if (root != null) readFields.add(root);
+                    }
+                    readFields.addAll(whereFieldsByType.getOrDefault(typeName, Set.of()));
+                    readFieldsByType.put(typeName, readFields);
                 }
             }
-            
-            // Collect requested type names from type blocks
-            java.util.Set<String> requestedTypes = typeSchemas.keySet();
-            
-            // Filter records to only include requested types, resolving schema
-            filteredRecords = allRecords.stream()
-                .filter(record -> requestedTypes.contains(record.typeName()))
-                .map(record -> {
-                    StructType schema = typeSchemas.get(record.typeName());
-                    if (schema != null) {
-                        StructValue resolved = SchemaResolver.resolveRead(
-                            record.value().fields(), schema);
-                        return new StreamRecord(record.typeName(), resolved);
-                    }
-                    return record;
-                })
-                .toList();
-        }
-        
-        // Apply WHERE clauses per type block
-        if (!read.blocks().isEmpty()) {
-            Map<String, Optional<WhereNode>> whereByType = new HashMap<>();
-            for (ReadTypeBlock block : read.blocks()) {
-                whereByType.put(block.alias().name(),
-                    block.where().isPresent() ? Optional.of(block.where().get()) : Optional.empty());
-            }
-            filteredRecords = filteredRecords.stream()
-                .filter(record -> {
-                    Optional<WhereNode> wOpt = whereByType.get(record.typeName());
-                    if (wOpt == null || wOpt.isEmpty()) return true;
-                    return matchesWhere(wOpt.get().expr(), record);
-                })
-                .toList();
+
+            Set<String> requestedTypes = typeSchemas.keySet();
+            // Read raw records (subclasses may skip non-read fields at the codec level)
+            // and apply type filtering, WHERE, and projection incrementally so callers can
+            // consume records as they arrive.
+            readRecords(streamName, readFieldsByType, raw -> {
+                if (!requestedTypes.contains(raw.typeName())) {
+                    return;
+                }
+
+                StructType schema = typeSchemas.get(raw.typeName());
+                StreamRecord resolvedRecord = raw;
+                if (schema != null) {
+                    Set<String> readFields = readFieldsByType.get(raw.typeName());
+                    StructValue resolved = (readFields != null)
+                        ? SchemaResolver.resolveRead(raw.value().fields(), schema, readFields)
+                        : SchemaResolver.resolveRead(raw.value().fields(), schema);
+                    resolvedRecord = new StreamRecord(raw.typeName(), resolved);
+                }
+
+                Optional<WhereNode> wOpt = whereByType.get(raw.typeName());
+                if (wOpt != null && wOpt.isPresent() && !matchesWhere(wOpt.get().expr(), resolvedRecord)) {
+                    return;
+                }
+
+                ProjectionNode proj = projectionByType.get(raw.typeName());
+                StreamRecord projectedRecord = (proj == null || proj.items().isEmpty())
+                    ? resolvedRecord
+                    : applyProjection(resolvedRecord, proj);
+
+                results.add(projectedRecord);
+                if (captureResults) {
+                    handleQueryRecord(projectedRecord);
+                }
+            });
         }
 
         if (captureResults) {
-            handleQueryResult(filteredRecords);
+            handleQueryResult(results);
+        }
+    }
+
+    /**
+     * Returns the root (top-level) field name of a projection expression.
+     * For {@code Name} → {@code "Name"}; for {@code Value.Status} → {@code "Value"}.
+     * Used to determine which top-level fields must be read from the stream.
+     */
+    private static String extractRootFieldName(Expr expr) {
+        return switch (expr) {
+            case IdentifierExpr id -> id.name().name();
+            case MemberExpr mem    -> extractRootFieldName(mem.target());
+            default                -> null;
+        };
+    }
+
+    /**
+     * Returns the leaf (last segment) name of a projection expression.
+     * For {@code Name} → {@code "Name"}; for {@code Value.Status} → {@code "Status"}.
+     * Used as the default output field name when no alias is given.
+     */
+    private static String extractLeafName(Expr expr) {
+        return switch (expr) {
+            case IdentifierExpr id -> id.name().name();
+            case MemberExpr mem    -> mem.name().name();
+            default                -> null;
+        };
+    }
+
+    /**
+     * Applies a {@link ProjectionNode} to a record: evaluates each projection expression
+     * against the current {@link StructValue}, applies any alias as the output field name,
+     * and returns a new {@link StreamRecord} whose {@link StructType} contains only
+     * the projected (and possibly renamed) fields.
+     */
+    private static StreamRecord applyProjection(StreamRecord record, ProjectionNode projection) {
+        StructValue sv = record.value();
+        java.util.LinkedHashMap<String, StructTypeField> typeFields = new java.util.LinkedHashMap<>();
+        java.util.LinkedHashMap<String, Object> fields = new java.util.LinkedHashMap<>();
+        for (ProjectionExprNode pe : projection.items()) {
+            String leafName = extractLeafName(pe.expr());
+            String outputName = pe.alias().isPresent() ? pe.alias().get().name() : leafName;
+            if (outputName == null) continue;
+            Object value = evalProjectionExpr(pe.expr(), sv);
+            StructTypeField typeField = resolveProjectionTypeField(pe.expr(), sv.type());
+            fields.put(outputName, value);
+            if (typeField != null) typeFields.put(outputName, typeField);
+        }
+        StructType projectedType = new StructType(
+            sv.type().fqn(), typeFields, sv.type().constraints(), sv.type().doc());
+        return new StreamRecord(record.typeName(), new StructValue(projectedType, fields));
+    }
+
+    /**
+     * Evaluates a projection expression against a {@link StructValue}.
+     * Handles nested member access: {@code Value.Name} navigates into the {@code Value} field.
+     */
+    private static Object evalProjectionExpr(Expr expr, StructValue sv) {
+        return switch (expr) {
+            case IdentifierExpr id -> sv.get(id.name().name());
+            case MemberExpr mem    -> getNestedField(evalProjectionExpr(mem.target(), sv), mem.name().name());
+            default                -> null;
+        };
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object getNestedField(Object container, String name) {
+        if (container instanceof StructValue sv) return sv.get(name);
+        if (container instanceof Map<?, ?> map) return ((Map<String, Object>) map).get(name);
+        return null;
+    }
+
+    /**
+     * Resolves the {@link StructTypeField} for a projection expression by walking the
+     * type tree. Returns {@code null} if the path cannot be resolved.
+     */
+    private static StructTypeField resolveProjectionTypeField(Expr expr, StructType type) {
+        return switch (expr) {
+            case IdentifierExpr id -> type.fields().get(id.name().name());
+            case MemberExpr mem    -> {
+                StructTypeField parent = resolveProjectionTypeField(mem.target(), type);
+                if (parent != null && parent.type() instanceof StructType nested) {
+                    yield nested.fields().get(mem.name().name());
+                }
+                yield null;
+            }
+            default -> null;
+        };
+    }
+
+    /**
+     * Collects all field-name references from a WHERE expression tree into {@code fields}.
+     * Literal values and non-field expressions contribute nothing.
+     */
+    private static void collectExprFields(Expr expr, Set<String> fields) {
+        switch (expr) {
+            case IdentifierExpr id -> fields.add(id.name().name());
+            case MemberExpr mem    -> collectExprFields(mem.target(), fields); // recurse to root variable
+            case InfixExpr inf     -> { collectExprFields(inf.left(), fields);
+                                        collectExprFields(inf.right(), fields); }
+            case PrefixExpr pre    -> collectExprFields(pre.expr(), fields);
+            case PostfixExpr post  -> collectExprFields(post.expr(), fields);
+            case TrifixExpr tri    -> { collectExprFields(tri.left(), fields);
+                                        collectExprFields(tri.middle(), fields);
+                                        collectExprFields(tri.right(), fields); }
+            case ParenExpr par     -> collectExprFields(par.inner(), fields);
+            case LiteralExpr ign   -> {}
+            case IndexExpr idx     -> { collectExprFields(idx.target(), fields);
+                                        collectExprFields(idx.index(), fields); }
         }
     }
 
@@ -367,7 +521,6 @@ public abstract class KafkaSqlEngine {
      *  - "Value" and the type name are added as aliases for the whole record
      *    so expressions like {@code Value.Status} and {@code CustomerRecord.Status}
      *    both resolve correctly. */
-    @SuppressWarnings("unchecked")
     private static Map<String, Object> buildRecordEnv(String typeName, StructValue value) {
         Map<String, Object> flat = new java.util.LinkedHashMap<>();
         for (var e : value.fields().entrySet()) {
@@ -388,7 +541,6 @@ public abstract class KafkaSqlEngine {
         return v;
     }
 
-    @SuppressWarnings("unchecked")
     private static Object evalWhereExpr(Expr expr, Map<String, Object> env) {
         return switch (expr) {
             case LiteralExpr lit    -> evalWhereLiteral(lit.literal());
@@ -650,6 +802,37 @@ public abstract class KafkaSqlEngine {
      * @return List of records from the stream
      */
     protected abstract List<StreamRecord> readRecords(Name streamName);
+
+    /**
+     * Read records from the stream backend with optional field-level projection hints.
+     * <p>
+     * Subclasses that deserialize from raw bytes (e.g., the Kafka LSP engine) can
+     * override this to skip non-projected field bytes at the codec level, avoiding
+     * allocation for data that will not be used.
+     * <p>
+     * The default implementation ignores {@code readFieldsByType} and reads all fields.
+     *
+     * @param streamName       Fully qualified stream name
+     * @param readFieldsByType type-name → set of field names to read;
+     *                         a {@code null} value means "all fields" for that type
+     */
+    protected List<StreamRecord> readRecords(Name streamName, Map<String, Set<String>> readFieldsByType) {
+        return readRecords(streamName);
+    }
+
+    /**
+     * Read records and emit them to {@code onRecord} as they become available.
+     * The default implementation delegates to the batch-oriented overload.
+     */
+    protected List<StreamRecord> readRecords(
+        Name streamName,
+        Map<String, Set<String>> readFieldsByType,
+        java.util.function.Consumer<StreamRecord> onRecord
+    ) {
+        List<StreamRecord> records = readRecords(streamName, readFieldsByType);
+        records.forEach(onRecord);
+        return records;
+    }
     
     /**
      * Write a schema-change marker to a stream topic.
@@ -672,6 +855,14 @@ public abstract class KafkaSqlEngine {
     protected void handleQueryResult(List<StreamRecord> records) {
         // Default: no-op
         // Subclasses can override to store results for inspection
+    }
+
+    /**
+     * Handle a single READ record as soon as it is available.
+     * Subclasses can override to stream incremental query results.
+     */
+    protected void handleQueryRecord(StreamRecord record) {
+        // Default: no-op
     }
     
     /**

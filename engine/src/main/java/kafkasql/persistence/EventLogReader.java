@@ -104,6 +104,7 @@ public class EventLogReader {
         Name objectName = Name.of(event.ObjectName());
         
         switch (event.EventType()) {
+            case NOOP -> {}
             case CREATE_STMT, ALTER_STMT -> {
                 if (event.State() != null) {
                     Decl decl = parseState(grammarVersion, event.State());

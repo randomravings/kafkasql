@@ -21,6 +21,7 @@ CONTEXTS      : [Cc][Oo][Nn][Tt][Ee][Xx][Tt][Ss] ;
 TYPES         : [Tt][Yy][Pp][Ee][Ss] ;
 STREAMS       : [Ss][Tt][Rr][Ee][Aa][Mm][Ss] ;
 USERS         : [Uu][Ss][Ee][Rr][Ss] ;
+CURSORS       : [Cc][Uu][Rr][Ss][Oo][Rr][Ss] ;
 SCALAR        : [Ss][Cc][Aa][Ll][Aa][Rr] ;
 ENUM          : [Ee][Nn][Uu][Mm] ;
 STRUCT        : [Ss][Tt][Rr][Uu][Cc][Tt] ;
@@ -80,14 +81,18 @@ SET           : [Ss][Ee][Tt] ;
 VERSION       : [Vv][Ee][Rr][Ss][Ii][Oo][Nn] ;
 USER          : [Uu][Ss][Ee][Rr] ;
 PASSWORD      : [Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd] ;
+RESET         : [Rr][Ee][Ss][Ee][Tt] ;
+SEEK          : [Ss][Ee][Ee][Kk] ;
 GRANT         : [Gg][Rr][Aa][Nn][Tt] ;
 REVOKE        : [Rr][Ee][Vv][Oo][Kk][Ee] ;
 MODIFY        : [Mm][Oo][Dd][Ii][Ff][Yy] ;
 ON            : [Oo][Nn] ;
+FOR           : [Ff][Oo][Rr] ;
 
 LATEST        : [Ll][Aa][Tt][Ee][Ss][Tt] ;
+EARLIEST      : [Ee][Aa][Rr][Ll][Ii][Ee][Ss][Tt] ;
 
-GROUP         : [Gg][Rr][Oo][Uu][Pp] ;
+CURSOR        : [Cc][Uu][Rr][Ss][Oo][Rr] ;
 BEGINNING     : [Bb][Ee][Gg][Ii][Nn][Nn][Ii][Nn][Gg] ;
 END           : [Ee][Nn][Dd] ;
 OFFSETS       : [Oo][Ff][Ff][Ss][Ee][Tt][Ss] ;

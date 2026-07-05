@@ -10,6 +10,7 @@ public sealed interface Stmt
             CreateStmt,
             AlterStmt,
             DropStmt,
+            CursorStmt,
             UserStmt,
             AclStmt,
             ReadStmt,

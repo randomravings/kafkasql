@@ -4,6 +4,7 @@ import kafkasql.runtime.value.StructValue;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Resolves schema drift between the wire (server) and the current (client) schema.
@@ -137,6 +138,58 @@ public final class SchemaResolver {
         }
 
         return new StructValue(serverType, resolved);
+    }
+
+    /**
+     * Resolves wire data against the current server schema for reading, producing a
+     * {@link StructValue} restricted to {@code projectedFields}.
+     * <p>
+     * The returned {@link StructValue}'s {@link StructType} contains <em>only</em>
+     * the projected fields, making non-projected data inaccessible via the type
+     * interface.
+     *
+     * @param wireFields      The raw field-name → value map from the wire
+     * @param serverType      The current (evolved) struct type
+     * @param projectedFields Fields to include in the result
+     * @return A resolved StructValue containing only the projected fields
+     */
+    public static StructValue resolveRead(
+            Map<String, Object> wireFields,
+            StructType serverType,
+            Set<String> projectedFields) {
+        LinkedHashMap<String, StructTypeField> projectedTypeFields = new LinkedHashMap<>();
+        LinkedHashMap<String, Object> resolved = new LinkedHashMap<>();
+
+        // Walk schema in declaration order, processing only projected fields
+        for (var entry : serverType.fields().entrySet()) {
+            String fieldName = entry.getKey();
+            if (!projectedFields.contains(fieldName)) continue;
+
+            StructTypeField field = entry.getValue();
+            projectedTypeFields.put(fieldName, field);
+
+            if (field.dropped()) {
+                resolved.put(fieldName, field.nullable() ? null : typeDefault(field.type()));
+            } else if (wireFields.containsKey(fieldName)) {
+                resolved.put(fieldName, wireFields.get(fieldName));
+            } else if (field.defaultValue().isPresent()) {
+                resolved.put(fieldName, field.defaultValue().get());
+            } else if (field.nullable()) {
+                resolved.put(fieldName, null);
+            }
+        }
+
+        // Include projected fields present in wire data but absent from the current schema
+        // (forward-compatibility: data from a future schema version)
+        for (String fieldName : projectedFields) {
+            if (!projectedTypeFields.containsKey(fieldName) && wireFields.containsKey(fieldName)) {
+                resolved.put(fieldName, wireFields.get(fieldName));
+            }
+        }
+
+        StructType projectedType = new StructType(
+            serverType.fqn(), projectedTypeFields, serverType.constraints(), serverType.doc());
+        return new StructValue(projectedType, resolved);
     }
 
     // ========================================================================

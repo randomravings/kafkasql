@@ -501,7 +501,7 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
 
     Optional<Path> gitRoot = GitBaseline.resolveGitRoot(workingDir);
     System.err.println("[kafkasql-lsp] compat diff: workingDir=" + workingDir
-        + ", gitRoot=" + gitRoot.map(Path::toString).orElse("<none — not a git repo>"));
+      + ", gitRoot=" + gitRoot.map(p -> p.toString()).orElse("<none — not a git repo>"));
 
     Optional<String> baseline;
     try {

@@ -3,13 +3,12 @@ package kafkasql.lang.syntax.ast.stmt;
 import kafkasql.runtime.diagnostics.Range;
 import kafkasql.lang.syntax.ast.AstNode;
 import kafkasql.lang.syntax.ast.AstListNode;
-import java.util.Optional;
 
 /**
  * Sealed hierarchy for the optional read mode clause on a READ statement.
  *
  * <pre>
- *   FROM GROUP 'name' [BEGINNING|END]
+ *   FROM CURSOR 'name'
  *   FROM BEGINNING
  *   FROM END
  *   FROM 'iso-timestamp'
@@ -18,18 +17,17 @@ import java.util.Optional;
  * </pre>
  */
 public sealed interface ReadMode extends AstNode
-    permits ReadMode.FromGroup,
+    permits ReadMode.FromCursor,
             ReadMode.FromBeginning,
             ReadMode.FromEnd,
             ReadMode.FromTimestamp,
             ReadMode.FromOffsets,
             ReadMode.FromTimestamps
 {
-    /** FROM GROUP 'name' [BEGINNING|END] */
-    record FromGroup(
+    /** FROM CURSOR 'name' */
+    record FromCursor(
         Range range,
-        String groupId,
-        Optional<Boolean> resetToBeginning  // true=BEGINNING, false=END, empty=default(END)
+        String cursorName
     ) implements ReadMode {}
 
     /** FROM BEGINNING */

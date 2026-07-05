@@ -143,7 +143,7 @@ public final class LiteralBinder {
         AnyType expectedType,
         Diagnostics diags
     ) {
-        // TODO: What is the empty bindings for?
+        // Literal binding doesn't involve variable references, so an empty BindingEnv is correct here.
         return bindLiteralTyped(node, expectedType, diags, new BindingEnv());
     }
 

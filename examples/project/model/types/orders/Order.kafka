@@ -1,4 +1,4 @@
-INCLUDE '../orders.kafka';
+INCLUDE '../../contexts/orders.kafka';
 INCLUDE 'OrderStatus.kafka';
 
 USE CONTEXT orders;

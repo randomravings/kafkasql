@@ -81,7 +81,7 @@ public final class ComplexTypeFactory {
         return new StructType(
             name,
             fields,
-            List.of(),  // TODO: Extract CHECK constraints
+            List.of(),  // Constraints require the full binder pipeline; use TypeBuilder.buildStructType() for constraint extraction
             FragmentUtils.extractDoc(fragments, diags)
         );
     }
@@ -229,7 +229,7 @@ public final class ComplexTypeFactory {
             name,
             base,
             defaultValue,
-            Optional.empty(),  // TODO: Extract CHECK constraint
+            Optional.empty(),  // Constraints require the full binder pipeline; use TypeBuilder.buildScalarType() for CHECK constraint extraction
             doc
         );
     }

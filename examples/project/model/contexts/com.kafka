@@ -2,4 +2,6 @@
 -- Lives at kafka/com.kafka (depth 1 — no folder constraint).
 -- Sub-contexts (e.g. com.example) are declared inside the com/ folder.
 
+USE CONTEXT GLOBAL;
+
 CREATE CONTEXT com;
