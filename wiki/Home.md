@@ -1,15 +1,15 @@
 # KafkaSQL Wiki
 
-Welcome to the KafkaSQL documentation. KafkaSQL is a type-safe schema definition language for Kafka with built-in support for validation, code generation, and IDE integration.
+KafkaSQL documentation is organized for both first-time users and contributors.
 
-## Contents
+## Start Here
 
-- [Project Structure](Project-Structure.md) - Module organization and architecture
-- [Language Syntax](Language-Syntax.md) - Complete syntax reference
-- [Type System](Type-System.md) - Types, validation, and constraints
-- [Command Line Interface](CLI.md) - Using the kafkasql compiler
-- [Language Server Protocol](LSP.md) - IDE integration and VS Code extension
-- [Pipeline Architecture](Pipeline-Architecture.md) - Compilation phases and extensibility
+- [Getting Started](getting-started/Home.md) - First run and onboarding
+
+## Sections
+
+- [Language](language/Home.md) - Syntax and statement reference
+- [Architecture](architecture/Home.md) - Repository structure and pipeline design
 
 ## Quick Start
 
@@ -49,3 +49,9 @@ CREATE STREAM UserEvents (
     Value User
 );
 ```
+
+## Navigation Tips
+
+- Subsection pages include a navigation line with both `Up` and `Home` links.
+- `Up` returns to the section index.
+- `Home` returns to this page.
