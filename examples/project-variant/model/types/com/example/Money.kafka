@@ -1,0 +1,7 @@
+INCLUDE '../../../contexts/com/example.kafka';
+
+USE CONTEXT com.example;
+
+CREATE TYPE Money AS SCALAR DECIMAL(20, 4)
+DEFAULT 0.0000
+COMMENT 'Monetary value with 4 decimal places';

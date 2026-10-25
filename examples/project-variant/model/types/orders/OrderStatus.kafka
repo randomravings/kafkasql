@@ -1,0 +1,12 @@
+INCLUDE '../../contexts/orders.kafka';
+
+USE CONTEXT orders;
+
+CREATE TYPE OrderStatus AS ENUM (
+    PENDING   = 0,
+    PROCESSING = 1,
+    DELIVERED = 2,
+    RETURNED  = 3
+)
+DEFAULT OrderStatus::PENDING
+COMMENT 'Status lifecycle for an order';

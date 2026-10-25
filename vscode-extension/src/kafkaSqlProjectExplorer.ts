@@ -479,12 +479,40 @@ export class KafkaSqlProjectExplorer
   }
 
   private async loadProjects(): Promise<ParsedProject[]> {
-    // Use VS Code's own file finder — respects workspace exclusions, no manual walking needed
-    const uris = await vscode.workspace.findFiles(
+    // Prefer VS Code discovery first.
+    const discovered = await vscode.workspace.findFiles(
       '**/*.proj.toml',
       '{.git,node_modules,build,.gradle,dist}/**'
     );
-    log('findFiles found: ' + uris.map(u => u.fsPath).join(', '));
+    const projFiles = new Set<string>(discovered.map(u => u.fsPath));
+
+    // Fallback/manual scan to avoid discovery gaps in certain workspace setups.
+    const skipDirs = new Set(['.git', 'node_modules', 'build', '.gradle', 'dist']);
+    const scanForProjTomls = (dir: string): void => {
+      let entries: fs.Dirent[] = [];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (skipDirs.has(entry.name)) continue;
+          scanForProjTomls(full);
+          continue;
+        }
+        if (entry.isFile() && entry.name.endsWith('.proj.toml')) {
+          projFiles.add(full);
+        }
+      }
+    };
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      scanForProjTomls(folder.uri.fsPath);
+    }
+
+    const uris = Array.from(projFiles).sort((a, b) => a.localeCompare(b)).map(f => vscode.Uri.file(f));
+    log('project discovery found: ' + uris.map(u => u.fsPath).join(', '));
 
     const projects: ParsedProject[] = [];
     for (const uri of uris) {

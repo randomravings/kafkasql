@@ -1,0 +1,13 @@
+INCLUDE '../../contexts/orders.kafka';
+INCLUDE '../../types/orders/Order.kafka';
+
+USE CONTEXT orders;
+
+CREATE STREAM Orders (
+    TYPE OrderRecord AS STRUCT (
+        Key   INT64,
+        Value orders.Order
+    )
+    DISTRIBUTE BY (Key)
+)
+COMMENT 'Primary orders stream (variant)';

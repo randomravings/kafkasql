@@ -1,0 +1,14 @@
+INCLUDE '../../contexts/orders.kafka';
+INCLUDE '../../types/orders/Order.kafka';
+
+USE CONTEXT orders;
+
+CREATE STREAM OrderAudit (
+    TYPE OrderAuditRecord AS STRUCT (
+        Key      INT64,
+        EventTs  INT64,
+        Value    orders.Order
+    )
+    DISTRIBUTE BY (Key)
+)
+COMMENT 'Audit stream for order state transitions';

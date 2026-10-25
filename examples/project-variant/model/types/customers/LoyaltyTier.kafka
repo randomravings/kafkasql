@@ -1,0 +1,12 @@
+INCLUDE '../../contexts/customers.kafka';
+
+USE CONTEXT customers;
+
+CREATE TYPE LoyaltyTier AS ENUM (
+    BRONZE   = 0,
+    SILVER   = 1,
+    GOLD     = 2,
+    PLATINUM = 3
+)
+DEFAULT LoyaltyTier::BRONZE
+COMMENT 'Customer loyalty tier';
