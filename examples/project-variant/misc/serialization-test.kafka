@@ -21,10 +21,10 @@ WRITE TO customers.Customers
 WRITE TO orders.Orders
   TYPE OrderRecord
   VALUES
-    ({ Key: 1, Value: { Id: 1, Status: orders.OrderStatus::PENDING   } },
-     { Key: 2, Value: { Id: 2, Status: orders.OrderStatus::SHIPPED   } },
+    ({ Key: 1, Value: { Id: 1, Status: orders.OrderStatus::PENDING    } },
+     { Key: 2, Value: { Id: 2, Status: orders.OrderStatus::PROCESSING } },
      { Key: 3, Value: { Id: 3, Status: orders.OrderStatus::DELIVERED } },
-     { Key: 4, Value: { Id: 4, Status: orders.OrderStatus::CANCELLED } });
+     { Key: 4, Value: { Id: 4, Status: orders.OrderStatus::RETURNED   } });
 
 -- ── Decimal precision boundaries ─────────────────────────────────────────────
 
