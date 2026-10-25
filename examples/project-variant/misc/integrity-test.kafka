@@ -18,7 +18,7 @@ WRITE TO orders.Orders
   TYPE OrderRecord
   VALUES
     ({ Key: 10, Value: { Id: 10, Status: orders.OrderStatus::PENDING   } },
-    { Key: 10, Value: { Id: 10, Status: orders.OrderStatus::SHIPPED   } },
+    { Key: 10, Value: { Id: 10, Status: orders.OrderStatus::PROCESSING } },
     { Key: 10, Value: { Id: 10, Status: orders.OrderStatus::DELIVERED } });
 
 -- ── VALID: union alternatives ─────────────────────────────────────────────────
