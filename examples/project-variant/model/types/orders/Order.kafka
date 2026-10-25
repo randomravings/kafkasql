@@ -1,0 +1,12 @@
+INCLUDE '../../contexts/orders.kafka';
+INCLUDE 'OrderStatus.kafka';
+INCLUDE '../com/example/Amount.kafka';
+
+USE CONTEXT orders;
+
+CREATE TYPE Order AS STRUCT (
+    Id           INT64,
+    Status       orders.OrderStatus,
+    TotalAmount  com.example.Amount
+)
+COMMENT 'Order payload with status and total amount';

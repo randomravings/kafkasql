@@ -44,13 +44,15 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
    * diagnostics mode for a specific file.
    *
    * @param uri  the document URI
-   * @param mode {@code "interactive"}, {@code "file"}, or {@code "auto"} (clears the override)
+   * @param mode {@code "interactive"}, {@code "project"}, {@code "file"}, or {@code "auto"}
+   *             (clears the override)
    */
   void setFileMode(String uri, String mode) {
     switch (mode.toLowerCase()) {
-      case "interactive" -> fileModeOverrides.put(uri, Boolean.TRUE);
-      case "file"        -> fileModeOverrides.put(uri, Boolean.FALSE);
-      default            -> fileModeOverrides.remove(uri);   // "auto" — revert to path detection
+      case "interactive" -> fileModeOverrides.put(uri, FileMode.INTERACTIVE);
+      case "project"     -> fileModeOverrides.put(uri, FileMode.PROJECT);
+      case "file"        -> fileModeOverrides.put(uri, FileMode.FILE);
+      default            -> fileModeOverrides.remove(uri); // "auto" — revert to path detection
     }
     System.err.println("[kafkasql-lsp] setFileMode " + uri + " -> " + mode);
     // Re-run diagnostics immediately so the editor reflects the new mode
@@ -100,11 +102,14 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
   private final Map<String, String> openDocumentText = new ConcurrentHashMap<>();
   /**
    * Per-URI mode overrides set by the user via the status bar command.
-   * {@code null} / absent  → auto-detect from file path
-   * {@code Boolean.TRUE}   → forced interactive mode
-   * {@code Boolean.FALSE}  → forced file mode
+   * {@code null} / absent       → auto-detect from file path
+   * {@code INTERACTIVE}         → parse-only, live-cluster resolution
+   * {@code PROJECT}             → full pipeline + project conventions
+   * {@code FILE}                → full pipeline without project conventions
    */
-  private final Map<String, Boolean> fileModeOverrides = new ConcurrentHashMap<>();
+  private final Map<String, FileMode> fileModeOverrides = new ConcurrentHashMap<>();
+
+  private enum FileMode { INTERACTIVE, PROJECT, FILE }
 
   public KafkaSqlTextDocumentService() {
     this.pipeline = Pipeline.builder()
@@ -223,22 +228,24 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
       filePath = null;
     }
 
-    // Determine interactive vs file mode.
+    // Determine effective mode.
     // Priority: explicit per-file override (set by the user via status bar) → path-based auto-detection.
-    boolean interactive;
+    FileMode mode;
     if (fileModeOverrides.containsKey(uri)) {
-      interactive = fileModeOverrides.get(uri);
-      System.err.println("[kafkasql-lsp]   interactive=" + interactive + " (override)");
+      mode = fileModeOverrides.get(uri);
+      System.err.println("[kafkasql-lsp]   mode=" + mode + " (override)");
     } else {
-      interactive = false;
+      mode = FileMode.FILE;
       if (filePath != null) {
         Optional<KafkaSqlProject> projOpt = KafkaSqlProject.findFor(filePath);
         if (projOpt.isPresent()) {
-          interactive = projOpt.get().isInteractiveFile(filePath);
+          mode = projOpt.get().isInteractiveFile(filePath) ? FileMode.INTERACTIVE : FileMode.PROJECT;
         }
       }
-      System.err.println("[kafkasql-lsp]   interactive=" + interactive + " (auto)");
+      System.err.println("[kafkasql-lsp]   mode=" + mode + " (auto)");
     }
+    boolean interactive = mode == FileMode.INTERACTIVE;
+    boolean projectMode = mode == FileMode.PROJECT;
 
     Input currentInput = new StringInput(uri, text);
     
@@ -270,10 +277,11 @@ public class KafkaSqlTextDocumentService implements TextDocumentService {
       lspDiags.addAll(buildInteractiveIncludeHints(text));
     } else {
       // Project-convention check (folder must align with declared context)
-      lspDiags.addAll(buildProjectConventionDiagnostics(uri, text));
-
-      // Project object-count check (one CREATE per file)
-      lspDiags.addAll(buildProjectObjectCountDiagnostics(uri, text));
+      if (projectMode) {
+        lspDiags.addAll(buildProjectConventionDiagnostics(uri, text));
+        // Project object-count check (one CREATE per file)
+        lspDiags.addAll(buildProjectObjectCountDiagnostics(uri, text));
+      }
 
       // Compatibility diff against git HEAD (only when parsed cleanly)
       if (!result.diagnostics().hasError()) {

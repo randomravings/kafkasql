@@ -33,5 +33,5 @@ topic     = "_kafkasql_log"
 [connection.local-admin]
 bootstrap = "localhost:9094"
 topic     = "_kafkasql_log"
-username  = "<set-via-env-or-local-secret>"
-password  = "<set-via-env-or-local-secret>"
+username  = "admin"
+password  = "admin-secret"

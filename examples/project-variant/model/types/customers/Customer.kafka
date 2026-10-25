@@ -1,0 +1,14 @@
+INCLUDE '../../contexts/customers.kafka';
+INCLUDE 'CustomerStatus.kafka';
+INCLUDE 'LoyaltyTier.kafka';
+
+USE CONTEXT customers;
+
+CREATE TYPE Customer AS STRUCT (
+    Id      INT32,
+    Name    STRING,
+    Email   STRING,
+    Status  customers.CustomerStatus,
+    Tier    customers.LoyaltyTier
+)
+COMMENT 'A customer profile with loyalty tier';

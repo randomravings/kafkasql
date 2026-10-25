@@ -1,0 +1,13 @@
+INCLUDE '../../../contexts/com/example.kafka';
+INCLUDE '../../../types/com/example/Amount.kafka';
+
+USE CONTEXT com.example;
+
+CREATE STREAM Payments (
+    TYPE PaymentRecord AS STRUCT (
+        Key   INT32,
+        Value com.example.Amount
+    )
+    DISTRIBUTE BY (Key)
+)
+COMMENT 'Payments stream with flexible amount representation';

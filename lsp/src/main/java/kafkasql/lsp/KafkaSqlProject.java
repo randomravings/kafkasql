@@ -20,13 +20,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * type_changed = "WARNING"
  * </pre>
  *
- * <p>Convention: a {@code .kafka} file at {@code <kafkaRoot>/a/b/File.kafka} is expected to
- * declare {@code USE CONTEXT a.b}.  The IDE warns when the declared context and folder path
+ * <p>Convention: context is derived from the file path under {@code kafkaRoot}. In
+ * model-style layouts, top-level category folders ({@code types/}, {@code streams/},
+ * {@code groups/}, {@code contexts/}) are ignored for context derivation, so
+ * {@code <kafkaRoot>/types/a/b/File.kafka} is expected to declare
+ * {@code USE CONTEXT a.b}. The IDE warns when the declared context and folder path
  * are misaligned (like Java's package/folder enforcement).
  */
 public final class KafkaSqlProject {
 
     private static final String EXTENSION = ".proj.toml";
+    private static final Set<String> CONTEXT_CATEGORY_FOLDERS =
+        Set.of("types", "streams", "groups", "contexts");
 
     /** Cache: starting directory → nearest project (empty = no project found). */
     private static final Map<Path, Optional<KafkaSqlProject>> cache = new ConcurrentHashMap<>();
@@ -120,11 +125,18 @@ public final class KafkaSqlProject {
         int depth = relative.getNameCount();
         if (depth < 2) return Optional.empty(); // directly in kafka root — no folder context
 
-        // All segments except the last one (the filename) form the context path
+        int contextStartIndex = 0;
+        String firstSegment = relative.getName(0).toString();
+        if (CONTEXT_CATEGORY_FOLDERS.contains(firstSegment)) {
+            contextStartIndex = 1;
+        }
+
+        // All path segments between contextStartIndex and the filename form the context path.
         List<String> segments = new ArrayList<>();
-        for (int i = 0; i < depth - 1; i++) {
+        for (int i = contextStartIndex; i < depth - 1; i++) {
             segments.add(relative.getName(i).toString());
         }
+        if (segments.isEmpty()) return Optional.empty();
         return Optional.of(String.join(".", segments));
     }
 

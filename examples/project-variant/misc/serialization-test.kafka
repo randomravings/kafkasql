@@ -1,0 +1,50 @@
+-- serialization-test.kafka
+-- Exercises serialization round-trips across all primitive types and
+-- complex structures (struct, enum, union).
+-- Used to validate the io/ and serialization/ modules.
+
+-- ── Scalar primitives — one value per type ────────────────────────────────────
+-- Requires a scratch stream with a wide struct; adjust to your test harness.
+
+WRITE TO customers.Customers
+  TYPE CustomerRecord
+  VALUES
+    -- Minimum key, string with special characters
+    ({ Key: -2147483648, Value: { Id: -2147483648, Name: 'Ünïcödé & <escapes>', Status: customers.CustomerStatus::ACTIVE } },
+    -- Maximum values
+    { Key: 2147483647,  Value: { Id: 2147483647,  Name: 'MAX',                 Status: customers.CustomerStatus::INACTIVE } },
+    -- Zero / empty boundary
+    { Key: 0,           Value: { Id: 0,            Name: '',                   Status: customers.CustomerStatus::ACTIVE } });
+
+-- ── Enum exhaustive coverage ──────────────────────────────────────────────────
+
+WRITE TO orders.Orders
+  TYPE OrderRecord
+  VALUES
+    ({ Key: 1, Value: { Id: 1, Status: orders.OrderStatus::PENDING   } },
+     { Key: 2, Value: { Id: 2, Status: orders.OrderStatus::SHIPPED   } },
+     { Key: 3, Value: { Id: 3, Status: orders.OrderStatus::DELIVERED } },
+     { Key: 4, Value: { Id: 4, Status: orders.OrderStatus::CANCELLED } });
+
+-- ── Decimal precision boundaries ─────────────────────────────────────────────
+
+WRITE TO com.example.Payments
+  TYPE PaymentRecord
+  VALUES
+    -- Minimum representable (DECIMAL 18,2)
+    ({ Key: 1, Value: 0.01 },
+    -- Typical value
+    { Key: 2, Value: 9999999999999999.99 },
+    -- Zero
+    { Key: 3, Value: 0.00 });
+
+-- ── Read-back for serialization verification ─────────────────────────────────
+
+READ FROM customers.Customers
+  TYPE CustomerRecord *;
+
+READ FROM orders.Orders
+  TYPE OrderRecord *;
+
+READ FROM com.example.Payments
+  TYPE PaymentRecord *;

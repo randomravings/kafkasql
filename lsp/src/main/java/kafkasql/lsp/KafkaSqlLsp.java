@@ -25,7 +25,11 @@ import kafkasql.lang.compare.ScriptDiff;
 import kafkasql.lang.compare.ScriptDiffer;
 import kafkasql.lang.input.StringInput;
 import kafkasql.lang.printer.SourceWriter;
+import kafkasql.lang.syntax.ast.AstListNode;
 import kafkasql.lang.syntax.ast.Script;
+import kafkasql.lang.syntax.ast.misc.Identifier;
+import kafkasql.lang.syntax.ast.misc.Include;
+import kafkasql.lang.syntax.ast.misc.QName;
 import kafkasql.engine.KafkaSqlEngine;
 import kafkasql.engine.KafkaSqlEngine.StreamRecord;
 import kafkasql.io.ValueCodec;
@@ -150,6 +154,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
     caps.setExecuteCommandProvider(
         new ExecuteCommandOptions(List.of(
             "kafkasql.semanticDiff",
+            "kafkasql.semanticDiffComposite",
             "kafkasql.setComparisonMode",
             "kafkasql.setFileMode",
             "kafkasql.liveModel"
@@ -207,6 +212,9 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
       public CompletableFuture<Object> executeCommand(ExecuteCommandParams params) {
         if ("kafkasql.semanticDiff".equals(params.getCommand())) {
           return CompletableFuture.supplyAsync(() -> handleSemanticDiff(params.getArguments()));
+        }
+        if ("kafkasql.semanticDiffComposite".equals(params.getCommand())) {
+          return CompletableFuture.supplyAsync(() -> handleSemanticDiffComposite(params.getArguments()));
         }
         if ("kafkasql.setComparisonMode".equals(params.getCommand())) {
           return CompletableFuture.supplyAsync(() -> handleSetComparisonMode(params.getArguments()));
@@ -286,6 +294,30 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
       return entries;
     } catch (Exception e) {
       System.err.println("[kafkasql-lsp] semanticDiff error: " + e.getMessage());
+      e.printStackTrace(System.err);
+      return Map.of("error", e.getMessage() != null ? e.getMessage() : e.getClass().getName());
+    }
+  }
+
+  private Object handleSemanticDiffComposite(List<Object> args) {
+    try {
+      if (args == null || args.size() < 4) {
+        return Map.of("error", "Expected arguments: [leftType, leftRef, rightType, rightRef]");
+      }
+      String leftType = ((JsonElement) args.get(0)).getAsString();
+      String leftRef  = ((JsonElement) args.get(1)).getAsString();
+      String rightType = ((JsonElement) args.get(2)).getAsString();
+      String rightRef  = ((JsonElement) args.get(3)).getAsString();
+
+      Path root = Path.of(workspaceRoot);
+      Script leftScript  = buildModelForCompareEndpoint(leftType, leftRef, root);
+      Script rightScript = buildModelForCompareEndpoint(rightType, rightRef, root);
+      ScriptDiff diff = ScriptDiffer.diff(leftScript, rightScript, RuleSet.defaults());
+      List<DiffEntry> entries = diff.flatten();
+      System.err.println("[kafkasql-lsp] semanticDiffComposite returned " + entries.size() + " entries");
+      return entries;
+    } catch (Exception e) {
+      System.err.println("[kafkasql-lsp] semanticDiffComposite error: " + e.getMessage());
       e.printStackTrace(System.err);
       return Map.of("error", e.getMessage() != null ? e.getMessage() : e.getClass().getName());
     }
@@ -1308,61 +1340,7 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
     if (!Files.isDirectory(kafkaRoot)) {
       throw new IllegalArgumentException("Kafka root directory not found: " + kafkaRoot);
     }
-
-    List<StringInput> inputs = new ArrayList<>();
-    try (var stream = Files.walk(kafkaRoot)) {
-      stream
-          .filter(p -> !Files.isDirectory(p))
-          .filter(p -> {
-            String n = p.getFileName().toString();
-            return n.endsWith(".kafka") || n.endsWith(".kafkasql");
-          })
-          .sorted()
-          .forEach(p -> {
-            try {
-              inputs.add(new StringInput(p.toString(), Files.readString(p)));
-            } catch (Exception e) {
-              System.err.println("[kafkasql-lsp] buildProjectDecls: failed to read " + p + ": " + e.getMessage());
-            }
-          });
-    }
-
-    if (inputs.isEmpty()) return new LinkedHashMap<>();
-
-    Path root = Path.of(workspaceRoot);
-    KafkaSqlArgs parseArgs = new KafkaSqlArgs(root, true, false);
-    List<kafkasql.lang.input.Input> inputList = inputs.stream()
-        .map(i -> (kafkasql.lang.input.Input) i)
-        .collect(java.util.stream.Collectors.toList());
-    ParseResult result = KafkaSqlParser.parse(inputList, parseArgs);
-    if (result.diags().hasError()) {
-      String errors = result.diags().all().stream()
-          .map(d -> d.toString())
-          .collect(java.util.stream.Collectors.joining("; "));
-      throw new IllegalArgumentException("Parse errors in project: " + errors);
-    }
-
-    Map<Name, Decl> decls = new LinkedHashMap<>();
-    String currentCtx = "";
-    for (Script script : result.scripts()) {
-      // Reset context per file so each file's USE CONTEXT is authoritative
-      currentCtx = "";
-      for (Stmt stmt : script.statements()) {
-        switch (stmt) {
-          case UseStmt use -> {
-            if (use.target() instanceof ContextUse cu) {
-              currentCtx = cu.qname().fullName();
-            }
-          }
-          case CreateStmt create -> {
-            Name name = Name.of(currentCtx, create.decl().name().name());
-            decls.put(name, create.decl());
-          }
-          default -> {}
-        }
-      }
-    }
-    return decls;
+    return buildDeclsFromDirectory(kafkaRoot);
   }
 
   /**
@@ -1384,6 +1362,117 @@ public class KafkaSqlLsp implements LanguageServer, LanguageClientAware {
       sb.append(sw).append(";\n");
     }
     return sb.toString();
+  }
+
+  private Script buildModelForCompareEndpoint(String type, String ref, Path root) throws Exception {
+    return switch (type.toLowerCase(java.util.Locale.ROOT)) {
+      case "file" -> {
+        Path file = Path.of(ref).normalize();
+        String content = Files.readString(file);
+        Map<Name, Decl> decls = buildLocalDecls(content, file.toString(), root);
+        yield buildModelScriptFromDecls(decls);
+      }
+      case "project" -> {
+        Map<Name, Decl> decls = buildProjectDecls(ref);
+        yield buildModelScriptFromDecls(decls);
+      }
+      case "folder" -> {
+        Map<Name, Decl> decls = buildFolderDecls(ref);
+        yield buildModelScriptFromDecls(decls);
+      }
+      default -> throw new IllegalArgumentException("Unsupported compare endpoint type: " + type);
+    };
+  }
+
+  private Map<Name, Decl> buildFolderDecls(String folderPath) throws Exception {
+    Path dir = Path.of(folderPath).normalize();
+    if (!Files.isDirectory(dir)) {
+      throw new IllegalArgumentException("Folder not found: " + dir);
+    }
+    return buildDeclsFromDirectory(dir);
+  }
+
+  private Map<Name, Decl> buildDeclsFromDirectory(Path rootDir) throws Exception {
+    List<StringInput> inputs = new ArrayList<>();
+    try (var stream = Files.walk(rootDir)) {
+      stream
+          .filter(p -> !Files.isDirectory(p))
+          .filter(p -> {
+            String n = p.getFileName().toString();
+            return n.endsWith(".kafka") || n.endsWith(".kafkasql");
+          })
+          .sorted()
+          .forEach(p -> {
+            try {
+              inputs.add(new StringInput(p.toString(), Files.readString(p)));
+            } catch (Exception e) {
+              System.err.println("[kafkasql-lsp] buildDeclsFromDirectory: failed to read " + p + ": " + e.getMessage());
+            }
+          });
+    }
+
+    if (inputs.isEmpty()) return new LinkedHashMap<>();
+
+    Path root = Path.of(workspaceRoot);
+    KafkaSqlArgs parseArgs = new KafkaSqlArgs(root, true, false);
+    List<kafkasql.lang.input.Input> inputList = inputs.stream()
+        .map(i -> (kafkasql.lang.input.Input) i)
+        .collect(java.util.stream.Collectors.toList());
+    ParseResult result = KafkaSqlParser.parse(inputList, parseArgs);
+    if (result.diags().hasError()) {
+      String errors = result.diags().all().stream()
+          .map(Object::toString)
+          .collect(java.util.stream.Collectors.joining("; "));
+      throw new IllegalArgumentException("Parse errors in directory: " + errors);
+    }
+
+    Map<Name, Decl> decls = new LinkedHashMap<>();
+    String currentCtx = "";
+    for (Script script : result.scripts()) {
+      currentCtx = "";
+      for (Stmt stmt : script.statements()) {
+        switch (stmt) {
+          case UseStmt use -> {
+            if (use.target() instanceof ContextUse cu) {
+              currentCtx = cu.qname().fullName();
+            }
+          }
+          case CreateStmt create -> {
+            Name name = Name.of(currentCtx, create.decl().name().name());
+            decls.put(name, create.decl());
+          }
+          default -> {}
+        }
+      }
+    }
+    return decls;
+  }
+
+  private Script buildModelScriptFromDecls(Map<Name, Decl> decls) {
+    AstListNode<Stmt> statements = new AstListNode<>(Stmt.class);
+    String currentCtx = "";
+    for (Map.Entry<Name, Decl> entry : decls.entrySet()) {
+      String ctx = entry.getKey().context();
+      if (!ctx.equals(currentCtx)) {
+        if (!ctx.isEmpty()) {
+          List<Identifier> parts = new ArrayList<>();
+          for (String part : ctx.split("\\.")) {
+            parts.add(new Identifier(kafkasql.runtime.diagnostics.Range.NONE, part));
+          }
+          QName qn = new QName(kafkasql.runtime.diagnostics.Range.NONE, parts);
+          ContextUse cu = new ContextUse(kafkasql.runtime.diagnostics.Range.NONE, qn);
+          statements.add(new UseStmt(kafkasql.runtime.diagnostics.Range.NONE, cu));
+        }
+        currentCtx = ctx;
+      }
+      statements.add(new CreateStmt(kafkasql.runtime.diagnostics.Range.NONE, entry.getValue()));
+    }
+    return new Script(
+        kafkasql.runtime.diagnostics.Range.NONE,
+        new AstListNode<>(Include.class),
+        Optional.empty(),
+        statements
+    );
   }
   private record LiveEventState(Map<Name, String> stateMap, Map<Name, Integer> versionMap) {}
 
