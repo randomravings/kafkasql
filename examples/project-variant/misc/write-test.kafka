@@ -16,10 +16,10 @@ WRITE TO customers.Customers
 WRITE TO orders.Orders
   TYPE OrderRecord
   VALUES
-    ({ Key: 101, Value: { Id: 101, Status: orders.OrderStatus::PENDING   } },
-    { Key: 102, Value: { Id: 102, Status: orders.OrderStatus::SHIPPED   } },
+    ({ Key: 101, Value: { Id: 101, Status: orders.OrderStatus::PENDING    } },
+    { Key: 102, Value: { Id: 102, Status: orders.OrderStatus::PROCESSING } },
     { Key: 103, Value: { Id: 103, Status: orders.OrderStatus::DELIVERED } },
-    { Key: 104, Value: { Id: 104, Status: orders.OrderStatus::CANCELLED } });
+    { Key: 104, Value: { Id: 104, Status: orders.OrderStatus::RETURNED   } });
 
 -- ── com.example.Payments ──────────────────────────────────────────────────────
 
