@@ -334,57 +334,6 @@ async function runCompositeSemanticDiff(leftType, leftRef, rightType, rightRef) 
         return null;
     }
 }
-async function pickProjectFileTarget(projectTomlPath, excludeUri) {
-    const projectDir = path.dirname(projectTomlPath);
-    const kafkaDir = readKafkaDirFromProjToml(projectTomlPath);
-    const modelRoot = path.join(projectDir, kafkaDir);
-    if (!fs.existsSync(modelRoot) || !fs.statSync(modelRoot).isDirectory()) {
-        vscode.window.showErrorMessage(`KafkaSQL: project model root not found: ${modelRoot}`);
-        return undefined;
-    }
-    const pattern = new vscode.RelativePattern(modelRoot, '**/*.{kafka,kafkasql}');
-    const files = await vscode.workspace.findFiles(pattern);
-    const filtered = files
-        .filter(u => !excludeUri || u.fsPath !== excludeUri.fsPath)
-        .sort((a, b) => a.fsPath.localeCompare(b.fsPath));
-    if (filtered.length === 0) {
-        vscode.window.showWarningMessage('KafkaSQL: no comparable KafkaSQL files found in selected project.');
-        return undefined;
-    }
-    const items = filtered.map(uri => ({
-        label: path.relative(modelRoot, uri.fsPath) || path.basename(uri.fsPath),
-        description: path.basename(projectTomlPath),
-        detail: uri.fsPath,
-        uri,
-    }));
-    return (await vscode.window.showQuickPick(items, {
-        placeHolder: 'Select right-side file from project',
-        matchOnDescription: true,
-        matchOnDetail: true,
-    }))?.uri;
-}
-async function pickFolderFileTarget(folderPath, excludeUri) {
-    const pattern = new vscode.RelativePattern(folderPath, '**/*.{kafka,kafkasql}');
-    const files = await vscode.workspace.findFiles(pattern);
-    const filtered = files
-        .filter(u => !excludeUri || u.fsPath !== excludeUri.fsPath)
-        .sort((a, b) => a.fsPath.localeCompare(b.fsPath));
-    if (filtered.length === 0) {
-        vscode.window.showWarningMessage('KafkaSQL: no comparable KafkaSQL files found in selected folder.');
-        return undefined;
-    }
-    const items = filtered.map(uri => ({
-        label: path.relative(folderPath, uri.fsPath) || path.basename(uri.fsPath),
-        description: path.basename(folderPath),
-        detail: uri.fsPath,
-        uri,
-    }));
-    return (await vscode.window.showQuickPick(items, {
-        placeHolder: 'Select right-side file from folder',
-        matchOnDescription: true,
-        matchOnDetail: true,
-    }))?.uri;
-}
 function mapSeverity(s) {
     switch (s) {
         case 'BREAKING': return vscode.DiagnosticSeverity.Error;
